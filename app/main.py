@@ -95,7 +95,15 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
             frame = manager.get_jpeg()
             if frame is not None and frame is not last_frame:
                 last_frame = frame
-                yield b"--frame\r\nContent-Type: image/jpeg\r\nCache-Control: no-cache\r\n\r\n" + frame + b"\r\n"
+                yield (
+                    b"--frame\r\n"
+                    b"Content-Type: image/jpeg\r\n"
+                    + f"Content-Length: {len(frame)}\r\n".encode("ascii")
+                    + b"Cache-Control: no-cache, no-store\r\n"
+                    + b"\r\n"
+                    + frame
+                    + b"\r\n"
+                )
             await asyncio.sleep(0.04)
 
     @app.get("/video.mjpg")
@@ -103,7 +111,11 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
         return StreamingResponse(
             mjpeg_generator(request),
             media_type="multipart/x-mixed-replace; boundary=frame",
-            headers={"Cache-Control": "no-store, no-cache, must-revalidate", "Pragma": "no-cache"},
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate",
+                "Pragma": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
         )
 
     @app.post("/api/controller/unlock")
