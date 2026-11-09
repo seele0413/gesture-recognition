@@ -9,7 +9,7 @@ import sqlite3
 
 from app.database import ControlStore
 from app.events import EventHub
-from app.stream import StreamManager
+from app.stream import StreamManager, _LatestFrameReader
 from app.decoder import PyAVDecoder
 
 
@@ -47,6 +47,19 @@ class DisconnectAfterOneFrame:
 
     def close(self):
         self.closed = True
+
+
+class BurstDecoder:
+    def __init__(self, frame_count=100):
+        self.frame_count = frame_count
+        self.index = 0
+
+    def read(self):
+        if self.index >= self.frame_count:
+            return False, None
+        frame = np.full((4, 4, 3), self.index, dtype=np.uint8)
+        self.index += 1
+        return True, frame
 
 
 class FakeProcessor:
@@ -104,6 +117,22 @@ class StreamManagerTests(unittest.TestCase):
         self.manager.stop()
         self.temp_dir.cleanup()
 
+    def test_latest_frame_reader_discards_backlog_and_keeps_newest_frame(self):
+        decoder = BurstDecoder(frame_count=100)
+        reader = _LatestFrameReader(decoder, threading.Event())
+        reader.start()
+        self.assertTrue(reader.wait_finished(timeout=2))
+
+        item = reader.read(timeout=0.01)
+        self.assertIsNotNone(item)
+        frame, _received_at = item
+        self.assertEqual(int(frame[0, 0, 0]), 99)
+        self.assertEqual(reader.dropped_frames, 99)
+        with self.assertRaisesRegex(RuntimeError, "decoder_read_failed"):
+            reader.read(timeout=0.01)
+        reader.stop()
+        reader.join(timeout=1)
+
     def test_substitute_stream_runs_without_camera_hardware(self):
         self.manager.start("rtsp://camera.local/live")
         deadline = time.monotonic() + 5
@@ -118,6 +147,9 @@ class StreamManagerTests(unittest.TestCase):
         self.assertTrue(status["frame_fresh"])
         self.assertGreater(status["frame_sequence"], 0)
         self.assertIsNotNone(status["last_frame_at_ms"])
+        self.assertIsInstance(status["last_processing_ms"], float)
+        self.assertIsInstance(status["last_queue_delay_ms"], float)
+        self.assertGreaterEqual(status["dropped_frames"], 0)
         self.assertEqual(status["controller"]["state"], "unlocked")
         self.assertIsNotNone(self.manager.get_jpeg())
         connection = sqlite3.connect(self.store.path)
