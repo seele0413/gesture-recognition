@@ -156,6 +156,8 @@ svg { display: block; }
   background: #20231f;
 }
 
+.pip-placeholder[hidden] { display: none; }
+
 .camera-glyph svg { width: 22px; height: 22px; fill: none; stroke: #aeb5aa; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
 .pip-status {
   display: flex;
