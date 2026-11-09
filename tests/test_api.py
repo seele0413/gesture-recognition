@@ -65,6 +65,11 @@ class ApiTests(unittest.TestCase):
         self.assertIn('id="rtspUrl"', settings)
         self.assertIn('id="mappingGrid"', settings)
 
+    def test_home_camera_placeholder_can_be_hidden_when_feed_is_ready(self):
+        styles = self.client.get("/static/styles.css").text
+        self.assertIn(".pip-placeholder[hidden]", styles)
+        self.assertIn(".pip-placeholder[hidden] { display: none; }", styles)
+
     def test_html_and_static_resources_are_revalidated(self):
         for path in ("/", "/settings", "/static/app.js", "/static/styles.css"):
             response = self.client.get(path)
