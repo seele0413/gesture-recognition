@@ -172,13 +172,14 @@ function renderTracks() {
     + " · 手部 " + (vision.hand_count || 0)
     + " · OK " + (vision.ok_hand_count || 0)
     + " · 已关联 OK " + (vision.associated_ok_count || 0);
-  const processingMs = appState.last_processing_ms;
+  const visionMs = appState.last_vision_ms;
+  const jpegMs = appState.last_jpeg_encode_ms;
   const queueDelayMs = appState.last_queue_delay_ms;
   const droppedFrames = appState.dropped_frames || 0;
-  elements.pipelineDiagnostics.textContent = processingMs == null
-    ? "推理 -- ms · 排队 -- ms · 丢弃旧帧 " + droppedFrames
-    : "推理 " + Math.round(processingMs) + " ms · 排队 " + Math.round(queueDelayMs || 0)
-      + " ms · 丢弃旧帧 " + droppedFrames;
+  elements.pipelineDiagnostics.textContent = visionMs == null
+    ? "推理 -- ms · JPEG -- ms · 排队 -- ms · 丢弃旧帧 " + droppedFrames
+    : "推理 " + Math.round(visionMs) + " ms · JPEG " + Math.round(jpegMs || 0)
+      + " ms · 排队 " + Math.round(queueDelayMs || 0) + " ms · 丢弃旧帧 " + droppedFrames;
   const hands = vision.hands || [];
   if (!hands.length) {
     elements.handDiagnostics.textContent = appState.state === "running"
