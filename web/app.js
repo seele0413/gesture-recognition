@@ -31,7 +31,7 @@ const elements = Object.fromEntries(
     "startStream", "stopStream", "videoFrame", "videoFeed", "personOverlay", "videoPlaceholder",
     "resolutionLabel", "candidateCount", "targetLabel", "visionDiagnostics", "handDiagnostics", "trackCount", "controllerCard", "controllerStatus",
     "controllerTrackId", "controllerDetail", "unlockController", "trackList", "mappingGrid", "saveMappings",
-    "mappingStatus", "eventList", "clearEvents",
+    "mappingStatus", "eventList", "clearEvents", "pipelineDiagnostics",
   ].map((id) => [id, document.getElementById(id)]),
 );
 
@@ -172,6 +172,13 @@ function renderTracks() {
     + " · 手部 " + (vision.hand_count || 0)
     + " · OK " + (vision.ok_hand_count || 0)
     + " · 已关联 OK " + (vision.associated_ok_count || 0);
+  const processingMs = appState.last_processing_ms;
+  const queueDelayMs = appState.last_queue_delay_ms;
+  const droppedFrames = appState.dropped_frames || 0;
+  elements.pipelineDiagnostics.textContent = processingMs == null
+    ? "推理 -- ms · 排队 -- ms · 丢弃旧帧 " + droppedFrames
+    : "推理 " + Math.round(processingMs) + " ms · 排队 " + Math.round(queueDelayMs || 0)
+      + " ms · 丢弃旧帧 " + droppedFrames;
   const hands = vision.hands || [];
   if (!hands.length) {
     elements.handDiagnostics.textContent = appState.state === "running"
