@@ -353,6 +353,7 @@ svg { display: block; }
 .video-placeholder[hidden] { display: none; }
 .stream-meta { display: flex; flex-wrap: wrap; gap: 8px 18px; padding-top: 11px; color: #7c857c; font-size: 11px; }
 .stream-meta #visionDiagnostics { color: #536357; font-variant-numeric: tabular-nums; }
+.stream-meta #pipelineDiagnostics { color: #536357; font-variant-numeric: tabular-nums; }
 .hand-diagnostics { min-height: 20px; padding-top: 7px; color: #536357; font-size: 11px; line-height: 1.5; }
 .settings-side { display: grid; gap: 16px; }
 .controller-state { display: grid; grid-template-columns: 9px minmax(0, 1fr) auto; align-items: center; gap: 11px; padding: 12px; background: #f5f7f4; }
