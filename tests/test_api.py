@@ -83,6 +83,32 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.content, b"st-vid")
         self.assertEqual(response.headers["accept-ranges"], "bytes")
 
+    def test_homepage_mjpeg_visibility_does_not_depend_on_img_load_event(self):
+        player = self.client.get("/static/player.js").text
+        self.assertIn("const hasImage = streamReady && frameFresh && !feedFailed;", player)
+        self.assertNotIn("naturalWidth", player)
+        self.assertNotIn("feedLoaded", player)
+
+    def test_mjpeg_parts_include_content_length(self):
+        route = next(route for route in self.client.app.routes if getattr(route, "path", None) == "/video.mjpg")
+        frame = b"\xff\xd8test-jpeg\xff\xd9"
+        self.client.app.state.stream_manager._latest_jpeg = frame
+
+        class ConnectedRequest:
+            def __init__(self):
+                self.checks = 0
+
+            async def is_disconnected(self):
+                self.checks += 1
+                return self.checks > 1
+
+        response = asyncio.run(route.endpoint(ConnectedRequest()))
+        part = asyncio.run(response.body_iterator.__anext__())
+        self.assertIn(b"Content-Type: image/jpeg\r\n", part)
+        self.assertIn(f"Content-Length: {len(frame)}\r\n".encode("ascii"), part)
+        self.assertTrue(part.endswith(frame + b"\r\n"))
+        self.assertEqual(response.headers.get("x-accel-buffering"), "no")
+
     def test_mjpeg_route_starts_as_a_multipart_stream_without_a_camera(self):
         route = next(route for route in self.client.app.routes if getattr(route, "path", None) == "/video.mjpg")
 
