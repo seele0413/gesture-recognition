@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import queue
 import threading
 import time
 import uuid
@@ -33,6 +34,104 @@ def _empty_vision() -> dict[str, Any]:
         "lock_progress": 0,
         "last_gesture": None,
     }
+
+
+class _LatestFrameReader:
+    """Read frames continuously while keeping only the newest unprocessed frame."""
+
+    def __init__(self, decoder: Any, stop_event: threading.Event, on_drop: Any = None):
+        self._decoder = decoder
+        self._stream_stop_event = stop_event
+        self._stop_event = threading.Event()
+        self._on_drop = on_drop
+        self._frames: queue.Queue = queue.Queue(maxsize=1)
+        self._finished = threading.Event()
+        self._failed = False
+        self._drop_lock = threading.Lock()
+        self._dropped_frames = 0
+        self._thread = threading.Thread(
+            target=self._read_loop,
+            daemon=True,
+            name="rtsp-decoder",
+        )
+
+    def start(self) -> None:
+        self._thread.start()
+
+    @property
+    def finished(self) -> bool:
+        return self._finished.is_set()
+
+    @property
+    def dropped_frames(self) -> int:
+        with self._drop_lock:
+            return self._dropped_frames
+
+    def wait_finished(self, timeout: float | None = None) -> bool:
+        return self._finished.wait(timeout)
+
+    def _record_drop(self) -> None:
+        with self._drop_lock:
+            self._dropped_frames += 1
+        if self._on_drop:
+            try:
+                self._on_drop()
+            except Exception:
+                pass
+
+    def _publish_latest(self, frame: Any) -> None:
+        item = (frame, time.monotonic())
+        try:
+            self._frames.put_nowait(item)
+            return
+        except queue.Full:
+            pass
+
+        try:
+            self._frames.get_nowait()
+        except queue.Empty:
+            pass
+        else:
+            self._record_drop()
+
+        try:
+            self._frames.put_nowait(item)
+        except queue.Full:
+            # The consumer won the race and another producer is not expected.
+            pass
+
+    def _read_loop(self) -> None:
+        try:
+            while not self._stop_event.is_set() and not self._stream_stop_event.is_set():
+                try:
+                    ok, frame = self._decoder.read()
+                except Exception:
+                    self._failed = True
+                    break
+                if not ok or frame is None:
+                    self._failed = True
+                    break
+                self._publish_latest(frame)
+        finally:
+            self._finished.set()
+
+    def read(self, timeout: float = 0.5) -> tuple[Any, float] | None:
+        if self._stop_event.is_set() or self._stream_stop_event.is_set():
+            return None
+        try:
+            return self._frames.get(timeout=timeout)
+        except queue.Empty:
+            if self._finished.is_set() and self._frames.empty():
+                if self._failed and not self._stream_stop_event.is_set():
+                    raise RuntimeError("decoder_read_failed") from None
+            return None
+
+    def stop(self) -> None:
+        self._stop_event.set()
+
+    def join(self, timeout: float | None = None) -> None:
+        if self._thread.is_alive() and self._thread is not threading.current_thread():
+            self._thread.join(timeout=timeout)
 
 
 class StreamManager:
@@ -72,6 +171,9 @@ class StreamManager:
         self._decoder_name: str | None = None
         self._reconnect_attempt = 0
         self._reconnect_count = 0
+        self._dropped_frames = 0
+        self._last_processing_ms: float | None = None
+        self._last_queue_delay_ms: float | None = None
 
     def start(self, rtsp_url: str) -> dict[str, Any]:
         rtsp_url = validate_rtsp_url(rtsp_url)
@@ -94,6 +196,9 @@ class StreamManager:
             self._decoder_name = None
             self._reconnect_attempt = 0
             self._reconnect_count = 0
+            self._dropped_frames = 0
+            self._last_processing_ms = None
+            self._last_queue_delay_ms = None
             self._thread = threading.Thread(
                 target=self._run,
                 args=(rtsp_url, self._stop_event),
@@ -134,6 +239,9 @@ class StreamManager:
             self._last_frame_at_ms = None
             self._reconnect_attempt = 0
             self._reconnect_count = 0
+            self._dropped_frames = 0
+            self._last_processing_ms = None
+            self._last_queue_delay_ms = None
             self._controller = {"state": "unlocked", "track_id": None, "lost_since_ms": None}
             status = self.get_status()
         if was_locked:
@@ -195,6 +303,9 @@ class StreamManager:
                 "decoder": self._decoder_name,
                 "reconnect_attempt": self._reconnect_attempt,
                 "reconnect_count": self._reconnect_count,
+                "dropped_frames": self._dropped_frames,
+                "last_processing_ms": self._last_processing_ms,
+                "last_queue_delay_ms": self._last_queue_delay_ms,
                 "tracks": [track.copy() for track in self._tracks],
                 "controller": controller,
                 "vision": dict(self._vision),
@@ -233,6 +344,10 @@ class StreamManager:
         if close:
             close()
 
+    def _record_dropped_frame(self) -> None:
+        with self._lock:
+            self._dropped_frames += 1
+
     def _run(self, rtsp_url: str, stop_event: threading.Event) -> None:
         import cv2
 
@@ -241,6 +356,7 @@ class StreamManager:
             while not stop_event.is_set():
                 decoder = None
                 processor = None
+                reader = None
                 session_id: str | None = None
                 retry_delay: int | None = None
                 fatal = False
@@ -288,14 +404,21 @@ class StreamManager:
                             {"type": "stream", "state": "running", "message": "摄像头已恢复，请重新做 OK 手势锁定主控。"}
                         )
 
+                    reader = _LatestFrameReader(
+                        decoder, stop_event, self._record_dropped_frame
+                    )
+                    reader.start()
+
                     processing_errors = 0
                     while not stop_event.is_set():
-                        try:
-                            ok, frame = decoder.read()
-                        except Exception as error:
-                            raise RuntimeError("decoder_read_failed") from error
-                        if not ok or frame is None:
-                            raise RuntimeError("decoder_read_failed")
+                        item = reader.read(timeout=0.5)
+                        if item is None:
+                            if stop_event.is_set():
+                                break
+                            continue
+                        frame, received_at = item
+                        processing_started = time.monotonic()
+                        queue_delay_ms = max(0.0, (processing_started - received_at) * 1000)
 
                         try:
                             result = processor.process(frame)
@@ -311,6 +434,7 @@ class StreamManager:
                         )
                         if not encoded:
                             continue
+                        processing_ms = (time.monotonic() - processing_started) * 1000
                         now_ms = int(time.time() * 1000)
                         with self._lock:
                             self._latest_jpeg = jpeg.tobytes()
@@ -321,6 +445,8 @@ class StreamManager:
                             self._tracks = result["tracks"]
                             self._controller = result["controller"]
                             self._vision = result.get("vision", self._vision)
+                            self._last_processing_ms = round(processing_ms, 1)
+                            self._last_queue_delay_ms = round(queue_delay_ms, 1)
                             self._reconnect_attempt = 0
                         reconnect_attempt = 0
 
@@ -343,15 +469,19 @@ class StreamManager:
                     )
                     session_id = None
                 finally:
+                    if reader is not None:
+                        reader.stop()
+                    try:
+                        self._close_decoder(decoder)
+                    except Exception:
+                        pass
+                    if reader is not None:
+                        reader.join(timeout=6)
                     if processor is not None:
                         try:
                             processor.close()
                         except Exception:
                             pass
-                    try:
-                        self._close_decoder(decoder)
-                    except Exception:
-                        pass
                     if session_id:
                         self.store.clear_temporary(session_id)
                     with self._lock:
