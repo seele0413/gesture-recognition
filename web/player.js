@@ -28,6 +28,7 @@ let status = {
 let feedbackTimer = 0;
 let feedRetryTimer = 0;
 let feedFailed = false;
+let feedLoaded = false;
 
 async function api(path) {
   const response = await fetch(path, { cache: "no-store" });
@@ -63,7 +64,7 @@ function renderCamera() {
   const controller = status.controller || { state: "unlocked", track_id: null };
   const streamReady = status.state === "running";
   const frameFresh = Boolean(status.frame_fresh ?? status.frame_ready);
-  const hasImage = streamReady && frameFresh && !feedFailed;
+  const hasImage = streamReady && frameFresh && feedLoaded && elements.cameraFeed.naturalWidth > 0 && !feedFailed;
 
   elements.cameraFeed.hidden = !hasImage;
   elements.cameraPlaceholder.hidden = hasImage;
@@ -86,12 +87,14 @@ function renderCamera() {
   if (!hasImage) {
     elements.cameraPlaceholderLabel.textContent = feedFailed
       ? "预览传输中断，正在重新连接"
-      : status.frame_age_ms == null ? "已连接，正在等待首帧" : "画面停滞，正在等待新帧";
+      : !feedLoaded ? "正在加载摄像头画面"
+        : status.frame_age_ms == null ? "已连接，正在等待首帧" : "画面停滞，正在等待新帧";
     elements.cameraStatusLabel.textContent = feedFailed
       ? "MJPEG 预览连接失败，正在自动重订阅"
-      : status.frame_age_ms == null
-        ? "摄像头已连接，等待视频帧"
-        : "视频帧已停滞 " + (status.frame_age_ms / 1000).toFixed(1) + " 秒";
+      : !feedLoaded ? "摄像头已连接，正在接收画面"
+        : status.frame_age_ms == null
+          ? "摄像头已连接，等待视频帧"
+          : "视频帧已停滞 " + (status.frame_age_ms / 1000).toFixed(1) + " 秒";
     elements.cameraStatus.dataset.state = "stale";
     return;
   }
@@ -112,11 +115,13 @@ function syncCameraFeed() {
   if (status.state === "running") {
     if (!elements.cameraFeed.getAttribute("src")) {
       feedFailed = false;
+      feedLoaded = false;
       elements.cameraFeed.src = "/video.mjpg?display=" + Date.now();
     }
   } else {
     window.clearTimeout(feedRetryTimer);
     feedFailed = false;
+    feedLoaded = false;
     elements.cameraFeed.removeAttribute("src");
   }
   renderCamera();
@@ -125,6 +130,7 @@ function syncCameraFeed() {
 elements.cameraFeed.addEventListener("error", () => {
   if (status.state !== "running") return;
   feedFailed = true;
+  feedLoaded = false;
   renderCamera();
   window.clearTimeout(feedRetryTimer);
   feedRetryTimer = window.setTimeout(() => {
@@ -136,6 +142,7 @@ elements.cameraFeed.addEventListener("error", () => {
 
 elements.cameraFeed.addEventListener("load", () => {
   feedFailed = false;
+  feedLoaded = elements.cameraFeed.naturalWidth > 0;
   renderCamera();
 });
 
