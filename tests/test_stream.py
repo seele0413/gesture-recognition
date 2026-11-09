@@ -119,7 +119,8 @@ class StreamManagerTests(unittest.TestCase):
 
     def test_latest_frame_reader_discards_backlog_and_keeps_newest_frame(self):
         decoder = BurstDecoder(frame_count=100)
-        reader = _LatestFrameReader(decoder, threading.Event())
+        dropped = []
+        reader = _LatestFrameReader(decoder, threading.Event(), lambda: dropped.append(1))
         reader.start()
         self.assertTrue(reader.wait_finished(timeout=2))
 
@@ -128,6 +129,7 @@ class StreamManagerTests(unittest.TestCase):
         frame, _received_at = item
         self.assertEqual(int(frame[0, 0, 0]), 99)
         self.assertEqual(reader.dropped_frames, 99)
+        self.assertEqual(len(dropped), 99)
         with self.assertRaisesRegex(RuntimeError, "decoder_read_failed"):
             reader.read(timeout=0.01)
         reader.stop()
