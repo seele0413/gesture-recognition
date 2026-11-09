@@ -55,6 +55,18 @@ def timing_summary(values: list[float]) -> dict[str, float] | None:
     }
 
 
+def timed_frames(frames: Any, timings: list[float]):
+    iterator = iter(frames)
+    while True:
+        started = time.perf_counter()
+        try:
+            frame = next(iterator)
+        except StopIteration:
+            return
+        timings.append((time.perf_counter() - started) * 1000)
+        yield frame
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="诊断 RTSP 解码、MediaPipe 处理和 JPEG 编码；不会把 RTSP 地址写入报告。"
@@ -135,6 +147,7 @@ def main() -> int:
     processor = None
     store = None
     session_id = "diagnostic-" + uuid.uuid4().hex
+    pyav_decode_next_ms: list[float] = []
     decode_to_bgr_ms: list[float] = []
     vision_ms: list[float] = []
     jpeg_encode_ms: list[float] = []
@@ -180,7 +193,7 @@ def main() -> int:
                 print(f"视觉模型初始化失败：{type(error).__name__}；仍将继续测试解码和 JPEG。")
 
         try:
-            for decoded_index, frame in enumerate(container.decode(video=stream.index)):
+            for decoded_index, frame in enumerate(timed_frames(container.decode(video=stream.index), pyav_decode_next_ms)):
                 if bool(getattr(frame, "is_corrupt", False)):
                     report["failures"]["corrupt_frames"] += 1
                     continue
@@ -224,6 +237,7 @@ def main() -> int:
                     "decoded_index": decoded_index,
                     "source_frame": frame_info(frame),
                     "bgr": image_info(bgr),
+                    "pyav_decode_next_ms": round(pyav_decode_next_ms[decoded_index], 3),
                     "bgr_conversion_ms": round(conversion_elapsed, 3),
                 }
 
@@ -308,6 +322,7 @@ def main() -> int:
     report["summary"] = {
         "valid_frames": valid_frames,
         "saved_samples": saved_samples,
+        "pyav_decode_next": timing_summary(pyav_decode_next_ms),
         "bgr_conversion": timing_summary(decode_to_bgr_ms),
         "vision_processing": timing_summary(vision_ms),
         "jpeg_encode": timing_summary(jpeg_encode_ms),
