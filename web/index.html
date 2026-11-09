@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#101210">
+    <title>康晋电气 · 企业宣传片</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/static/styles.css?v=20261109-2">
+    <script src="/static/player.js?v=20261109-2" defer></script>
+  </head>
+  <body class="display-page">
+    <main class="display-stage">
+      <div class="movie-frame" id="movieFrame">
+        <video id="promoVideo" src="/media/promo.mp4" poster="/static/promo-poster.jpg" preload="metadata" playsinline loop controls aria-label="康晋电气企业宣传片"></video>
+        <button id="playButton" class="play-overlay" type="button">
+          <span class="play-symbol" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false"><path d="M8 5.5v13l10-6.5-10-6.5Z"></path></svg>
+          </span>
+          <span id="playLabel">开始播放</span>
+        </button>
+      </div>
+
+      <header class="display-header">
+        <a class="display-brand" href="/" aria-label="康晋电气宣传片主页">
+          <span class="brand-rule" aria-hidden="true"></span>
+          <span>
+            <strong>康晋电气</strong>
+            <small>企业宣传片</small>
+          </span>
+        </a>
+        <div class="display-tools">
+          <a class="icon-button" href="/settings" aria-label="打开设置" title="设置">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M12 8.7a3.3 3.3 0 1 0 0 6.6 3.3 3.3 0 0 0 0-6.6Z"></path>
+              <path d="m19.2 13.5 1.1.9-1.5 2.6-1.4-.5a7.4 7.4 0 0 1-1.6.9l-.3 1.5h-3l-.3-1.5a7.4 7.4 0 0 1-1.6-.9l-1.4.5-1.5-2.6 1.1-.9a7.8 7.8 0 0 1 0-1.8l-1.1-.9 1.5-2.6 1.4.5a7.4 7.4 0 0 1 1.6-.9l.3-1.5h3l.3 1.5a7.4 7.4 0 0 1 1.6.9l1.4-.5 1.5 2.6-1.1.9a7.8 7.8 0 0 1 0 1.8Z"></path>
+            </svg>
+          </a>
+          <button id="fullscreenButton" class="icon-button" type="button" aria-label="进入全屏" title="全屏展示">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M8 4H4v4M16 4h4v4M4 16v4h4M20 16v4h-4"></path>
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <aside class="camera-pip" aria-label="摄像头画中画">
+        <div class="pip-frame">
+          <img id="cameraFeed" alt="RTSP 摄像头实时画面" hidden>
+          <div id="cameraPlaceholder" class="pip-placeholder">
+            <span class="camera-glyph" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false"><path d="M4 7.5h10a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2ZM16 10l6-3v10l-6-3"></path></svg>
+            </span>
+            <span id="cameraPlaceholderLabel">摄像头未连接</span>
+          </div>
+        </div>
+        <div id="cameraStatus" class="pip-status" data-state="stopped" role="status" aria-live="polite">
+          <span class="pip-status-dot" aria-hidden="true"></span>
+          <span id="cameraStatusLabel">摄像头未连接</span>
+        </div>
+      </aside>
+
+      <p id="gestureFeedback" class="gesture-feedback" role="status" aria-live="polite"></p>
+      <noscript>此页面需要启用 JavaScript 才能控制宣传片和连接摄像头。</noscript>
+    </main>
+  </body>
+</html>

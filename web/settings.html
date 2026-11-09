@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f2f4f1">
+    <title>康晋电气 · 播放与手势设置</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/static/styles.css?v=20261109-2">
+    <script src="/static/app.js?v=20261109-2" defer></script>
+  </head>
+  <body class="settings-page">
+    <header class="settings-header">
+      <a class="settings-brand" href="/" aria-label="返回宣传片主页">
+        <span class="settings-brand-mark">康</span>
+        <span><strong>康晋电气</strong><small>大屏播放设置</small></span>
+      </a>
+      <div class="settings-header-tools">
+        <div id="connectionStatus" class="connection-status" data-state="stopped" role="status" aria-live="polite">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span id="connectionLabel">未连接</span>
+        </div>
+        <a class="back-link" href="/">返回大屏</a>
+      </div>
+    </header>
+
+    <main class="settings-layout">
+      <section class="settings-panel stream-panel" aria-labelledby="streamHeading">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">CAMERA SOURCE</p>
+            <h1 id="streamHeading">摄像头连接</h1>
+            <p class="panel-description">RTSP 地址仅在当前服务运行期间保留</p>
+          </div>
+          <button id="unlockController" class="button button-quiet unlock-button" type="button" disabled>解除主控</button>
+        </div>
+
+        <form id="streamForm" class="stream-form">
+          <label for="rtspUrl">RTSP 地址</label>
+          <div class="rtsp-input-row">
+            <input id="rtspUrl" name="rtspUrl" type="password" autocomplete="off" spellcheck="false" placeholder="rtsp://摄像头地址/路径">
+            <button id="toggleRtspVisibility" class="button button-quiet" type="button" aria-pressed="false">显示</button>
+            <button id="startStream" class="button button-primary" type="submit">连接摄像头</button>
+            <button id="stopStream" class="button button-secondary" type="button" disabled>停止</button>
+          </div>
+          <p id="streamError" class="error-text" role="status"></p>
+        </form>
+
+        <div id="videoFrame" class="settings-video-frame">
+          <img id="videoFeed" alt="RTSP 摄像头实时画面" hidden>
+          <canvas id="personOverlay" aria-label="人体跟踪框"></canvas>
+          <div id="videoPlaceholder" class="video-placeholder">等待视频流</div>
+        </div>
+        <div class="stream-meta">
+          <span id="resolutionLabel">-- × --</span>
+          <span id="candidateCount">画面中 0 人</span>
+          <span id="targetLabel">主控未锁定</span>
+          <span id="visionDiagnostics">人体轨迹 0 · 手部 0 · OK 0 · 已关联 OK 0</span>
+        </div>
+        <div id="handDiagnostics" class="hand-diagnostics" role="status" aria-live="polite">等待识别手部</div>
+      </section>
+
+      <div class="settings-side">
+        <section class="settings-panel controller-panel" aria-labelledby="controllerHeading">
+          <div class="panel-heading compact-heading">
+            <div>
+              <p class="eyebrow">CONTROLLER</p>
+              <h2 id="controllerHeading">主控状态</h2>
+            </div>
+            <span class="track-total">人体轨迹 <strong id="trackCount">0</strong></span>
+          </div>
+          <div id="controllerCard" class="controller-state" data-state="unlocked">
+            <span class="controller-state-indicator" aria-hidden="true"></span>
+            <div>
+              <strong id="controllerStatus">未锁定</strong>
+              <p id="controllerDetail">等待人体进入画面</p>
+            </div>
+            <span id="controllerTrackId" class="controller-track-id">--</span>
+          </div>
+          <div id="trackList" class="track-list" aria-live="polite"></div>
+        </section>
+
+        <section class="settings-panel mapping-panel" aria-labelledby="mappingHeading">
+          <div class="panel-heading compact-heading">
+            <div>
+              <p class="eyebrow">GESTURE ACTIONS</p>
+              <h2 id="mappingHeading">手势映射</h2>
+            </div>
+            <button id="saveMappings" class="button button-primary" type="button">保存</button>
+          </div>
+          <div id="mappingGrid" class="mapping-grid"></div>
+          <p id="mappingStatus" class="form-status" role="status"></p>
+        </section>
+
+        <section class="settings-panel events-panel" aria-labelledby="eventsHeading">
+          <div class="panel-heading compact-heading">
+            <div>
+              <p class="eyebrow">RECENT ACTIVITY</p>
+              <h2 id="eventsHeading">手势事件</h2>
+            </div>
+            <button id="clearEvents" class="text-button" type="button">清空</button>
+          </div>
+          <p class="event-help">完整关键点参数输出在浏览器开发者控制台。</p>
+          <ol id="eventList" class="event-list" aria-live="polite"></ol>
+        </section>
+      </div>
+    </main>
+    <footer class="settings-footer">识别与事件处理均在本机完成。手势锁定在停止视频流或服务重启时清除。</footer>
+  </body>
+</html>
