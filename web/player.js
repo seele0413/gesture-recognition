@@ -61,6 +61,12 @@ async function togglePlayback() {
 }
 
 function renderCamera() {
+  // MJPEG is a long-lived multipart image; some browsers do not reliably fire
+  // the initial load event, so also observe its decoded intrinsic dimensions.
+  if (status.state === "running" && elements.cameraFeed.getAttribute("src")
+      && !feedFailed && elements.cameraFeed.naturalWidth > 0) {
+    feedLoaded = true;
+  }
   const controller = status.controller || { state: "unlocked", track_id: null };
   const streamReady = status.state === "running";
   const frameFresh = Boolean(status.frame_fresh ?? status.frame_ready);
@@ -235,4 +241,7 @@ document.addEventListener("fullscreenchange", () => {
 
 refreshStatus();
 window.setInterval(refreshStatus, 1100);
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) refreshStatus();
+});
 connectEvents();
