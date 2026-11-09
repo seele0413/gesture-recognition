@@ -243,6 +243,7 @@ class StreamManager:
             self._reconnect_count = 0
             self._dropped_frames = 0
             self._last_vision_ms = None
+            self._last_jpeg_encode_ms = None
             self._last_queue_delay_ms = None
             self._controller = {"state": "unlocked", "track_id": None, "lost_since_ms": None}
             status = self.get_status()
