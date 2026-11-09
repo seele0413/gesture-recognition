@@ -172,7 +172,8 @@ class StreamManager:
         self._reconnect_attempt = 0
         self._reconnect_count = 0
         self._dropped_frames = 0
-        self._last_processing_ms: float | None = None
+        self._last_vision_ms: float | None = None
+        self._last_jpeg_encode_ms: float | None = None
         self._last_queue_delay_ms: float | None = None
 
     def start(self, rtsp_url: str) -> dict[str, Any]:
@@ -197,7 +198,8 @@ class StreamManager:
             self._reconnect_attempt = 0
             self._reconnect_count = 0
             self._dropped_frames = 0
-            self._last_processing_ms = None
+            self._last_vision_ms = None
+            self._last_jpeg_encode_ms = None
             self._last_queue_delay_ms = None
             self._thread = threading.Thread(
                 target=self._run,
@@ -240,7 +242,7 @@ class StreamManager:
             self._reconnect_attempt = 0
             self._reconnect_count = 0
             self._dropped_frames = 0
-            self._last_processing_ms = None
+            self._last_vision_ms = None
             self._last_queue_delay_ms = None
             self._controller = {"state": "unlocked", "track_id": None, "lost_since_ms": None}
             status = self.get_status()
@@ -304,7 +306,8 @@ class StreamManager:
                 "reconnect_attempt": self._reconnect_attempt,
                 "reconnect_count": self._reconnect_count,
                 "dropped_frames": self._dropped_frames,
-                "last_processing_ms": self._last_processing_ms,
+                "last_vision_ms": self._last_vision_ms,
+                "last_jpeg_encode_ms": self._last_jpeg_encode_ms,
                 "last_queue_delay_ms": self._last_queue_delay_ms,
                 "tracks": [track.copy() for track in self._tracks],
                 "controller": controller,
@@ -427,14 +430,16 @@ class StreamManager:
                             if processing_errors >= MAX_CONSECUTIVE_PROCESSING_ERRORS:
                                 raise _VisionProcessingFailure from None
                             continue
+                        vision_ms = (time.monotonic() - processing_started) * 1000
                         processing_errors = 0
 
+                        jpeg_started = time.monotonic()
                         encoded, jpeg = cv2.imencode(
                             ".jpg", result["frame"], [cv2.IMWRITE_JPEG_QUALITY, 82]
                         )
+                        jpeg_encode_ms = (time.monotonic() - jpeg_started) * 1000
                         if not encoded:
                             continue
-                        processing_ms = (time.monotonic() - processing_started) * 1000
                         now_ms = int(time.time() * 1000)
                         with self._lock:
                             self._latest_jpeg = jpeg.tobytes()
@@ -445,7 +450,8 @@ class StreamManager:
                             self._tracks = result["tracks"]
                             self._controller = result["controller"]
                             self._vision = result.get("vision", self._vision)
-                            self._last_processing_ms = round(processing_ms, 1)
+                            self._last_vision_ms = round(vision_ms, 1)
+                            self._last_jpeg_encode_ms = round(jpeg_encode_ms, 1)
                             self._last_queue_delay_ms = round(queue_delay_ms, 1)
                             self._reconnect_attempt = 0
                         reconnect_attempt = 0
