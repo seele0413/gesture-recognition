@@ -15,6 +15,12 @@ from app.settings import MODEL_DIR
 
 FRAME_STALE_MS = 5000
 RECONNECT_DELAYS_SECONDS = (1, 2, 4, 8, 10)
+MAX_CONSECUTIVE_PROCESSING_ERRORS = 3
+
+
+class _VisionProcessingFailure(RuntimeError):
+    """Raised when repeated frame-processing failures require a fresh session."""
+
 
 
 def _empty_vision() -> dict[str, Any]:
@@ -282,6 +288,7 @@ class StreamManager:
                             {"type": "stream", "state": "running", "message": "摄像头已恢复，请重新做 OK 手势锁定主控。"}
                         )
 
+                    processing_errors = 0
                     while not stop_event.is_set():
                         try:
                             ok, frame = decoder.read()
@@ -292,10 +299,12 @@ class StreamManager:
 
                         try:
                             result = processor.process(frame)
-                        except Exception as error:
-                            self._set_error(f"视频识别处理失败（{type(error).__name__}）。请检查模型和运行环境。")
-                            fatal = True
-                            break
+                        except Exception:
+                            processing_errors += 1
+                            if processing_errors >= MAX_CONSECUTIVE_PROCESSING_ERRORS:
+                                raise _VisionProcessingFailure from None
+                            continue
+                        processing_errors = 0
 
                         encoded, jpeg = cv2.imencode(
                             ".jpg", result["frame"], [cv2.IMWRITE_JPEG_QUALITY, 82]
@@ -317,14 +326,21 @@ class StreamManager:
 
                     if fatal or stop_event.is_set():
                         break
-                except Exception:
+                except Exception as error:
                     if stop_event.is_set():
                         break
                     reconnect_attempt += 1
                     retry_delay = self.reconnect_delays[
                         min(reconnect_attempt - 1, len(self.reconnect_delays) - 1)
                     ]
-                    self._enter_reconnecting(session_id, reconnect_attempt, retry_delay)
+                    reconnect_message = (
+                        "连续多帧视觉处理失败，正在重新初始化解码器和识别模型。"
+                        if isinstance(error, _VisionProcessingFailure)
+                        else "视频流中断，正在自动重连。请检查摄像头和网络；恢复后需要重新做 OK 手势锁定。"
+                    )
+                    self._enter_reconnecting(
+                        session_id, reconnect_attempt, retry_delay, reconnect_message
+                    )
                     session_id = None
                 finally:
                     if processor is not None:
@@ -369,13 +385,15 @@ class StreamManager:
             if session_id:
                 self.store.clear_temporary(session_id)
 
-    def _enter_reconnecting(self, session_id: str | None, attempt: int, retry_delay: int) -> None:
+    def _enter_reconnecting(
+        self, session_id: str | None, attempt: int, retry_delay: int, message: str | None = None
+    ) -> None:
         with self._lock:
             processor = self._processor
             controller = processor.controller.snapshot() if processor else dict(self._controller)
             was_locked = controller["state"] != "unlocked"
             self._state = "reconnecting"
-            self._error = "视频流中断，正在自动重连。请检查摄像头和网络；恢复后需要重新做 OK 手势。"
+            self._error = message or "视频流中断，正在自动重连。请检查摄像头和网络；恢复后需要重新做 OK 手势。"
             self._latest_jpeg = None
             self._frame_width = 0
             self._frame_height = 0
