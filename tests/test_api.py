@@ -44,6 +44,25 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.client.post("/api/controller/unlock").json()["controller"]["state"], "unlocked")
         self.assertEqual(self.client.get("/api/mappings").status_code, 200)
 
+    def test_recognition_confidence_setting_is_validated_and_applied(self):
+        settings = self.client.get("/api/recognition-settings")
+        self.assertEqual(settings.status_code, 200)
+        self.assertEqual(settings.json()["gesture_confidence_threshold"], 0.6)
+        updated = self.client.put(
+            "/api/recognition-settings", json={"gesture_confidence_threshold": 0.65}
+        )
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(updated.json()["gesture_confidence_threshold"], 0.65)
+        invalid = self.client.put(
+            "/api/recognition-settings", json={"gesture_confidence_threshold": 0.63}
+        )
+        self.assertEqual(invalid.status_code, 400)
+        self.assertEqual(
+            self.client.get("/api/recognition-settings").json()["gesture_confidence_threshold"], 0.65
+        )
+        status = self.client.get("/api/status").json()
+        self.assertEqual(status["vision"]["confidence_threshold"], 0.65)
+
     def test_invalid_rtsp_address_does_not_echo_credentials(self):
         response = self.client.post(
             "/api/stream/start",
@@ -64,6 +83,8 @@ class ApiTests(unittest.TestCase):
         self.assertNotIn('id="mappingGrid"', homepage)
         self.assertIn('id="rtspUrl"', settings)
         self.assertIn('id="mappingGrid"', settings)
+        self.assertIn('id="gestureConfidenceRange"', settings)
+        self.assertIn('step="0.05"', settings)
 
     def test_home_camera_placeholder_can_be_hidden_when_feed_is_ready(self):
         styles = self.client.get("/static/styles.css").text

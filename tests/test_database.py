@@ -24,6 +24,27 @@ class ControlStoreTests(unittest.TestCase):
         self.store.set_mappings(changed)
         self.assertEqual(self.store.get_mappings(), changed)
 
+    def test_gesture_confidence_threshold_is_persisted_and_mappings_remain_unchanged(self):
+        self.assertEqual(self.store.get_gesture_confidence_threshold(), 0.6)
+        mappings = self.store.get_mappings()
+        self.assertEqual(self.store.set_gesture_confidence_threshold(0.65), 0.65)
+        reopened = ControlStore(self.path)
+        self.assertEqual(reopened.get_gesture_confidence_threshold(), 0.65)
+        self.assertEqual(reopened.get_mappings(), mappings)
+        with self.assertRaises(ValueError):
+            self.store.set_gesture_confidence_threshold(0.63)
+
+    def test_invalid_stored_confidence_threshold_migrates_to_default(self):
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute(
+                "UPDATE settings SET value = ? WHERE key = ?", (json.dumps(0.63), "gesture_confidence_threshold")
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        self.assertEqual(ControlStore(self.path).get_gesture_confidence_threshold(), 0.6)
+
     def test_temporary_session_and_gesture_metadata_are_cleared(self):
         self.store.begin_session("session-1", 100)
         self.store.update_controller("session-1", "locked", "person-1", 120)

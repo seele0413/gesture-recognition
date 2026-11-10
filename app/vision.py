@@ -9,10 +9,10 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from app.control import GestureGate, build_controller_event, build_gesture_event
+from app.control import GESTURES, GestureGate, build_controller_event, build_gesture_event
 from app.controller import ControllerLock, analyze_ok_gesture
 from app.database import ControlStore
-from app.settings import MODEL_DIR, MODEL_FILES
+from app.settings import MAX_INFERENCE_WIDTH, MODEL_DIR, MODEL_FILES
 from app.tracking import PoseTrackManager
 
 
@@ -23,12 +23,19 @@ class ModelsMissingError(RuntimeError):
 class VisionProcessor:
     """Processes a stream with session-local pose tracks and gesture control."""
 
+    DEFAULT_MAX_INFERENCE_WIDTH = MAX_INFERENCE_WIDTH
+    DEFAULT_NUM_POSES = 5
+    DEFAULT_NUM_HANDS = 10
+
     def __init__(
         self,
         store: ControlStore,
         publish: Callable[[dict[str, Any]], None],
         models_dir: Path = MODEL_DIR,
         session_id: str = "",
+        max_inference_width: int = DEFAULT_MAX_INFERENCE_WIDTH,
+        num_poses: int = DEFAULT_NUM_POSES,
+        num_hands: int = DEFAULT_NUM_HANDS,
     ):
         missing = [name for name in MODEL_FILES.values() if not (models_dir / name).is_file()]
         if missing:
@@ -42,12 +49,16 @@ class VisionProcessor:
         self.store = store
         self.publish = publish
         self.session_id = session_id
+        self.max_inference_width = max(1, int(max_inference_width))
+        self.num_poses = max(1, int(num_poses))
+        self.num_hands = max(1, int(num_hands))
         self.model_temp_dir: Path | None = None
         self.lock = threading.RLock()
         self.frame_index = 0
         self.track_manager = PoseTrackManager()
         self.controller = ControllerLock()
-        self.gate = GestureGate()
+        self.gate = GestureGate(confidence_threshold=store.get_gesture_confidence_threshold())
+        self.low_confidence_result_count = 0
         self.last_timestamp_ms = 0
 
         runtime_models = self._runtime_model_paths(models_dir)
@@ -57,7 +68,7 @@ class VisionProcessor:
                 vision.GestureRecognizerOptions(
                     base_options=mp.tasks.BaseOptions(model_asset_path=runtime_models["gesture"]),
                     running_mode=vision.RunningMode.VIDEO,
-                    num_hands=10,
+                    num_hands=self.num_hands,
                     min_hand_detection_confidence=0.45,
                     min_hand_presence_confidence=0.45,
                     min_tracking_confidence=0.45,
@@ -67,7 +78,7 @@ class VisionProcessor:
                 vision.PoseLandmarkerOptions(
                     base_options=mp.tasks.BaseOptions(model_asset_path=runtime_models["pose"]),
                     running_mode=vision.RunningMode.VIDEO,
-                    num_poses=5,
+                    num_poses=self.num_poses,
                     min_pose_detection_confidence=0.45,
                     min_pose_presence_confidence=0.45,
                     min_tracking_confidence=0.45,
@@ -117,12 +128,14 @@ class VisionProcessor:
             "Vision models cannot load from this Unicode path. Enable short Windows paths or install under an ASCII path."
         )
 
-    def process(self, frame: Any) -> dict[str, Any]:
+    def process(self, frame: Any, frame_resize_ms: float = 0.0) -> dict[str, Any]:
+        full_started = time.perf_counter()
+        preprocessing_started = full_started
         self.frame_index += 1
         height, width = frame.shape[:2]
-        if width > 960:
-            scale = 960 / width
-            frame = self.cv2.resize(frame, (960, max(1, round(height * scale))))
+        if width > self.max_inference_width:
+            scale = self.max_inference_width / width
+            frame = self.cv2.resize(frame, (self.max_inference_width, max(1, round(height * scale))))
             height, width = frame.shape[:2]
 
         rgb = self.cv2.cvtColor(frame, self.cv2.COLOR_BGR2RGB)
@@ -130,19 +143,32 @@ class VisionProcessor:
             image_format=self.mp.ImageFormat.SRGB,
             data=self._numpy.ascontiguousarray(rgb),
         )
+        preprocessing_ms = frame_resize_ms + (time.perf_counter() - preprocessing_started) * 1000
         timestamp_ms = max(int(time.monotonic() * 1000), self.last_timestamp_ms + 1)
         self.last_timestamp_ms = timestamp_ms
+        pose_started = time.perf_counter()
         poses_result = self.pose_landmarker.detect_for_video(image, timestamp_ms)
+        pose_inference_ms = (time.perf_counter() - pose_started) * 1000
+        gesture_started = time.perf_counter()
         gestures_result = self.gesture_recognizer.recognize_for_video(image, timestamp_ms)
+        gesture_inference_ms = (time.perf_counter() - gesture_started) * 1000
+        tracking_started = time.perf_counter()
         tracks = self.track_manager.update(poses_result.pose_landmarks, width, height, timestamp_ms)
-        hands = self._describe_hands(gestures_result, tracks)
-
+        tracking_ms = (time.perf_counter() - tracking_started) * 1000
         visible_track_ids = {
             track["track_id"]
             for track in tracks
             if track["track_id"] is not None and not track["ambiguous"]
         }
         with self.lock:
+            hand_association_started = time.perf_counter()
+            hands = self._describe_hands(gestures_result, tracks, self.gate.confidence_threshold)
+            hand_association_ms = (time.perf_counter() - hand_association_started) * 1000
+            low_confidence_count = sum(
+                hand["gesture"] in GESTURES and hand["confidence"] < hand["confidence_threshold"]
+                for hand in hands
+            )
+            self.low_confidence_result_count += low_confidence_count
             lock_candidates = [hand["track_id"] for hand in hands if hand["is_ok"]]
             lock_result = self.controller.observe_lock_candidates(lock_candidates, timestamp_ms)
             if lock_result == "locked":
@@ -155,7 +181,9 @@ class VisionProcessor:
                 for state, reason in transitions:
                     self._publish_controller(state, reason, timestamp_ms)
 
+            control_started = time.perf_counter()
             events = self._process_controller_hands(hands, timestamp_ms)
+            control_ms = (time.perf_counter() - control_started) * 1000
             controller = self.controller.snapshot()
             hand_diagnostics = [self._public_hand(hand) for hand in hands]
         diagnostics = {
@@ -166,8 +194,20 @@ class VisionProcessor:
             "hands": hand_diagnostics,
             "lock_progress": controller["lock_progress"],
             "last_gesture": hand_diagnostics[0] if hand_diagnostics else None,
+            "confidence_threshold": self.gate.confidence_threshold,
+            "low_confidence_hand_count": low_confidence_count,
+            "low_confidence_result_count": self.low_confidence_result_count,
         }
         public_tracks = [self._public_track(track) for track in tracks]
+        diagnostics["timings"] = {
+            "preprocessing_ms": round(preprocessing_ms, 2),
+            "pose_inference_ms": round(pose_inference_ms, 2),
+            "gesture_inference_ms": round(gesture_inference_ms, 2),
+            "tracking_ms": round(tracking_ms, 2),
+            "hand_association_ms": round(hand_association_ms, 2),
+            "control_ms": round(control_ms, 2),
+            "full_vision_ms": round((time.perf_counter() - full_started) * 1000 + frame_resize_ms, 2),
+        }
         return {
             "frame": frame,
             "frame_width": width,
@@ -184,7 +224,13 @@ class VisionProcessor:
 
         return numpy
 
-    def _describe_hands(self, result: Any, tracks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _describe_hands(
+        self,
+        result: Any,
+        tracks: list[dict[str, Any]],
+        confidence_threshold: float | None = None,
+    ) -> list[dict[str, Any]]:
+        threshold = self.gate.confidence_threshold if confidence_threshold is None else confidence_threshold
         hands = []
         for hand_index, landmarks in enumerate(result.hand_landmarks):
             categories = result.gestures[hand_index] if hand_index < len(result.gestures) else []
@@ -205,11 +251,13 @@ class VisionProcessor:
                     "handedness": handedness,
                     "gesture": label,
                     "confidence": confidence,
+                    "confidence_threshold": threshold,
                     "is_ok": ok_geometry["is_ok"],
                     "ok_reason": ok_geometry["reason"],
                     "tip_ratio": ok_geometry["tip_ratio"],
                     "action": "none",
                     "action_reason": "等待主控锁定",
+                    "reason_code": "waiting",
                     "stable_frames": 0,
                 }
             )
@@ -236,12 +284,17 @@ class VisionProcessor:
                 continue
             if len(pose) <= 16:
                 continue
+            box = track.get("box_norm")
+            distance_limit = max_distance
+            if box and len(box) == 4:
+                person_extent = max(float(box[2]), float(box[3]))
+                distance_limit = min(max_distance, max(0.08, person_extent * 0.26))
             for wrist_index in (15, 16):
                 pose_wrist = pose[wrist_index]
                 if not VisionProcessor._landmark_visible(pose_wrist):
                     continue
                 distance = math.hypot(float(wrist.x) - float(pose_wrist.x), float(wrist.y) - float(pose_wrist.y))
-                if distance <= max_distance:
+                if distance <= distance_limit:
                     best_by_track[track_id] = min(distance, best_by_track.get(track_id, float("inf")))
         candidates = sorted((distance, track_id) for track_id, distance in best_by_track.items())
         if candidates:
@@ -277,6 +330,7 @@ class VisionProcessor:
         return {
             "track_id": track["track_id"],
             "box": list(track["box"]),
+            "box_norm": list(track["box_norm"]),
             "association_confidence": float(track["association_confidence"]),
             "ambiguous": bool(track["ambiguous"]),
         }
@@ -294,6 +348,8 @@ class VisionProcessor:
             "tip_ratio": hand["tip_ratio"],
             "action": hand["action"],
             "action_reason": hand["action_reason"],
+            "reason_code": hand["reason_code"],
+            "confidence_threshold": hand["confidence_threshold"],
             "stable_frames": hand["stable_frames"],
             "landmarks": [
                 {"x": float(point.x), "y": float(point.y)}
@@ -325,6 +381,11 @@ class VisionProcessor:
                 self._publish_controller("unlocked", "manual", self.last_timestamp_ms)
             return self.controller.snapshot()
 
+    def set_confidence_threshold(self, threshold: float) -> float:
+        with self.lock:
+            self.gate.set_confidence_threshold(threshold)
+            return self.gate.confidence_threshold
+
     def _process_controller_hands(self, hands: list[dict[str, Any]], timestamp_ms: int) -> list[dict[str, Any]]:
         controller = self.controller.snapshot()
         track_id = controller["track_id"]
@@ -333,15 +394,29 @@ class VisionProcessor:
             for hand in hands:
                 if controller["state"] == "lost":
                     hand["action_reason"] = "主控轨迹暂时丢失，控制已暂停"
+                    hand["reason_code"] = "master_track_lost"
                 elif hand["is_ok"] and hand["track_id"]:
                     hand["action_reason"] = (
                         f"OK 已确认，锁定进度 {controller['lock_progress']}/"
                         f"{controller['lock_required_frames']} 帧"
                     )
+                    hand["reason_code"] = "locking_controller"
                 elif hand["is_ok"]:
                     hand["action_reason"] = hand["association_reason"]
+                    hand["reason_code"] = "hand_not_associated"
                 else:
-                    hand["action_reason"] = "OK 未确认：" + hand["ok_reason"]
+                    if hand["gesture"] not in GESTURES:
+                        hand["action_reason"] = "未识别到内置手势"
+                        hand["reason_code"] = "unrecognized_gesture"
+                    elif hand["confidence"] < hand["confidence_threshold"]:
+                        hand["action_reason"] = (
+                            f"识别置信度不足（{hand['confidence']:.0%}，"
+                            f"门槛 {hand['confidence_threshold']:.0%}）"
+                        )
+                        hand["reason_code"] = "low_confidence"
+                    else:
+                        hand["action_reason"] = "OK 未确认：" + hand["ok_reason"]
+                        hand["reason_code"] = "waiting_for_controller_lock"
             return []
 
         mappings = self.store.get_mappings()
@@ -350,9 +425,11 @@ class VisionProcessor:
         for hand in hands:
             if hand["track_id"] != track_id:
                 hand["action_reason"] = "手未关联到当前主控人"
+                hand["reason_code"] = "hand_not_associated"
                 continue
             if hand["is_ok"]:
                 hand["action_reason"] = "OK 仅用于锁定主控，不执行网页动作"
+                hand["reason_code"] = "ok_lock_gesture"
                 continue
             handedness = hand["handedness"]
             gesture = hand["gesture"]
@@ -364,6 +441,7 @@ class VisionProcessor:
             action_triggered = self.gate.observe(key, gesture, confidence, action, timestamp_ms)
             gate_status = self.gate.status(key)
             hand["action_reason"] = gate_status["reason"]
+            hand["reason_code"] = gate_status["reason_code"]
             hand["stable_frames"] = gate_status["stable_frames"]
             if action_triggered is None:
                 continue

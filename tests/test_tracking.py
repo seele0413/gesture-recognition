@@ -36,6 +36,20 @@ class PoseTrackTests(unittest.TestCase):
         self.assertEqual(reversed_ids[0.24], ids_by_x[0.25])
         self.assertEqual(reversed_ids[0.76], ids_by_x[0.75])
 
+    def test_motion_prediction_reduces_cost_after_a_short_observation_gap(self):
+        tracker = PoseTrackManager()
+        tracker.update([pose(0.30)], 640, 480, 100)
+        tracker.update([pose(0.35)], 640, 480, 200)
+        track = tracker._tracks["person-1"]
+        observation = tracker._features(0, pose(0.42))
+
+        unpredicted_cost = tracker._cost(track, observation)
+        predicted_cost = tracker._cost(track, observation, 400)
+        resumed = tracker.update([pose(0.42)], 640, 480, 400)
+
+        self.assertLess(predicted_cost, unpredicted_cost)
+        self.assertEqual(resumed[0]["track_id"], "person-1")
+
     def test_track_output_contains_pixel_box_and_ambiguity_state(self):
         tracker = PoseTrackManager()
         result = tracker.update([pose(0.5)], 640, 480, 100)
@@ -77,6 +91,19 @@ class PoseTrackTests(unittest.TestCase):
         ]
         hand = [landmark(0.40, 0.40)] + [landmark(0.40, 0.40) for _ in range(20)]
         self.assertIsNone(VisionProcessor._associate_hand_to_track(hand, tracks))
+
+    def test_hand_wrist_gate_scales_with_person_box_size(self):
+        def track(track_id, wrist, box):
+            landmarks = [landmark(0.0, 0.0) for _ in range(33)]
+            landmarks[15] = landmark(*wrist)
+            return {"track_id": track_id, "landmarks": landmarks, "box_norm": box, "ambiguous": False}
+
+        hand = [landmark(0.5, 0.5)] + [landmark(0.5, 0.5) for _ in range(20)]
+        small_person = track("small", (0.4, 0.5), [0.25, 0.35, 0.2, 0.2])
+        large_person = track("large", (0.4, 0.5), [0.3, 0.3, 0.45, 0.45])
+
+        self.assertIsNone(VisionProcessor._associate_hand_to_track(hand, [small_person]))
+        self.assertEqual(VisionProcessor._associate_hand_to_track(hand, [large_person]), "large")
 
     def test_ambiguous_wrist_match_does_not_fall_back_to_a_single_person_box(self):
         def track(track_id, wrist_x, box):

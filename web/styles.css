@@ -373,6 +373,10 @@ svg { display: block; }
 .empty-state { padding: 8px 2px; color: #8b938a; font-size: 11px; }
 
 .mapping-grid { display: grid; gap: 0; }
+.confidence-value { color: #3e6d50; font-size: 14px; font-variant-numeric: tabular-nums; }
+.range-label { display: block; margin: 7px 0 5px; color: #4c564d; font-size: 12px; }
+.confidence-range { display: block; width: 100%; height: 22px; margin: 0; accent-color: #53845f; }
+.confidence-range:focus-visible { outline: 2px solid #9bb2a0; outline-offset: 2px; }
 .mapping-row { display: grid; grid-template-columns: minmax(120px, .8fr) minmax(150px, 1.2fr); align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid #edf0eb; }
 .mapping-row label { color: #4c564d; font-size: 12px; }
 .mapping-row select { width: 100%; min-width: 0; height: 34px; padding: 0 8px; border: 1px solid #dce2da; border-radius: 3px; color: #394239; background: #fff; font-size: 12px; }

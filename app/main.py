@@ -24,6 +24,10 @@ class MappingsRequest(BaseModel):
     mappings: dict[str, str]
 
 
+class RecognitionSettingsRequest(BaseModel):
+    gesture_confidence_threshold: float
+
+
 def _local_origin(origin: str | None) -> bool:
     if not origin:
         return True
@@ -130,6 +134,17 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
     async def put_mappings(payload: MappingsRequest) -> dict:
         try:
             return {"mappings": store.set_mappings(payload.mappings)}
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+    @app.get("/api/recognition-settings")
+    async def get_recognition_settings() -> dict:
+        return manager.get_recognition_settings()
+
+    @app.put("/api/recognition-settings")
+    async def put_recognition_settings(payload: RecognitionSettingsRequest) -> dict:
+        try:
+            return manager.set_gesture_confidence_threshold(payload.gesture_confidence_threshold)
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
 

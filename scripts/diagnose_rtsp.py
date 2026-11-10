@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import math
 import json
 import statistics
 import sys
@@ -51,6 +52,7 @@ def timing_summary(values: list[float]) -> dict[str, float] | None:
     return {
         "min_ms": round(min(values), 3),
         "median_ms": round(statistics.median(values), 3),
+        "p95_ms": round(sorted(values)[max(0, math.ceil(len(values) * 0.95) - 1)], 3),
         "max_ms": round(max(values), 3),
     }
 
@@ -74,6 +76,9 @@ def main() -> int:
     parser.add_argument("--frames", type=int, default=120, help="采集的有效帧数，默认 120")
     parser.add_argument("--samples", type=int, default=8, help="每个阶段最多保存的抽样图片数，默认 8")
     parser.add_argument("--with-vision", action="store_true", help="同时运行项目的 VisionProcessor，需要已下载模型")
+    parser.add_argument("--max-inference-width", type=int, choices=(640, 720, 960), default=960)
+    parser.add_argument("--num-poses", type=int, choices=(1, 3, 5), default=5)
+    parser.add_argument("--num-hands", type=int, choices=(2, 4, 10), default=10)
     parser.add_argument("--discard-corrupt", action="store_true", help="启用 FFmpeg discardcorrupt，默认保持 main 当前解码选项")
     parser.add_argument("--output", type=Path, help="报告输出目录；默认 diagnostics/时间戳")
     args = parser.parse_args()
@@ -114,6 +119,11 @@ def main() -> int:
             "requested_valid_frames": args.frames,
             "requested_samples": args.samples,
             "vision_enabled": bool(args.with_vision),
+            "vision_parameters": {
+                "max_inference_width": args.max_inference_width,
+                "num_poses": args.num_poses,
+                "num_hands": args.num_hands,
+            },
         },
         "runtime": {
             "pyav": av.__version__,
@@ -152,6 +162,7 @@ def main() -> int:
     vision_ms: list[float] = []
     jpeg_encode_ms: list[float] = []
     jpeg_decode_ms: list[float] = []
+    vision_stage_ms: dict[str, list[float]] = {}
     valid_frames = 0
     saved_samples = 0
     sample_interval = max(1, args.frames // args.samples)
@@ -186,6 +197,9 @@ def main() -> int:
                     lambda _event: None,
                     MODEL_DIR,
                     session_id,
+                    max_inference_width=args.max_inference_width,
+                    num_poses=args.num_poses,
+                    num_hands=args.num_hands,
                 )
             except Exception as error:
                 report["vision_initialization_error"] = type(error).__name__
@@ -255,6 +269,10 @@ def main() -> int:
                         elapsed = (time.perf_counter() - vision_started) * 1000
                         vision_ms.append(elapsed)
                         record["vision_ms"] = round(elapsed, 3)
+                        timings = result.get("vision", {}).get("timings", {})
+                        record["vision_timings"] = timings
+                        for name, value in timings.items():
+                            vision_stage_ms.setdefault(name, []).append(float(value))
                         record["processed"] = image_info(processed)
                     except Exception as error:
                         report["failures"]["vision_processing"] += 1
@@ -327,6 +345,7 @@ def main() -> int:
         "vision_processing": timing_summary(vision_ms),
         "jpeg_encode": timing_summary(jpeg_encode_ms),
         "jpeg_decode": timing_summary(jpeg_decode_ms),
+        "vision_stages": {name: timing_summary(values) for name, values in vision_stage_ms.items()},
     }
     report_path = output_dir / "report.json"
     report_path.write_text(

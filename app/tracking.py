@@ -10,6 +10,9 @@ MAX_TRACK_GAP_MS = 2000
 MAX_ASSOCIATION_COST = 1.4
 AMBIGUITY_MARGIN = 0.18
 MIN_TRACK_CONFIDENCE = 0.45
+MAX_PREDICTION_GAP_SECONDS = 0.4
+MAX_PREDICTION_DISTANCE = 0.12
+MAX_TRACK_SPEED = 3.0
 
 
 def _visible(landmark: Any) -> bool:
@@ -41,6 +44,7 @@ class _Track:
     box: tuple[float, float, float, float]
     torso: tuple[tuple[int, tuple[float, float]], ...]
     last_seen_ms: int
+    velocity: tuple[float, float] = (0.0, 0.0)
 
 
 class PoseTrackManager:
@@ -66,7 +70,10 @@ class PoseTrackManager:
         observations = [self._features(index, pose) for index, pose in enumerate(poses)]
         observations = [item for item in observations if item is not None]
         tracks = list(self._tracks.values())
-        costs = [[self._cost(track, observation) for observation in observations] for track in tracks]
+        costs = [
+            [self._cost(track, observation, timestamp_ms) for observation in observations]
+            for track in tracks
+        ]
         ambiguous_tracks: set[int] = set()
         ambiguous_observations: set[int] = set()
 
@@ -100,12 +107,26 @@ class PoseTrackManager:
                 continue
             track = tracks[track_index]
             observation = observations[observation_index]
+            elapsed_seconds = max(0.001, (timestamp_ms - track.last_seen_ms) / 1000)
+            measured_velocity = (
+                (observation["center"][0] - track.center[0]) / elapsed_seconds,
+                (observation["center"][1] - track.center[1]) / elapsed_seconds,
+            )
+            speed = math.hypot(*measured_velocity)
+            if speed > MAX_TRACK_SPEED:
+                ratio = MAX_TRACK_SPEED / speed
+                measured_velocity = (measured_velocity[0] * ratio, measured_velocity[1] * ratio)
+            velocity = (
+                0.55 * track.velocity[0] + 0.45 * measured_velocity[0],
+                0.55 * track.velocity[1] + 0.45 * measured_velocity[1],
+            )
             self._tracks[track.track_id] = _Track(
                 track_id=track.track_id,
                 center=observation["center"],
                 box=observation["box"],
                 torso=observation["torso"],
                 last_seen_ms=timestamp_ms,
+                velocity=velocity,
             )
             observation_tracks[observation_index] = (
                 track.track_id,
@@ -191,10 +212,29 @@ class PoseTrackManager:
         }
 
     @staticmethod
-    def _cost(track: _Track, observation: dict[str, Any]) -> float:
-        scale = max(0.08, min(0.35, max(track.box[2], track.box[3], observation["box"][2], observation["box"][3])))
-        center_cost = _distance(track.center, observation["center"]) / scale
-        old_torso = dict(track.torso)
+    def _cost(track: _Track, observation: dict[str, Any], timestamp_ms: int | None = None) -> float:
+        dx = 0.0
+        dy = 0.0
+        if timestamp_ms is not None:
+            elapsed = max(0.0, min((timestamp_ms - track.last_seen_ms) / 1000, MAX_PREDICTION_GAP_SECONDS))
+            dx = track.velocity[0] * elapsed
+            dy = track.velocity[1] * elapsed
+            distance = math.hypot(dx, dy)
+            if distance > MAX_PREDICTION_DISTANCE:
+                ratio = MAX_PREDICTION_DISTANCE / distance
+                dx *= ratio
+                dy *= ratio
+        predicted_center = (track.center[0] + dx, track.center[1] + dy)
+        predicted_box = (track.box[0] + dx, track.box[1] + dy, track.box[2], track.box[3])
+        scale = max(
+            0.08,
+            min(0.35, max(predicted_box[2], predicted_box[3], observation["box"][2], observation["box"][3])),
+        )
+        center_cost = _distance(predicted_center, observation["center"]) / scale
+        old_torso = {
+            index: (point[0] + dx, point[1] + dy)
+            for index, point in track.torso
+        }
         new_torso = dict(observation["torso"])
         shared = old_torso.keys() & new_torso.keys()
         torso_cost = (
@@ -202,7 +242,7 @@ class PoseTrackManager:
             if shared
             else center_cost
         )
-        overlap_cost = 1.0 - _iou(track.box, observation["box"])
+        overlap_cost = 1.0 - _iou(predicted_box, observation["box"])
         return 0.55 * center_cost + 0.35 * torso_cost + 0.10 * overlap_cost
 
     def active_track_ids(self) -> set[str]:

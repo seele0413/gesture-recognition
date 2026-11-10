@@ -62,6 +62,19 @@
       </section>
 
       <div class="settings-side">
+        <section class="settings-panel recognition-panel" aria-labelledby="recognitionHeading">
+          <div class="panel-heading compact-heading">
+            <div>
+              <p class="eyebrow">RECOGNITION</p>
+              <h2 id="recognitionHeading">识别灵敏度</h2>
+            </div>
+            <output id="confidenceValue" class="confidence-value" for="gestureConfidenceRange">60%</output>
+          </div>
+          <label class="range-label" for="gestureConfidenceRange">手势分类置信度</label>
+          <input id="gestureConfidenceRange" class="confidence-range" type="range" min="0.50" max="0.90" step="0.05" value="0.60">
+          <p id="confidenceStatus" class="form-status" role="status"></p>
+        </section>
+
         <section class="settings-panel controller-panel" aria-labelledby="controllerHeading">
           <div class="panel-heading compact-heading">
             <div>

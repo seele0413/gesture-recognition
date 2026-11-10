@@ -31,7 +31,7 @@ const elements = Object.fromEntries(
     "startStream", "stopStream", "videoFrame", "videoFeed", "personOverlay", "videoPlaceholder",
     "resolutionLabel", "candidateCount", "targetLabel", "visionDiagnostics", "handDiagnostics", "trackCount", "controllerCard", "controllerStatus",
     "controllerTrackId", "controllerDetail", "unlockController", "trackList", "mappingGrid", "saveMappings",
-    "mappingStatus", "eventList", "clearEvents", "pipelineDiagnostics",
+    "mappingStatus", "eventList", "clearEvents", "pipelineDiagnostics", "gestureConfidenceRange", "confidenceValue", "confidenceStatus",
   ].map((id) => [id, document.getElementById(id)]),
 );
 
@@ -43,6 +43,8 @@ let appState = {
   controller: { state: "unlocked", track_id: null },
 };
 let mappings = {};
+let confidenceSaveTimer;
+let confidenceSaveQueue = Promise.resolve();
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -79,13 +81,21 @@ function drawTracks() {
   context.setTransform(ratio, 0, 0, ratio, 0, 0);
   context.clearRect(0, 0, width, height);
   if (!appState.frame_width || !appState.frame_height) return;
+  const frameGap = Math.abs((appState.preview_frame_sequence || 0) - (appState.vision_frame_sequence || 0));
+  const maxOverlayGap = Math.max(2, Math.round((appState.preview_fps || 20) * 0.25));
+  if (frameGap > maxOverlayGap) return;
   const controller = appState.controller || {};
   for (const track of appState.tracks || []) {
-    const [x, y, boxWidth, boxHeight] = track.box;
-    const left = (x / appState.frame_width) * width;
-    const top = (y / appState.frame_height) * height;
-    const drawWidth = (boxWidth / appState.frame_width) * width;
-    const drawHeight = (boxHeight / appState.frame_height) * height;
+    const [x, y, boxWidth, boxHeight] = track.box_norm || [
+      track.box[0] / appState.frame_width,
+      track.box[1] / appState.frame_height,
+      track.box[2] / appState.frame_width,
+      track.box[3] / appState.frame_height,
+    ];
+    const left = x * width;
+    const top = y * height;
+    const drawWidth = boxWidth * width;
+    const drawHeight = boxHeight * height;
     const isController = track.track_id && track.track_id === controller.track_id;
     context.strokeStyle = isController ? "#d0b56d" : track.ambiguous ? "#bd7165" : "#70a27a";
     context.lineWidth = isController ? 3 : 2;
@@ -168,18 +178,26 @@ function renderTracks() {
         : appState.state === "reconnecting" ? "视频流恢复后需要重新做 OK 手势锁定" : "视频流未启动";
 
   const vision = appState.vision || {};
+  const ambiguousTrackCount = tracks.filter((track) => track.ambiguous).length;
   elements.visionDiagnostics.textContent = "人体轨迹 " + tracks.length
+    + " · 明确 " + (tracks.length - ambiguousTrackCount) + " · 歧义 " + ambiguousTrackCount
     + " · 手部 " + (vision.hand_count || 0)
     + " · OK " + (vision.ok_hand_count || 0)
-    + " · 已关联 OK " + (vision.associated_ok_count || 0);
+    + " · 已关联 OK " + (vision.associated_ok_count || 0)
+    + " · 低置信 " + (vision.low_confidence_hand_count || 0)
+    + " · 门槛 " + Math.round((vision.confidence_threshold || 0.6) * 100) + "%";
   const visionMs = appState.last_vision_ms;
   const jpegMs = appState.last_jpeg_encode_ms;
   const queueDelayMs = appState.last_queue_delay_ms;
+  const timings = vision.timings || {};
   const droppedFrames = appState.dropped_frames || 0;
   elements.pipelineDiagnostics.textContent = visionMs == null
-    ? "推理 -- ms · JPEG -- ms · 排队 -- ms · 丢弃旧帧 " + droppedFrames
-    : "推理 " + Math.round(visionMs) + " ms · JPEG " + Math.round(jpegMs || 0)
-      + " ms · 排队 " + Math.round(queueDelayMs || 0) + " ms · 丢弃旧帧 " + droppedFrames;
+    ? "预览 -- FPS · AI -- FPS · 预处理 -- ms · Pose -- ms · 手势 -- ms · 轨迹 -- ms · 推理 -- ms · JPEG -- ms · 排队 -- ms · 丢帧 " + droppedFrames
+    : "预览 " + (appState.preview_fps || 0) + " FPS · AI " + (appState.ai_processing_fps || 0) + " FPS"
+      + " · 预处理 " + Math.round(timings.preprocessing_ms || 0) + " ms"
+      + " · Pose " + Math.round(timings.pose_inference_ms || 0) + " ms · 手势 " + Math.round(timings.gesture_inference_ms || 0) + " ms"
+      + " · 轨迹 " + Math.round(timings.tracking_ms || 0) + " ms · 推理 " + Math.round(visionMs) + " ms · JPEG " + Math.round(jpegMs || 0)
+      + " ms · 排队 " + Math.round(queueDelayMs || 0) + " ms · 丢帧 " + droppedFrames;
   const hands = vision.hands || [];
   if (!hands.length) {
     elements.handDiagnostics.textContent = appState.state === "running"
@@ -194,7 +212,8 @@ function renderTracks() {
       const gestureName = hand.gesture || "未识别内置手势";
       const confidence = Math.round((hand.confidence || 0) * 100);
       const okState = hand.is_ok ? "OK 已确认" : "OK 未确认：" + hand.ok_reason;
-      return (hand.handedness || "手") + " · " + gestureName + " " + confidence + "% · "
+      return (hand.handedness || "手") + " · " + gestureName + " " + confidence + "% · 稳定 "
+        + (hand.stable_frames || 0) + "/3 · "
         + okState + " · " + (hand.track_id || hand.association_reason) + " · " + hand.action_reason;
     }).join("  /  ");
   }
@@ -333,6 +352,52 @@ async function saveMappings() {
   }
 }
 
+async function loadRecognitionSettings() {
+  try {
+    const settings = await api("/api/recognition-settings");
+    const threshold = Number(settings.gesture_confidence_threshold);
+    elements.gestureConfidenceRange.value = String(threshold);
+    elements.confidenceValue.value = Math.round(threshold * 100) + "%";
+    elements.confidenceValue.textContent = elements.confidenceValue.value;
+  } catch (error) {
+    elements.confidenceStatus.textContent = error.message;
+  }
+}
+
+function saveConfidenceThreshold() {
+  const threshold = Number(elements.gestureConfidenceRange.value);
+  confidenceSaveQueue = confidenceSaveQueue.catch(() => {}).then(async () => {
+    try {
+      const settings = await api("/api/recognition-settings", {
+        method: "PUT",
+        body: JSON.stringify({ gesture_confidence_threshold: threshold }),
+      });
+      if (Number(elements.gestureConfidenceRange.value) === threshold) {
+        const saved = Number(settings.gesture_confidence_threshold);
+        elements.confidenceStatus.textContent = "已立即应用并保存";
+        elements.confidenceValue.value = Math.round(saved * 100) + "%";
+      }
+    } catch (error) {
+      if (Number(elements.gestureConfidenceRange.value) === threshold) {
+        elements.confidenceStatus.textContent = error.message;
+      }
+    }
+  });
+}
+
+function scheduleConfidenceSave(immediate = false) {
+  const threshold = Number(elements.gestureConfidenceRange.value);
+  elements.confidenceValue.value = Math.round(threshold * 100) + "%";
+  elements.confidenceValue.textContent = elements.confidenceValue.value;
+  elements.confidenceStatus.textContent = "应用中…";
+  window.clearTimeout(confidenceSaveTimer);
+  if (immediate) {
+    saveConfidenceThreshold();
+  } else {
+    confidenceSaveTimer = window.setTimeout(saveConfidenceThreshold, 180);
+  }
+}
+
 function actionLabel(action) {
   return ACTIONS.find(([value]) => value === action)?.[1] || "不执行";
 }
@@ -381,10 +446,13 @@ elements.toggleRtspVisibility.addEventListener("click", () => {
 });
 elements.unlockController.addEventListener("click", unlockController);
 elements.saveMappings.addEventListener("click", saveMappings);
+elements.gestureConfidenceRange.addEventListener("input", () => scheduleConfidenceSave());
+elements.gestureConfidenceRange.addEventListener("change", () => scheduleConfidenceSave(true));
 elements.clearEvents.addEventListener("click", () => elements.eventList.replaceChildren());
 window.addEventListener("resize", drawTracks);
 
 loadMappings();
+loadRecognitionSettings();
 refreshStatus();
-window.setInterval(refreshStatus, 900);
+window.setInterval(refreshStatus, 250);
 connectEvents();

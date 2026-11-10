@@ -7,7 +7,13 @@ from pathlib import Path
 from threading import RLock
 from typing import Any
 
-from app.control import DEFAULT_MAPPINGS, migrate_legacy_mappings, validate_mappings
+from app.control import (
+    DEFAULT_GESTURE_CONFIDENCE_THRESHOLD,
+    DEFAULT_MAPPINGS,
+    migrate_legacy_mappings,
+    validate_gesture_confidence_threshold,
+    validate_mappings,
+)
 
 
 class ControlStore:
@@ -74,6 +80,10 @@ class ControlStore:
                 "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
                 ("gesture_mappings", json.dumps(DEFAULT_MAPPINGS)),
             )
+            connection.execute(
+                "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
+                ("gesture_confidence_threshold", json.dumps(DEFAULT_GESTURE_CONFIDENCE_THRESHOLD)),
+            )
             row = connection.execute(
                 "SELECT value FROM settings WHERE key = ?", ("gesture_mappings",)
             ).fetchone()
@@ -83,6 +93,16 @@ class ControlStore:
                 connection.execute(
                     "UPDATE settings SET value = ? WHERE key = ?",
                     (json.dumps(migrated_mappings), "gesture_mappings"),
+                )
+            threshold_row = connection.execute(
+                "SELECT value FROM settings WHERE key = ?", ("gesture_confidence_threshold",)
+            ).fetchone()
+            try:
+                validate_gesture_confidence_threshold(json.loads(threshold_row["value"]))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                connection.execute(
+                    "UPDATE settings SET value = ? WHERE key = ?",
+                    (json.dumps(DEFAULT_GESTURE_CONFIDENCE_THRESHOLD), "gesture_confidence_threshold"),
                 )
 
     def clear_temporary(self, session_id: str | None = None) -> None:
@@ -165,3 +185,20 @@ class ControlStore:
                 ("gesture_mappings", json.dumps(clean)),
             )
         return clean
+
+    def get_gesture_confidence_threshold(self) -> float:
+        with self._lock, self._connection() as connection:
+            row = connection.execute(
+                "SELECT value FROM settings WHERE key = ?", ("gesture_confidence_threshold",)
+            ).fetchone()
+        return validate_gesture_confidence_threshold(json.loads(row["value"]))
+
+    def set_gesture_confidence_threshold(self, value: float) -> float:
+        threshold = validate_gesture_confidence_threshold(value)
+        with self._lock, self._connection() as connection:
+            connection.execute(
+                "INSERT INTO settings (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                ("gesture_confidence_threshold", json.dumps(threshold)),
+            )
+        return threshold
