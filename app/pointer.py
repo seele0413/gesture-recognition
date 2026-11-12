@@ -10,10 +10,11 @@ class HandPointerController:
 
     def __init__(
         self,
-        press_threshold: float = 0.28,
-        release_threshold: float = 0.38,
-        smoothing: float = 0.45,
-        max_update_hz: float = 30.0,
+        press_threshold: float = 0.36,
+        release_threshold: float = 0.50,
+        smoothing: float = 0.72,
+        max_update_hz: float = 45.0,
+        dropout_grace_ms: int = 350,
     ) -> None:
         if not 0 < press_threshold < release_threshold < 1:
             raise ValueError("捏合阈值必须满足 0 < 按下阈值 < 释放阈值 < 1")
@@ -21,6 +22,7 @@ class HandPointerController:
         self.release_threshold = float(release_threshold)
         self.smoothing = min(1.0, max(0.05, float(smoothing)))
         self.min_update_interval = 1.0 / max(1.0, float(max_update_hz))
+        self.dropout_grace_ms = max(0, int(dropout_grace_ms))
         self.enabled = False
         self._active = False
         self._pressed = False
@@ -28,6 +30,7 @@ class HandPointerController:
         self._handedness: str | None = None
         self._x: float | None = None
         self._y: float | None = None
+        self._last_valid_timestamp_ms: int | None = None
         self._last_emit_at = 0.0
 
     def set_enabled(self, enabled: bool, timestamp_ms: int = 0) -> dict[str, Any] | None:
@@ -65,12 +68,14 @@ class HandPointerController:
         if self._handedness is not None:
             matching = [item for item in candidates if item[0].get("handedness") == self._handedness]
             if not matching:
-                return self._deactivate(timestamp_ms)
-            hand, pinch_ratio, index_extended = matching[0]
+                return self._handle_dropout(timestamp_ms)
+            hand, pinch_ratio, index_extended = max(
+                matching, key=lambda item: float(item[0].get("confidence", 0.0))
+            )
         else:
             eligible = [item for item in candidates if item[2] or item[1] <= self.press_threshold]
             if not eligible:
-                return self._deactivate(timestamp_ms)
+                return self._handle_dropout(timestamp_ms)
             hand, pinch_ratio, index_extended = max(
                 eligible,
                 key=lambda item: (item[2], float(item[0].get("confidence", 0.0))),
@@ -81,9 +86,8 @@ class HandPointerController:
             if self._pressed
             else pinch_ratio <= self.press_threshold
         )
-        active = bool(index_extended or pressed)
-        if not active:
-            return self._deactivate(timestamp_ms)
+        if not (index_extended or pressed):
+            return self._handle_dropout(timestamp_ms)
 
         landmarks = hand["landmarks"]
         target_x = min(1.0, max(0.0, self._coordinate(landmarks[8], "x")))
@@ -91,8 +95,10 @@ class HandPointerController:
         if self._x is None or self._y is None:
             self._x, self._y = target_x, target_y
         else:
-            self._x += self.smoothing * (target_x - self._x)
-            self._y += self.smoothing * (target_y - self._y)
+            distance = math.hypot(target_x - self._x, target_y - self._y)
+            alpha = min(0.94, max(self.smoothing, self.smoothing + distance * 1.5))
+            self._x += alpha * (target_x - self._x)
+            self._y += alpha * (target_y - self._y)
 
         handedness = str(hand.get("handedness") or "Unknown")
         state_changed = (
@@ -105,41 +111,54 @@ class HandPointerController:
         self._pressed = pressed
         self._track_id = controller_track_id
         self._handedness = handedness
+        self._last_valid_timestamp_ms = int(timestamp_ms)
 
         now = time.monotonic()
         if not state_changed and now - self._last_emit_at < self.min_update_interval:
             return None
         self._last_emit_at = now
+        return self._event(True, pressed, timestamp_ms)
+
+    def _handle_dropout(self, timestamp_ms: int) -> dict[str, Any] | None:
+        """Keep the last cursor position briefly, but never leave a drag pressed."""
+        if not self._active:
+            return None
+
+        release_event = None
+        if self._pressed:
+            self._pressed = False
+            release_event = self._event(True, False, timestamp_ms)
+            self._last_emit_at = time.monotonic()
+
+        last_valid = self._last_valid_timestamp_ms
+        if last_valid is not None and int(timestamp_ms) - last_valid <= self.dropout_grace_ms:
+            return release_event
+
+        return self._deactivate(timestamp_ms) or release_event
+
+    def _event(self, active: bool, pressed: bool, timestamp_ms: int) -> dict[str, Any]:
         return {
             "type": "pointer",
-            "active": True,
-            "pressed": pressed,
-            "x": round(self._x, 5),
-            "y": round(self._y, 5),
-            "track_id": controller_track_id,
-            "handedness": handedness,
-            "timestamp_ms": int(timestamp_ms),
-        }
-
-    def _deactivate(self, timestamp_ms: int) -> dict[str, Any] | None:
-        if not self._active and not self._pressed:
-            return None
-        event = {
-            "type": "pointer",
-            "active": False,
-            "pressed": False,
+            "active": bool(active),
+            "pressed": bool(pressed),
             "x": round(self._x if self._x is not None else 0.5, 5),
             "y": round(self._y if self._y is not None else 0.5, 5),
             "track_id": self._track_id,
             "handedness": self._handedness,
             "timestamp_ms": int(timestamp_ms),
         }
+
+    def _deactivate(self, timestamp_ms: int) -> dict[str, Any] | None:
+        if not self._active and not self._pressed:
+            return None
+        event = self._event(False, False, timestamp_ms)
         self._active = False
         self._pressed = False
         self._track_id = None
         self._handedness = None
         self._x = None
         self._y = None
+        self._last_valid_timestamp_ms = None
         self._last_emit_at = time.monotonic()
         return event
 
@@ -165,7 +184,7 @@ class HandPointerController:
         if denominator < 1e-6:
             return False
         cosine = max(-1.0, min(1.0, (ax * bx + ay * by) / denominator))
-        return math.degrees(math.acos(cosine)) >= 150.0
+        return math.degrees(math.acos(cosine)) >= 140.0
 
     @staticmethod
     def _coordinate(point: Any, axis: str) -> float:
