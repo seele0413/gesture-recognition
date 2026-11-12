@@ -161,3 +161,44 @@
   .trigger-editor { flex-wrap: wrap; }
   .edge-when-wrap { width: 100%; }
 }
+
+
+/* Camera-driven pointer for the workflow canvas. */
+.hand-pointer-cursor {
+  position: fixed;
+  z-index: 10000;
+  width: 22px;
+  height: 22px;
+  border: 2px solid #e0a63b;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .28);
+  box-shadow: 0 1px 8px rgba(0, 0, 0, .28), 0 0 0 3px rgba(224, 166, 59, .16);
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  transition: width .06s ease, height .06s ease, border-color .06s ease;
+}
+.hand-pointer-cursor::after {
+  position: absolute;
+  inset: 6px;
+  border-radius: 50%;
+  background: #e0a63b;
+  content: "";
+}
+.hand-pointer-cursor[data-pressed="true"] {
+  width: 17px;
+  height: 17px;
+  border-color: #3f8c59;
+  background: rgba(63, 140, 89, .18);
+}
+.hand-pointer-cursor[data-pressed="true"]::after { background: #3f8c59; }
+.hand-pointer-cursor[hidden] { display: none; }
+#pointerMode[data-state="active"] {
+  border-color: #4b7956;
+  color: #fff;
+  background: #4b7956;
+}
+#pointerMirror[aria-pressed="true"] {
+  border-color: #a67b36;
+  color: #76521d;
+  background: #fff7e8;
+}
