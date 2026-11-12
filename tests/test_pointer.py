@@ -23,7 +23,7 @@ def make_hand(*, track_id="person-1", handedness="Right", confidence=0.9, is_ok=
 
 class HandPointerControllerTests(unittest.TestCase):
     def setUp(self):
-        self.pointer = HandPointerController()
+        self.pointer = HandPointerController(max_update_hz=1000000)
         self.pointer.set_enabled(True)
 
     @staticmethod
