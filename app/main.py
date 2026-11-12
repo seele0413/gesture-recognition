@@ -40,6 +40,10 @@ class WorkflowDryRunRequest(BaseModel):
     context: dict[str, Any] = Field(default_factory=dict)
 
 
+class PointerModeRequest(BaseModel):
+    enabled: bool
+
+
 def _local_origin(origin: str | None) -> bool:
     if not origin:
         return True
@@ -191,6 +195,18 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
     @app.get("/api/actions")
     async def get_actions() -> dict:
         return {"actions": action_registry.describe()}
+
+    @app.get("/api/pointer/mode")
+    async def get_pointer_mode() -> dict:
+        status = manager.get_status()
+        return {
+            "enabled": status.get("pointer_mode_enabled", False),
+            "controller": status.get("controller", {"state": "unlocked", "track_id": None}),
+        }
+
+    @app.post("/api/pointer/mode")
+    async def set_pointer_mode(payload: PointerModeRequest) -> dict:
+        return manager.set_pointer_mode(payload.enabled)
 
     @app.get("/api/workflow-status")
     async def workflow_status() -> dict:
