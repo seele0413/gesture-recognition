@@ -187,7 +187,11 @@ class VisionProcessor:
             control_started = time.perf_counter()
             events = self._process_controller_hands(hands, timestamp_ms)
             controller = self.controller.snapshot()
-            pointer_hands = self._pointer_hands(hands, tracks, controller["track_id"])
+            pointer_hands = (
+                self._pointer_hands(hands, tracks, controller["track_id"])
+                if self.pointer_mode_enabled
+                else hands
+            )
             pointer_event = self.pointer.update(
                 pointer_hands, controller["state"], controller["track_id"], timestamp_ms
             )
