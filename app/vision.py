@@ -187,8 +187,9 @@ class VisionProcessor:
             control_started = time.perf_counter()
             events = self._process_controller_hands(hands, timestamp_ms)
             controller = self.controller.snapshot()
+            pointer_hands = self._pointer_hands(hands, tracks, controller["track_id"])
             pointer_event = self.pointer.update(
-                hands, controller["state"], controller["track_id"], timestamp_ms
+                pointer_hands, controller["state"], controller["track_id"], timestamp_ms
             )
             if pointer_event:
                 self.publish(pointer_event)
@@ -279,7 +280,12 @@ class VisionProcessor:
 
     @staticmethod
     def _associate_hand(
-        landmarks: list[Any], tracks: list[dict[str, Any]], max_distance: float = 0.16, ambiguity_margin: float = 0.025
+        landmarks: list[Any],
+        tracks: list[dict[str, Any]],
+        max_distance: float = 0.16,
+        ambiguity_margin: float = 0.025,
+        person_extent_factor: float = 0.26,
+        min_distance: float = 0.08,
     ) -> tuple[str | None, str]:
         if not landmarks:
             return None, "缺少手部关键点"
@@ -296,7 +302,7 @@ class VisionProcessor:
             distance_limit = max_distance
             if box and len(box) == 4:
                 person_extent = max(float(box[2]), float(box[3]))
-                distance_limit = min(max_distance, max(0.08, person_extent * 0.26))
+                distance_limit = min(max_distance, max(min_distance, person_extent * person_extent_factor))
             for wrist_index in (15, 16):
                 pose_wrist = pose[wrist_index]
                 if not VisionProcessor._landmark_visible(pose_wrist):
@@ -326,6 +332,36 @@ class VisionProcessor:
         if len(box_matches) > 1:
             return None, "多人手腕或人体框关联有歧义"
         return None, "未能关联到人体手腕或唯一人体框"
+
+    @staticmethod
+    def _pointer_hands(
+        hands: list[dict[str, Any]],
+        tracks: list[dict[str, Any]],
+        controller_track_id: str | None,
+    ) -> list[dict[str, Any]]:
+        """Use a slightly wider, ambiguity-checked wrist match for pointer-only input."""
+        if not controller_track_id:
+            return hands
+        pointer_hands = []
+        for hand in hands:
+            if hand.get("track_id") is not None or hand.get("is_ok"):
+                pointer_hands.append(hand)
+                continue
+            track_id, _reason = VisionProcessor._associate_hand(
+                hand.get("landmarks") or [],
+                tracks,
+                max_distance=0.24,
+                ambiguity_margin=0.04,
+                person_extent_factor=0.42,
+                min_distance=0.12,
+            )
+            if track_id == controller_track_id:
+                pointer_hand = dict(hand)
+                pointer_hand["track_id"] = track_id
+                pointer_hands.append(pointer_hand)
+            else:
+                pointer_hands.append(hand)
+        return pointer_hands
 
     @staticmethod
     def _landmark_visible(landmark: Any) -> bool:
