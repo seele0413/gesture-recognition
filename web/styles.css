@@ -217,6 +217,26 @@ svg { display: block; }
   pointer-events: none;
 }
 
+.scene-panel {
+  position: absolute;
+  z-index: 2;
+  left: clamp(20px, 5vw, 72px);
+  bottom: clamp(42px, 8vh, 96px);
+  width: min(640px, calc(100vw - 40px));
+  padding: 20px 24px;
+  border-left: 3px solid #a9c5b0;
+  color: #f7f7f2;
+  background: rgba(16, 20, 17, .82);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, .24);
+  pointer-events: none;
+}
+
+.scene-panel[hidden] { display: none; }
+.scene-panel h1 { margin: 0; font-size: 30px; font-weight: 650; line-height: 1.25; }
+.scene-panel p { margin: 8px 0 0; color: rgba(247, 247, 242, .82); font-size: 15px; line-height: 1.5; }
+.scene-panel .scene-notice { margin: 0 0 8px; color: #c1d8c6; font-size: 12px; }
+.scene-panel .scene-notice:empty { display: none; }
+
 .display-stage noscript { position: absolute; bottom: 24px; left: 32px; color: #fff; }
 
 /* Settings */
@@ -406,6 +426,9 @@ svg { display: block; }
   .camera-pip { top: 62px; right: 14px; width: clamp(148px, 31vw, 220px); }
   .pip-status { font-size: 10px; }
   .gesture-feedback { top: 54px; left: 16px; max-width: 45vw; font-size: 10px; }
+  .scene-panel { left: 16px; bottom: 34px; width: min(460px, calc(100vw - 32px)); padding: 14px 16px; }
+  .scene-panel h1 { font-size: 21px; }
+  .scene-panel p { font-size: 13px; }
   .play-overlay { min-height: 46px; gap: 9px; padding: 0 14px 0 10px; font-size: 13px; }
   .play-symbol { width: 25px; height: 25px; }
   .settings-header { min-height: 64px; padding: 9px 14px; }

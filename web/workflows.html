@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f1f3f0">
+    <title>康晋电气 · 工作流编排</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/static/styles.css?v=20261111-1">
+    <link rel="stylesheet" href="/static/workflows.css?v=20261111-1">
+    <script src="/static/workflows.js?v=20261111-1" defer></script>
+  </head>
+  <body class="workflow-page">
+    <header class="workflow-header">
+      <a class="workflow-brand" href="/">
+        <span class="settings-brand-mark">康</span>
+        <span><strong>展厅工作流</strong><small>康晋电气</small></span>
+      </a>
+      <div class="workflow-meta">
+        <select id="workflowSelect" aria-label="选择工作流"></select>
+        <input id="workflowName" maxlength="80" aria-label="工作流名称" placeholder="工作流名称">
+        <input id="workflowDescription" maxlength="500" aria-label="工作流描述" placeholder="描述">
+        <select id="workflowVersion" aria-label="工作流版本"></select>
+      </div>
+      <div class="workflow-actions">
+        <button id="newWorkflow" class="tool-button" type="button">新建</button>
+        <button id="copyWorkflow" class="tool-button" type="button" disabled>复制</button>
+        <button id="saveWorkflow" class="tool-button tool-primary" type="button" disabled>保存</button>
+        <button id="deleteWorkflow" class="tool-button tool-danger" type="button" disabled>删除</button>
+        <button id="validateWorkflow" class="tool-button" type="button" disabled>校验</button>
+        <button id="dryRunWorkflow" class="tool-button" type="button" disabled>模拟</button>
+        <button id="toggleWorkflow" class="tool-button" type="button" disabled>启用</button>
+        <a class="back-link" href="/settings">设置</a>
+      </div>
+    </header>
+
+    <main class="workflow-layout">
+      <aside class="workflow-library" aria-labelledby="libraryHeading">
+        <div class="section-title"><h1 id="libraryHeading">节点库</h1></div>
+        <div class="node-library-group">
+          <h2>逻辑</h2>
+          <button class="library-node" data-node-type="condition" type="button"><span class="node-mark mark-condition">?</span><span>条件分支</span></button>
+          <button class="library-node" data-node-type="delay" type="button"><span class="node-mark mark-delay">Ⅱ</span><span>延迟</span></button>
+          <button class="library-node" data-node-type="wait_event" type="button"><span class="node-mark mark-wait">◷</span><span>等待事件</span></button>
+          <button class="library-node" data-node-type="end" type="button"><span class="node-mark mark-end">■</span><span>结束</span></button>
+        </div>
+        <div id="actionLibrary" class="node-library-group">
+          <h2>动作</h2>
+          <p class="muted">正在读取动作…</p>
+        </div>
+      </aside>
+
+      <section class="workflow-editor" aria-label="工作流画布">
+        <div class="editor-toolbar">
+          <div class="trigger-editor">
+            <label for="triggerType">触发</label>
+            <select id="triggerType">
+              <option value="gesture_trigger">单个手势</option>
+              <option value="gesture_sequence_trigger">手势序列</option>
+              <option value="controller_locked">主控锁定</option>
+            </select>
+            <div id="triggerFields"></div>
+          </div>
+          <div class="canvas-tools">
+            <label class="edge-when-wrap" for="edgeWhen">连线条件
+              <select id="edgeWhen"><option value="">常规</option><option value="true">true</option><option value="false">false</option><option value="error">error</option></select>
+            </label>
+            <button id="linkMode" class="tool-button" type="button" aria-pressed="false">连线</button>
+            <button id="autoArrange" class="icon-tool" type="button" title="自动排列节点" aria-label="自动排列节点">↔</button>
+            <button id="zoomOut" class="icon-tool" type="button" title="缩小画布" aria-label="缩小画布">−</button>
+            <span id="zoomLabel" class="zoom-label">100%</span>
+            <button id="zoomIn" class="icon-tool" type="button" title="放大画布" aria-label="放大画布">+</button>
+          </div>
+        </div>
+        <div id="validationMessage" class="validation-message" role="status" aria-live="polite"></div>
+        <div id="canvasViewport" class="canvas-viewport">
+          <div id="canvasWorld" class="canvas-world">
+            <svg id="edgeLayer" class="edge-layer" aria-hidden="true">
+              <defs><marker id="edgeArrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z"></path></marker></defs>
+            </svg>
+            <div id="triggerBadge" class="trigger-badge">手势触发器</div>
+            <div id="canvasNodes" class="canvas-nodes"></div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="workflow-inspector" aria-labelledby="inspectorHeading">
+        <div class="section-title"><h2 id="inspectorHeading">节点参数</h2></div>
+        <div id="inspectorContent" class="inspector-content"><p class="muted">选择画布节点</p></div>
+        <div class="inspector-actions">
+          <button id="duplicateNode" class="tool-button" type="button" disabled>复制节点</button>
+          <button id="deleteNode" class="tool-button tool-danger" type="button" disabled>删除节点</button>
+        </div>
+      </aside>
+    </main>
+
+    <section class="workflow-runs" aria-labelledby="runsHeading">
+      <div class="runs-heading"><h2 id="runsHeading">运行记录</h2><span id="displayConnection" class="connection-pill" data-state="offline">展示页面未连接</span></div>
+      <div id="runList" class="run-list"><p class="muted">暂无运行记录</p></div>
+    </section>
+  </body>
+</html>

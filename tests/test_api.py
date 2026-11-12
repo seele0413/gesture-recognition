@@ -6,6 +6,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from app.main import create_app
+from app.workflow import new_workflow
 
 
 class ApiTests(unittest.TestCase):
@@ -144,6 +145,53 @@ class ApiTests(unittest.TestCase):
         )
         with self.assertRaises(StopAsyncIteration):
             asyncio.run(response.body_iterator.__anext__())
+
+    def test_workflow_crud_validation_dry_run_versions_and_trigger_conflict(self):
+        workflow = new_workflow("展示欢迎画面")
+        created = self.client.post("/api/workflows", json=workflow)
+        self.assertEqual(created.status_code, 201, created.text)
+        saved = created.json()["workflow"]
+        workflow_id = saved["id"]
+        self.assertEqual(saved["version"], 1)
+        self.assertTrue(self.client.post(f"/api/workflows/{workflow_id}/validate").json()["valid"])
+
+        dry_run = self.client.post(f"/api/workflows/{workflow_id}/dry-run", json={"context": {}})
+        self.assertEqual(dry_run.status_code, 200, dry_run.text)
+        self.assertEqual(dry_run.json()["run"]["status"], "success")
+        self.assertEqual(dry_run.json()["run"]["mode"], "dry_run")
+        self.assertTrue(all(step["status"] == "simulated" for step in dry_run.json()["run"]["steps"]))
+
+        copied = self.client.post(f"/api/workflows/{workflow_id}/copy")
+        self.assertEqual(copied.status_code, 201, copied.text)
+        copy_id = copied.json()["workflow"]["id"]
+        self.assertNotEqual(copy_id, workflow_id)
+        self.assertFalse(copied.json()["workflow"]["enabled"])
+
+        self.assertEqual(self.client.post(f"/api/workflows/{workflow_id}/enable").status_code, 200)
+        self.assertEqual(self.client.post(f"/api/workflows/{copy_id}/enable").status_code, 409)
+        updated = self.client.put(f"/api/workflows/{workflow_id}", json={**saved, "description": "更新"})
+        self.assertEqual(updated.status_code, 200, updated.text)
+        self.assertEqual(updated.json()["workflow"]["version"], 3)
+        self.assertEqual(len(self.client.get(f"/api/workflows/{workflow_id}/versions").json()["versions"]), 3)
+        self.assertEqual(self.client.post(f"/api/workflows/{workflow_id}/disable").status_code, 200)
+        self.assertEqual(self.client.delete(f"/api/workflows/{workflow_id}").status_code, 200)
+
+    def test_workflow_api_rejects_unregistered_actions_and_media_paths(self):
+        workflow = new_workflow("无效动作")
+        workflow["nodes"][0].update({"action": "video.load", "params": {"media_id": "..\\secret.mp4"}})
+        response = self.client.post("/api/workflows", json=workflow)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("不是允许的选项", response.text)
+        self.assertIn("video.load", {action["name"] for action in self.client.get("/api/actions").json()["actions"]})
+
+    def test_workflow_routes_and_page_are_local_and_available(self):
+        self.assertEqual(self.client.get("/workflows").status_code, 200)
+        self.assertIn("/api/workflows", self.client.get("/static/workflows.js").text)
+        self.assertEqual(
+            self.client.get("/api/media-assets").json()["media_assets"][0]["id"],
+            "company-promo",
+        )
+        self.assertEqual(self.client.get("/api/presentations").json()["presentations"], [])
 
 
 if __name__ == "__main__":
