@@ -103,7 +103,9 @@ function setPointerMirrorUi(enabled) {
 
 async function refreshPointerMode() {
   const response = await api("/api/pointer/mode");
+  const wasEnabled = pointerModeEnabled;
   setPointerModeUi(response.enabled);
+  if (wasEnabled && !pointerModeEnabled) releaseHandPointer();
 }
 
 async function togglePointerMode() {
@@ -1115,6 +1117,7 @@ ui.canvasViewport.addEventListener("drop", (event) => {
 setInterval(() => {
   refreshRuns().catch(() => {});
   refreshDisplayStatus().catch(() => {});
+  refreshPointerMode().catch(() => {});
 }, 3000);
 connectWorkflowEvents();
 refreshPointerMode().catch(() => {});
