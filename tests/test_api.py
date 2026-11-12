@@ -184,8 +184,25 @@ class ApiTests(unittest.TestCase):
         self.assertIn("不是允许的选项", response.text)
         self.assertIn("video.load", {action["name"] for action in self.client.get("/api/actions").json()["actions"]})
 
+    def test_pointer_mode_api_can_be_enabled_and_disabled(self):
+        initial = self.client.get("/api/pointer/mode")
+        self.assertEqual(initial.status_code, 200)
+        self.assertFalse(initial.json()["enabled"])
+
+        enabled = self.client.post("/api/pointer/mode", json={"enabled": True})
+        self.assertEqual(enabled.status_code, 200)
+        self.assertTrue(enabled.json()["enabled"])
+        self.assertTrue(self.client.get("/api/status").json()["pointer_mode_enabled"])
+
+        disabled = self.client.post("/api/pointer/mode", json={"enabled": False})
+        self.assertEqual(disabled.status_code, 200)
+        self.assertFalse(disabled.json()["enabled"])
+
     def test_workflow_routes_and_page_are_local_and_available(self):
         self.assertEqual(self.client.get("/workflows").status_code, 200)
+        workflow_page = self.client.get("/workflows").text
+        self.assertIn('id="pointerMode"', workflow_page)
+        self.assertIn('id="pointerMirror"', workflow_page)
         self.assertIn("/api/workflows", self.client.get("/static/workflows.js").text)
         self.assertEqual(
             self.client.get("/api/media-assets").json()["media_assets"][0]["id"],
