@@ -11,6 +11,7 @@ from typing import Any, Callable
 
 from app.control import GESTURES, GestureGate, build_controller_event, build_gesture_event
 from app.controller import ControllerLock, analyze_ok_gesture
+from app.pointer import HandPointerController
 from app.database import ControlStore
 from app.settings import MAX_INFERENCE_WIDTH, MODEL_DIR, MODEL_FILES
 from app.tracking import PoseTrackManager
@@ -58,6 +59,8 @@ class VisionProcessor:
         self.track_manager = PoseTrackManager()
         self.controller = ControllerLock()
         self.gate = GestureGate(confidence_threshold=store.get_gesture_confidence_threshold())
+        self.pointer = HandPointerController()
+        self.pointer_mode_enabled = False
         self.low_confidence_result_count = 0
         self.last_timestamp_ms = 0
 
@@ -183,8 +186,13 @@ class VisionProcessor:
 
             control_started = time.perf_counter()
             events = self._process_controller_hands(hands, timestamp_ms)
-            control_ms = (time.perf_counter() - control_started) * 1000
             controller = self.controller.snapshot()
+            pointer_event = self.pointer.update(
+                hands, controller["state"], controller["track_id"], timestamp_ms
+            )
+            if pointer_event:
+                self.publish(pointer_event)
+            control_ms = (time.perf_counter() - control_started) * 1000
             hand_diagnostics = [self._public_hand(hand) for hand in hands]
         diagnostics = {
             "hand_count": len(hands),
@@ -377,6 +385,9 @@ class VisionProcessor:
         with self.lock:
             changed = self.controller.unlock()
             self.gate.reset(preserve_cooldowns=True)
+            pointer_event = self.pointer.reset(self.last_timestamp_ms)
+            if pointer_event:
+                self.publish(pointer_event)
             if changed:
                 self._publish_controller("unlocked", "manual", self.last_timestamp_ms)
             return self.controller.snapshot()
@@ -385,6 +396,15 @@ class VisionProcessor:
         with self.lock:
             self.gate.set_confidence_threshold(threshold)
             return self.gate.confidence_threshold
+
+    def set_pointer_mode(self, enabled: bool) -> bool:
+        with self.lock:
+            self.pointer_mode_enabled = bool(enabled)
+            self.gate.reset(preserve_cooldowns=True)
+            pointer_event = self.pointer.set_enabled(self.pointer_mode_enabled, self.last_timestamp_ms)
+            if pointer_event:
+                self.publish(pointer_event)
+            return self.pointer_mode_enabled
 
     def _process_controller_hands(self, hands: list[dict[str, Any]], timestamp_ms: int) -> list[dict[str, Any]]:
         controller = self.controller.snapshot()
@@ -417,6 +437,14 @@ class VisionProcessor:
                     else:
                         hand["action_reason"] = "OK 未确认：" + hand["ok_reason"]
                         hand["reason_code"] = "waiting_for_controller_lock"
+            return []
+
+        if self.pointer_mode_enabled:
+            self.gate.reset()
+            for hand in hands:
+                if hand["track_id"] == track_id:
+                    hand["action_reason"] = "手势指针模式已启用，普通手势映射暂时暂停"
+                    hand["reason_code"] = "pointer_mode"
             return []
 
         mappings = self.store.get_mappings()
