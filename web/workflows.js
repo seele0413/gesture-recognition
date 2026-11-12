@@ -15,6 +15,8 @@ const ui = {
   triggerFields: document.getElementById("triggerFields"),
   edgeWhen: document.getElementById("edgeWhen"),
   linkMode: document.getElementById("linkMode"),
+  pointerMode: document.getElementById("pointerMode"),
+  pointerMirror: document.getElementById("pointerMirror"),
   autoArrange: document.getElementById("autoArrange"),
   zoomOut: document.getElementById("zoomOut"),
   zoomIn: document.getElementById("zoomIn"),
@@ -57,6 +59,17 @@ let linkSourceId = null;
 let zoom = 1;
 let activeRunId = null;
 const nodeStatuses = new Map();
+let pointerModeEnabled = false;
+let pointerMirrorX = false;
+let pointerPressed = false;
+let pointerDownTarget = null;
+let pointerDragNodeId = null;
+let pointerDownPoint = null;
+let pointerMoved = false;
+const handPointerCursor = make("div", "hand-pointer-cursor");
+handPointerCursor.hidden = true;
+handPointerCursor.setAttribute("aria-hidden", "true");
+document.body.append(handPointerCursor);
 
 async function api(path, options = {}) {
   const response = await fetch(path, { cache: "no-store", ...options, headers: { "Content-Type": "application/json", ...(options.headers || {}) } });
@@ -75,6 +88,134 @@ function make(tag, className, text) {
   return element;
 }
 
+function setPointerModeUi(enabled) {
+  pointerModeEnabled = Boolean(enabled);
+  ui.pointerMode.textContent = pointerModeEnabled ? "手势拖拽：开启" : "手势拖拽：关闭";
+  ui.pointerMode.setAttribute("aria-pressed", String(pointerModeEnabled));
+  ui.pointerMode.dataset.state = pointerModeEnabled ? "active" : "idle";
+}
+
+function setPointerMirrorUi(enabled) {
+  pointerMirrorX = Boolean(enabled);
+  ui.pointerMirror.textContent = pointerMirrorX ? "镜像：开启" : "镜像：关闭";
+  ui.pointerMirror.setAttribute("aria-pressed", String(pointerMirrorX));
+}
+
+async function refreshPointerMode() {
+  const response = await api("/api/pointer/mode");
+  setPointerModeUi(response.enabled);
+}
+
+async function togglePointerMode() {
+  ui.pointerMode.disabled = true;
+  try {
+    const response = await api("/api/pointer/mode", {
+      method: "POST",
+      body: JSON.stringify({ enabled: !pointerModeEnabled }),
+    });
+    setPointerModeUi(response.enabled);
+    if (!response.enabled) releaseHandPointer();
+    const controllerLocked = response.controller?.state === "locked";
+    setMessage(response.enabled
+      ? controllerLocked
+        ? "手势拖拽已开启：伸出食指移动，捏合抓取节点，松开释放"
+        : "手势拖拽已开启；请先在摄像头前完成 OK 主控锁定"
+      : "手势拖拽已关闭");
+  } catch (error) {
+    setMessage(error.message, "error");
+  } finally {
+    ui.pointerMode.disabled = false;
+  }
+}
+
+function pointerClientPoint(event) {
+  const rect = ui.canvasViewport.getBoundingClientRect();
+  const normalizedX = pointerMirrorX ? 1 - Number(event.x) : Number(event.x);
+  const normalizedY = Number(event.y);
+  return {
+    x: rect.left + Math.min(1, Math.max(0, normalizedX)) * rect.width,
+    y: rect.top + Math.min(1, Math.max(0, normalizedY)) * rect.height,
+  };
+}
+
+function releaseHandPointer() {
+  pointerPressed = false;
+  pointerDownTarget = null;
+  pointerDragNodeId = null;
+  pointerDownPoint = null;
+  pointerMoved = false;
+  handPointerCursor.hidden = true;
+  handPointerCursor.dataset.pressed = "false";
+}
+
+function beginHandPointerPress(clientX, clientY) {
+  pointerDownPoint = { x: clientX, y: clientY };
+  pointerMoved = false;
+  const target = document.elementFromPoint(clientX, clientY);
+  const nodeCard = target?.closest(".canvas-node");
+  if (nodeCard) {
+    const nodeId = nodeCard.dataset.nodeId;
+    if (ui.linkMode.getAttribute("aria-pressed") === "true") {
+      selectOrLink(nodeId);
+      pointerDownTarget = null;
+      return;
+    }
+    selectedNodeId = nodeId;
+    renderCanvas();
+    renderInspector();
+    pointerDragNodeId = nodeId;
+    pointerDownTarget = null;
+    return;
+  }
+  pointerDownTarget = target;
+}
+
+function moveHandPointerPress(clientX, clientY) {
+  if (!pointerPressed || !pointerDownPoint) return;
+  const distance = Math.hypot(clientX - pointerDownPoint.x, clientY - pointerDownPoint.y);
+  if (distance >= 7) pointerMoved = true;
+  if (pointerDragNodeId && pointerMoved) moveNode(pointerDragNodeId, clientX, clientY);
+}
+
+function endHandPointerPress() {
+  if (!pointerMoved && !pointerDragNodeId && pointerDownTarget instanceof HTMLElement) {
+    const target = pointerDownTarget.closest("button, a, [role='button'], input, select, textarea") || pointerDownTarget;
+    if (!target.matches(":disabled")) {
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) {
+        target.focus();
+      }
+      target.click();
+    }
+  }
+  pointerPressed = false;
+  pointerDownTarget = null;
+  pointerDragNodeId = null;
+  pointerDownPoint = null;
+  pointerMoved = false;
+  handPointerCursor.dataset.pressed = "false";
+}
+
+function handleHandPointer(event) {
+  if (!pointerModeEnabled) return;
+  if (!event.active || !Number.isFinite(Number(event.x)) || !Number.isFinite(Number(event.y))) {
+    releaseHandPointer();
+    return;
+  }
+  const point = pointerClientPoint(event);
+  handPointerCursor.hidden = false;
+  handPointerCursor.style.left = point.x + "px";
+  handPointerCursor.style.top = point.y + "px";
+  handPointerCursor.dataset.pressed = String(Boolean(event.pressed));
+
+  if (event.pressed && !pointerPressed) {
+    pointerPressed = true;
+    beginHandPointerPress(point.x, point.y);
+  } else if (event.pressed && pointerPressed) {
+    moveHandPointerPress(point.x, point.y);
+  } else if (!event.pressed && pointerPressed) {
+    endHandPointerPress();
+  }
+}
 function currentNode() {
   return workflow?.nodes.find((node) => node.id === selectedNodeId) || null;
 }
@@ -801,6 +942,16 @@ function connectWorkflowEvents() {
   socket.addEventListener("message", async (message) => {
     try {
       const event = JSON.parse(message.data);
+      if (event.type === "pointer") {
+        handleHandPointer(event);
+        return;
+      }
+      if (event.type === "controller" && event.state !== "locked") {
+        releaseHandPointer();
+      }
+      if (event.type === "stream" && event.state !== "running") {
+        releaseHandPointer();
+      }
       if (event.type === "workflow") {
         if (event.run_id && event.status === "pending") {
           activeRunId = event.run_id;
@@ -929,6 +1080,19 @@ ui.zoomIn.addEventListener("click", () => { zoom = Math.min(1.5, zoom + 0.1); up
 ui.zoomOut.addEventListener("click", () => { zoom = Math.max(0.6, zoom - 0.1); updateZoom(); });
 ui.duplicateNode.addEventListener("click", duplicateNode);
 ui.deleteNode.addEventListener("click", deleteNode);
+ui.pointerMode.addEventListener("click", () => togglePointerMode());
+ui.pointerMirror.addEventListener("click", () => setPointerMirrorUi(!pointerMirrorX));
+window.addEventListener("pagehide", () => {
+  if (pointerModeEnabled) {
+    fetch("/api/pointer/mode", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: false }),
+      keepalive: true,
+    }).catch(() => {});
+  }
+  releaseHandPointer();
+});
 
 ui.canvasViewport.addEventListener("dragover", (event) => event.preventDefault());
 ui.canvasViewport.addEventListener("drop", (event) => {
@@ -953,4 +1117,5 @@ setInterval(() => {
   refreshDisplayStatus().catch(() => {});
 }, 3000);
 connectWorkflowEvents();
+refreshPointerMode().catch(() => {});
 initialize();
