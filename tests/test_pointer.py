@@ -1,3 +1,4 @@
+import math
 import unittest
 from types import SimpleNamespace
 
@@ -52,12 +53,48 @@ class HandPointerControllerTests(unittest.TestCase):
         up = self.pointer.update([self.pinch(make_hand(), 0.62)], "locked", "person-1", 160)
         self.assertFalse(up["pressed"])
 
-    def test_missing_hand_emits_release(self):
+    def test_short_detection_dropout_keeps_cursor_visible(self):
+        first = self.pointer.update([make_hand()], "locked", "person-1", 100)
+        self.assertTrue(first["active"])
+        self.assertIsNone(self.pointer.update([], "locked", "person-1", 220))
+        recovered = self.pointer.update([make_hand()], "locked", "person-1", 260)
+        self.assertTrue(recovered["active"])
+        self.assertAlmostEqual(recovered["x"], 0.65, places=4)
+
+    def test_pressed_dropout_releases_drag_but_keeps_cursor_briefly(self):
         self.pointer.update([make_hand()], "locked", "person-1", 100)
         self.pointer.update([self.pinch(make_hand(), 0.52)], "locked", "person-1", 120)
         release = self.pointer.update([], "locked", "person-1", 140)
-        self.assertFalse(release["active"])
+        self.assertTrue(release["active"])
         self.assertFalse(release["pressed"])
+        self.assertIsNone(self.pointer.update([], "locked", "person-1", 300))
+        hidden = self.pointer.update([], "locked", "person-1", 500)
+        self.assertFalse(hidden["active"])
+        self.assertFalse(hidden["pressed"])
+
+    def test_cursor_hides_after_dropout_grace_expires(self):
+        self.pointer.update([make_hand()], "locked", "person-1", 100)
+        hidden = self.pointer.update([], "locked", "person-1", 451)
+        self.assertFalse(hidden["active"])
+
+    def test_more_sensitive_pinch_threshold(self):
+        hand = make_hand()
+        hand["landmarks"][4] = SimpleNamespace(x=0.72, y=0.50, z=0.0)
+        event = self.pointer.update([hand], "locked", "person-1", 100)
+        self.assertTrue(event["active"])
+        self.assertTrue(event["pressed"])
+
+    def test_relaxed_index_angle_keeps_pointer_active(self):
+        hand = make_hand()
+        angle = math.radians(35)
+        hand["landmarks"][8] = SimpleNamespace(
+            x=0.50 + 0.10 * math.cos(angle),
+            y=0.50 + 0.10 * math.sin(angle),
+            z=0.0,
+        )
+        event = self.pointer.update([hand], "locked", "person-1", 100)
+        self.assertIsNotNone(event)
+        self.assertTrue(event["active"])
 
     def test_ok_hand_is_not_used_as_drag_pointer(self):
         self.assertIsNone(self.pointer.update([make_hand(is_ok=True)], "locked", "person-1", 100))
