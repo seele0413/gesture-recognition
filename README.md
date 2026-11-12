@@ -38,7 +38,7 @@ Python Launcher 找不到兼容解释器时，可指定已安装的解释器：
 5. 手势须连续稳定至少 3 帧、分类置信度不低于设置门槛才触发；默认门槛为 0.60，可在设置页按 0.05 步长调整至 0.50～0.90，修改后立即应用并持久化；相同动作仍有 800 ms 冷却。设置页可修改映射并保存。
 6. 浏览器控制台输出 [gesture-control] 事件对象，包含临时 track_id、手势类别、置信度、左右手、时间戳、动作和 21 个归一化手部关键点。
 
-展厅工作流编辑器位于 `/workflows`，支持已确认手势触发多步网页/视频/PPT 动作、条件与失败分支、模拟运行和步骤日志。协议、节点参数及媒体/PPT 白名单配置见 [WORKFLOWS.md](WORKFLOWS.md)。
+展厅工作流编辑器位于 `/workflows`，支持已确认手势触发多步网页/视频/PPT 动作、条件与失败分支、模拟运行和步骤日志。编辑器另提供手势指针模式：主控锁定后，伸出食指移动光标，捏合并移动可拖动工作流节点，松开释放；仅控制本项目工作流画布，不模拟 Windows 系统鼠标。协议、节点参数及媒体/PPT 白名单配置见 [WORKFLOWS.md](WORKFLOWS.md)。
 
 默认播放器映射：
 
@@ -64,7 +64,8 @@ Python Launcher 找不到兼容解释器时，可指定已安装的解释器：
 - POST /api/controller/unlock：解除当前主控。
 - GET /api/mappings、PUT /api/mappings：读取或保存手势动作映射。
 - GET /api/recognition-settings、PUT /api/recognition-settings：读取或实时修改并保存手势分类置信度门槛。
-- /ws/events：推送主控状态与稳定手势事件。
+- /ws/events：推送主控状态、稳定手势和手势指针事件。
+- GET /api/pointer/mode、POST /api/pointer/mode：读取和开关手势指针模式。
 - /ws/display：主页唯一动作执行通道，按 command_id 确认。
 
 ## 数据与隐私
