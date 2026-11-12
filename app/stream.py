@@ -193,6 +193,7 @@ class StreamManager:
         self.store = store
         self.hub = hub
         self._confidence_threshold = store.get_gesture_confidence_threshold()
+        self._pointer_mode_enabled = False
         self.models_dir = models_dir
         self.capture_factory = capture_factory
         self.processor_factory = processor_factory
@@ -279,6 +280,7 @@ class StreamManager:
             return self.get_status()
 
     def stop(self) -> dict[str, Any]:
+        self.set_pointer_mode(False)
         with self._lock:
             thread = self._thread
             decoder = self._decoder
@@ -353,6 +355,22 @@ class StreamManager:
                     )
             return dict(self._controller)
 
+    def set_pointer_mode(self, enabled: bool) -> dict[str, Any]:
+        with self._lock:
+            self._pointer_mode_enabled = bool(enabled)
+            processor = self._processor
+            controller = processor.controller.snapshot() if processor else dict(self._controller)
+        setter = getattr(processor, "set_pointer_mode", None) if processor else None
+        if setter:
+            setter(self._pointer_mode_enabled)
+        elif not self._pointer_mode_enabled:
+            self.hub.publish_from_thread({
+                "type": "pointer", "active": False, "pressed": False,
+                "x": 0.5, "y": 0.5, "track_id": None, "handedness": None,
+                "timestamp_ms": int(time.monotonic() * 1000),
+            })
+        return {"enabled": self._pointer_mode_enabled, "controller": controller}
+
     def get_status(self) -> dict[str, Any]:
         with self._lock:
             processor = self._processor
@@ -377,6 +395,7 @@ class StreamManager:
             return {
                 "state": self._state,
                 "error": self._error,
+                "pointer_mode_enabled": self._pointer_mode_enabled,
                 "frame_width": self._frame_width,
                 "frame_height": self._frame_height,
                 "frame_ready": frame_fresh,
@@ -564,6 +583,9 @@ class StreamManager:
                         apply_threshold = getattr(processor, "set_confidence_threshold", None)
                         if apply_threshold:
                             apply_threshold(self.store.get_gesture_confidence_threshold())
+                        apply_pointer_mode = getattr(processor, "set_pointer_mode", None)
+                        if apply_pointer_mode:
+                            apply_pointer_mode(self._pointer_mode_enabled)
                         self._processor = processor
                         self._state = "running"
                         self._error = None
