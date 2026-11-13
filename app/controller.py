@@ -44,13 +44,17 @@ def _finger_cosine(
     return max(-1.0, min(1.0, cosine))
 
 
-def _is_extended(landmarks: Sequence[Any], mcp: int, pip: int, tip: int) -> bool:
-    cosine = _finger_cosine(landmarks, mcp, pip, tip, 1.0)
+def _is_extended(
+    landmarks: Sequence[Any], mcp: int, pip: int, tip: int, palm_width: float
+) -> bool:
+    cosine = _finger_cosine(landmarks, mcp, pip, tip, palm_width)
     return cosine is not None and cosine >= V_FINGER_EXTENSION_COSINE
 
 
-def _is_folded(landmarks: Sequence[Any], mcp: int, pip: int, tip: int) -> bool:
-    cosine = _finger_cosine(landmarks, mcp, pip, tip, 1.0)
+def _is_folded(
+    landmarks: Sequence[Any], mcp: int, pip: int, tip: int, palm_width: float
+) -> bool:
+    cosine = _finger_cosine(landmarks, mcp, pip, tip, palm_width)
     return cosine is not None and cosine < V_FINGER_FOLDED_COSINE
 
 
@@ -66,9 +70,9 @@ def analyze_v_gesture(landmarks: Sequence[Any]) -> dict[str, Any]:
     if palm_width < V_MIN_PALM_WIDTH:
         return {"is_v": False, "reason": "手掌在画面中过小，建议靠近摄像头或提高画面分辨率", "spread_ratio": None}
 
-    if not _is_extended(landmarks, 5, 6, 8):
+    if not _is_extended(landmarks, 5, 6, 8, palm_width):
         return {"is_v": False, "reason": "食指未充分伸展", "spread_ratio": None}
-    if not _is_extended(landmarks, 9, 10, 12):
+    if not _is_extended(landmarks, 9, 10, 12, palm_width):
         return {"is_v": False, "reason": "中指未充分伸展", "spread_ratio": None}
 
     spread_ratio = _distance(points[8], points[12]) / palm_width
@@ -78,9 +82,9 @@ def analyze_v_gesture(landmarks: Sequence[Any]) -> dict[str, Any]:
             "reason": f"食指与中指分开幅度不足（{spread_ratio:.2f} 掌宽）",
             "spread_ratio": round(spread_ratio, 3),
         }
-    if not _is_folded(landmarks, 13, 14, 16):
+    if not _is_folded(landmarks, 13, 14, 16, palm_width):
         return {"is_v": False, "reason": "无名指需要弯曲", "spread_ratio": round(spread_ratio, 3)}
-    if not _is_folded(landmarks, 17, 18, 20):
+    if not _is_folded(landmarks, 17, 18, 20, palm_width):
         return {"is_v": False, "reason": "小指需要弯曲", "spread_ratio": round(spread_ratio, 3)}
 
     return {"is_v": True, "reason": "V 字手势几何符合", "spread_ratio": round(spread_ratio, 3)}
