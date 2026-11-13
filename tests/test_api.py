@@ -34,8 +34,19 @@ class ApiTests(unittest.TestCase):
         self.assertIn("decoder", payload)
         self.assertEqual(payload["vision"]["hand_count"], 0)
         self.assertEqual(payload["controller"]["state"], "unlocked")
+        self.assertIsNone(payload["controller"]["controller_id"])
+        self.assertIsNone(payload["controller"]["track_id"])
+        self.assertEqual(payload["controller"]["suspect_grace_ms"], 800)
+        self.assertEqual(payload["controller"]["reacquire_timeout_ms"], 4000)
         self.assertNotIn("candidates", payload)
         self.assertNotIn("target_id", payload)
+
+    def test_controller_session_accepts_recovery_states(self):
+        store = self.client.app.state.control_store
+        store.begin_session("controller-recovery-test", 100)
+        store.update_controller("controller-recovery-test", "suspect", "person-1", 200)
+        store.update_controller("controller-recovery-test", "reacquiring", "person-1", 1000)
+        store.update_controller("controller-recovery-test", "locked", "person-3", 1100)
 
     def test_identity_and_manual_target_endpoints_are_removed(self):
         self.assertEqual(self.client.get("/api/identities").status_code, 404)
