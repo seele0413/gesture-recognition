@@ -211,7 +211,7 @@ class StreamManager:
         self._frame_height = 0
         self._vision = _empty_vision()
         self._tracks: list[dict[str, Any]] = []
-        self._controller: dict[str, Any] = {"state": "unlocked", "track_id": None, "lost_since_ms": None}
+        self._controller: dict[str, Any] = {"state": "unlocked", "controller_id": None, "track_id": None, "lost_since_ms": None}
         self._session_id: str | None = None
         self._frame_sequence = 0
         self._last_frame_at_ms: int | None = None
@@ -246,7 +246,7 @@ class StreamManager:
             self._error = None
             self._latest_jpeg = None
             self._tracks = []
-            self._controller = {"state": "unlocked", "track_id": None, "lost_since_ms": None}
+            self._controller = {"state": "unlocked", "controller_id": None, "track_id": None, "lost_since_ms": None}
             self._frame_width = 0
             self._frame_height = 0
             self._vision = _empty_vision()
@@ -323,7 +323,7 @@ class StreamManager:
             self._preview_fps = 0.0
             self._ai_fps = 0.0
             self._last_preview_encode_at = None
-            self._controller = {"state": "unlocked", "track_id": None, "lost_since_ms": None}
+            self._controller = {"state": "unlocked", "controller_id": None, "track_id": None, "lost_since_ms": None}
             status = self.get_status()
         if was_locked:
             self.hub.publish_from_thread(
@@ -343,7 +343,7 @@ class StreamManager:
                 self._controller = processor.unlock_controller()
             else:
                 was_locked = self._controller["state"] != "unlocked"
-                self._controller = {"state": "unlocked", "track_id": None, "lost_since_ms": None}
+                self._controller = {"state": "unlocked", "controller_id": None, "track_id": None, "lost_since_ms": None}
                 if was_locked:
                     self.hub.publish_from_thread(
                         build_controller_event(
@@ -591,7 +591,7 @@ class StreamManager:
                         self._error = None
                     if was_reconnecting:
                         self.hub.publish_from_thread(
-                            {"type": "stream", "state": "running", "message": "摄像头已恢复，请重新做 OK 手势锁定主控。"}
+                            {"type": "stream", "state": "running", "message": "摄像头已恢复，请重新做比耶手势锁定主控。"}
                         )
 
                     max_width = getattr(processor, "max_inference_width", PREVIEW_MAX_WIDTH)
@@ -656,7 +656,7 @@ class StreamManager:
                     reconnect_message = (
                         "连续多帧视觉处理失败，正在重新初始化解码器和识别模型。"
                         if isinstance(error, _VisionProcessingFailure)
-                        else "视频流中断，正在自动重连。请检查摄像头和网络；恢复后需要重新做 OK 手势锁定。"
+                        else "视频流中断，正在自动重连。请检查摄像头和网络；恢复后需要重新做比耶手势锁定。"
                     )
                     self._enter_reconnecting(
                         session_id, reconnect_attempt, retry_delay, reconnect_message
@@ -700,7 +700,7 @@ class StreamManager:
                 self._processor = None
                 self._tracks = []
                 self._vision = _empty_vision()
-                self._controller = {"state": "unlocked", "track_id": None, "lost_since_ms": None}
+                self._controller = {"state": "unlocked", "controller_id": None, "track_id": None, "lost_since_ms": None}
                 self._latest_jpeg = None
                 self._last_frame_at_ms = None
                 self._last_preview_frame_at_ms = None
@@ -718,7 +718,7 @@ class StreamManager:
             controller = processor.controller.snapshot() if processor else dict(self._controller)
             was_locked = controller["state"] != "unlocked"
             self._state = "reconnecting"
-            self._error = message or "视频流中断，正在自动重连。请检查摄像头和网络；恢复后需要重新做 OK 手势。"
+            self._error = message or "视频流中断，正在自动重连。请检查摄像头和网络；恢复后需要重新做比耶手势。"
             self._latest_jpeg = None
             self._frame_width = 0
             self._frame_height = 0
@@ -737,7 +737,7 @@ class StreamManager:
             self._vision_frame_sequence = 0
             self._tracks = []
             self._vision = _empty_vision()
-            self._controller = {"state": "unlocked", "track_id": None, "lost_since_ms": None}
+            self._controller = {"state": "unlocked", "controller_id": None, "track_id": None, "lost_since_ms": None}
             self._processor = None
             self._decoder = None
             self._session_id = None
