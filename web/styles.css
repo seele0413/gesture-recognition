@@ -380,6 +380,8 @@ svg { display: block; }
 .controller-state-indicator { width: 8px; height: 8px; border-radius: 50%; background: #929b92; }
 .controller-state[data-state="locked"] .controller-state-indicator { background: #518862; }
 .controller-state[data-state="lost"] .controller-state-indicator { background: #bb715f; }
+.controller-state[data-state="suspect"] .controller-state-indicator { background: #c29b48; }
+.controller-state[data-state="reacquiring"] .controller-state-indicator { background: #6f91b8; }
 .controller-state strong { color: #303831; font-size: 13px; font-weight: 620; }
 .controller-state p { margin: 3px 0 0; color: #798179; font-size: 11px; }
 .controller-track-id { color: #6c776d; font-size: 11px; font-variant-numeric: tabular-nums; }
