@@ -110,7 +110,7 @@ class WorkflowEngine:
             self._controller_track_id = event.get("track_id") if self._controller_state == "locked" else None
             self._notify_event_waiters(event)
             if self._controller_state != "locked":
-                self.cancel_active("主控丢失或解除，已取消后续工作流动作")
+                self.cancel_active("主控轨迹暂时丢失或解除，已取消后续工作流动作")
             elif event.get("reason") in {"ok_gesture", "stream_reconnected"}:
                 for definition in self.store.get_workflows(enabled_only=True):
                     if definition["trigger"].get("type") == "controller_locked":
