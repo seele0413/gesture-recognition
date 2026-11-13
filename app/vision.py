@@ -471,7 +471,7 @@ class VisionProcessor:
             state=state,
             track_id=controller_snapshot["track_id"],
             controller_id=controller_snapshot["controller_id"],
-            timestamp_ms=int(time.time() * 1000),
+            timestamp_ms=int(timestamp_ms),
             reason=reason,
         )
         if self.session_id:
