@@ -18,16 +18,6 @@ MAX_CONTROLLER_SPEED = 1.5
 SIGNATURE_LANDMARKS = (11, 12, 13, 14, 15, 16, 23, 24)
 
 
-def _finite_pair(value: Any) -> tuple[float, float] | None:
-    try:
-        x, y = float(value[0]), float(value[1])
-    except (TypeError, ValueError, IndexError, KeyError):
-        return None
-    if not math.isfinite(x) or not math.isfinite(y):
-        return None
-    return x, y
-
-
 def _landmark_visible(point: Any) -> bool:
     visibility = getattr(point, "visibility", 1.0)
     presence = getattr(point, "presence", 1.0)
@@ -124,7 +114,6 @@ class ControllerIdentityManager:
         if elapsed_ms >= self.suspect_grace_ms:
             candidate = self._find_reacquisition_candidate(tracks, now_ms)
             if candidate is not None:
-                old_track_id = self.track_id
                 self.track_id = str(candidate["track_id"])
                 self.state = "locked"
                 self.lost_since_ms = None
