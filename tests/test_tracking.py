@@ -50,6 +50,14 @@ class PoseTrackTests(unittest.TestCase):
         self.assertLess(predicted_cost, unpredicted_cost)
         self.assertEqual(resumed[0]["track_id"], "person-1")
 
+    def test_track_first_seen_timestamp_is_preserved_across_updates(self):
+        tracker = PoseTrackManager()
+        first = tracker.update([pose(0.5)], 640, 480, 100)
+        self.assertEqual(first[0]["first_seen_ms"], 100)
+        second = tracker.update([pose(0.51)], 640, 480, 200)
+        self.assertEqual(second[0]["track_id"], first[0]["track_id"])
+        self.assertEqual(second[0]["first_seen_ms"], 100)
+
     def test_track_output_contains_pixel_box_and_ambiguity_state(self):
         tracker = PoseTrackManager()
         result = tracker.update([pose(0.5)], 640, 480, 100)
