@@ -184,6 +184,7 @@ function renderTracks() {
     + " · 手部 " + (vision.hand_count || 0)
     + " · 比耶 " + (vision.lock_gesture_count || 0)
     + " · 已关联比耶 " + (vision.associated_lock_gesture_count || 0)
+    + " · 手部输入 " + (vision.hand_inference_width || 0) + "px"
     + " · 低置信 " + (vision.low_confidence_hand_count || 0)
     + " · 门槛 " + Math.round((vision.confidence_threshold || 0.6) * 100) + "%";
   const visionMs = appState.last_vision_ms;
