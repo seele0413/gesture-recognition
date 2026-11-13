@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from app.control import GESTURES, GestureGate, build_controller_event, build_gesture_event
-from app.controller import ControllerLock, analyze_ok_gesture
+from app.controller import ControllerLock, analyze_v_gesture
 from app.pointer import HandPointerController
 from app.database import ControlStore
 from app.settings import MAX_INFERENCE_WIDTH, MODEL_DIR, MODEL_FILES
@@ -72,9 +72,9 @@ class VisionProcessor:
                     base_options=mp.tasks.BaseOptions(model_asset_path=runtime_models["gesture"]),
                     running_mode=vision.RunningMode.VIDEO,
                     num_hands=self.num_hands,
-                    min_hand_detection_confidence=0.45,
-                    min_hand_presence_confidence=0.45,
-                    min_tracking_confidence=0.45,
+                    min_hand_detection_confidence=0.40,
+                    min_hand_presence_confidence=0.40,
+                    min_tracking_confidence=0.40,
                 )
             )
             self.pose_landmarker = vision.PoseLandmarker.create_from_options(
@@ -172,11 +172,28 @@ class VisionProcessor:
                 for hand in hands
             )
             self.low_confidence_result_count += low_confidence_count
-            lock_candidates = [hand["track_id"] for hand in hands if hand["is_ok"]]
+            lock_candidates: list[str | None] = []
+            for hand in hands:
+                if not hand["is_lock_gesture"]:
+                    continue
+                lock_track_id = hand["track_id"]
+                if lock_track_id is None:
+                    lock_track_id, lock_association_reason = self._associate_hand(
+                        hand["landmarks"],
+                        tracks,
+                        max_distance=0.24,
+                        ambiguity_margin=0.04,
+                        person_extent_factor=0.42,
+                        min_distance=0.12,
+                    )
+                    hand["lock_association_reason"] = lock_association_reason
+                else:
+                    hand["lock_association_reason"] = hand["association_reason"]
+                lock_candidates.append(lock_track_id)
             lock_result = self.controller.observe_lock_candidates(lock_candidates, timestamp_ms)
             if lock_result == "locked":
                 self.gate.reset(preserve_cooldowns=True)
-                self._publish_controller("locked", "ok_gesture", timestamp_ms)
+                self._publish_controller("locked", "v_gesture", timestamp_ms)
 
             transitions = self.controller.update_tracking(visible_track_ids, timestamp_ms)
             if transitions:
@@ -201,9 +218,14 @@ class VisionProcessor:
             hand_diagnostics = [self._public_hand(hand) for hand in hands]
         diagnostics = {
             "hand_count": len(hands),
-            "ok_hand_count": sum(hand["is_ok"] for hand in hands),
+            "lock_gesture_count": sum(hand["is_lock_gesture"] for hand in hands),
             "associated_hand_count": sum(hand["track_id"] is not None for hand in hands),
-            "associated_ok_count": sum(hand["is_ok"] and hand["track_id"] is not None for hand in hands),
+            "associated_lock_gesture_count": sum(
+                hand["is_lock_gesture"]
+                and hand.get("lock_association_reason", hand["association_reason"])
+                not in {"未能关联到人体手腕或唯一人体框", "多人手腕或人体框关联有歧义", "多人手腕关联有歧义"}
+                for hand in hands
+            ),
             "hands": hand_diagnostics,
             "lock_progress": controller["lock_progress"],
             "last_gesture": hand_diagnostics[0] if hand_diagnostics else None,
@@ -255,7 +277,7 @@ class VisionProcessor:
                 label = None
             confidence = float(category.score) if category else 0.0
             track_id, association_reason = self._associate_hand(landmarks, tracks)
-            ok_geometry = analyze_ok_gesture(landmarks)
+            lock_geometry = analyze_v_gesture(landmarks)
             hands.append(
                 {
                     "landmarks": landmarks,
@@ -265,9 +287,10 @@ class VisionProcessor:
                     "gesture": label,
                     "confidence": confidence,
                     "confidence_threshold": threshold,
-                    "is_ok": ok_geometry["is_ok"],
-                    "ok_reason": ok_geometry["reason"],
-                    "tip_ratio": ok_geometry["tip_ratio"],
+                    "is_lock_gesture": lock_geometry["is_v"],
+                    "lock_gesture_reason": lock_geometry["reason"],
+                    "lock_spread_ratio": lock_geometry["spread_ratio"],
+                    "lock_association_reason": association_reason,
                     "action": "none",
                     "action_reason": "等待主控锁定",
                     "reason_code": "waiting",
@@ -391,9 +414,10 @@ class VisionProcessor:
             "confidence": hand["confidence"],
             "track_id": hand["track_id"],
             "association_reason": hand["association_reason"],
-            "is_ok": hand["is_ok"],
-            "ok_reason": hand["ok_reason"],
-            "tip_ratio": hand["tip_ratio"],
+            "is_lock_gesture": hand["is_lock_gesture"],
+            "lock_gesture_reason": hand["lock_gesture_reason"],
+            "lock_spread_ratio": hand["lock_spread_ratio"],
+            "lock_association_reason": hand.get("lock_association_reason", hand["association_reason"]),
             "action": hand["action"],
             "action_reason": hand["action_reason"],
             "reason_code": hand["reason_code"],
@@ -455,14 +479,15 @@ class VisionProcessor:
                 if controller["state"] == "lost":
                     hand["action_reason"] = "主控轨迹暂时丢失，控制已暂停"
                     hand["reason_code"] = "master_track_lost"
-                elif hand["is_ok"] and hand["track_id"]:
+                elif hand["is_lock_gesture"] and hand["track_id"]:
                     hand["action_reason"] = (
-                        f"OK 已确认，锁定进度 {controller['lock_progress']}/"
-                        f"{controller['lock_required_frames']} 帧"
+                        f"比耶手势已识别，锁定进度 "
+                        f"{controller['lock_progress']}/{controller['lock_required_frames']} "
+                        f"（最近 {controller['lock_window_frames']} 帧）"
                     )
                     hand["reason_code"] = "locking_controller"
-                elif hand["is_ok"]:
-                    hand["action_reason"] = hand["association_reason"]
+                elif hand["is_lock_gesture"]:
+                    hand["action_reason"] = hand.get("lock_association_reason", hand["association_reason"])
                     hand["reason_code"] = "hand_not_associated"
                 else:
                     if hand["gesture"] not in GESTURES:
@@ -475,7 +500,7 @@ class VisionProcessor:
                         )
                         hand["reason_code"] = "low_confidence"
                     else:
-                        hand["action_reason"] = "OK 未确认：" + hand["ok_reason"]
+                        hand["action_reason"] = "比耶手势未确认：" + hand["lock_gesture_reason"]
                         hand["reason_code"] = "waiting_for_controller_lock"
             return []
 
@@ -495,9 +520,9 @@ class VisionProcessor:
                 hand["action_reason"] = "手未关联到当前主控人"
                 hand["reason_code"] = "hand_not_associated"
                 continue
-            if hand["is_ok"]:
-                hand["action_reason"] = "OK 仅用于锁定主控，不执行网页动作"
-                hand["reason_code"] = "ok_lock_gesture"
+            if hand["is_lock_gesture"] or hand["gesture"] == "Victory":
+                hand["action_reason"] = "比耶手势保留用于主控锁定，不执行普通网页动作"
+                hand["reason_code"] = "controller_lock_gesture"
                 continue
             handedness = hand["handedness"]
             gesture = hand["gesture"]
