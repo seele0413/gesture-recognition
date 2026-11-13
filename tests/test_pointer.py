@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from app.pointer import HandPointerController
 
 
-def make_hand(*, track_id="person-1", handedness="Right", confidence=0.9, is_ok=False):
+def make_hand(*, track_id="person-1", handedness="Right", confidence=0.9, is_lock_gesture=False):
     points = [SimpleNamespace(x=0.5, y=0.5, z=0.0) for _ in range(21)]
     points[5] = SimpleNamespace(x=0.40, y=0.50, z=0.0)
     points[6] = SimpleNamespace(x=0.50, y=0.50, z=0.0)
@@ -17,7 +17,7 @@ def make_hand(*, track_id="person-1", handedness="Right", confidence=0.9, is_ok=
         "handedness": handedness,
         "confidence": confidence,
         "gesture": "Pointing_Up",
-        "is_ok": is_ok,
+        "is_lock_gesture": is_lock_gesture,
         "landmarks": points,
     }
 
@@ -97,7 +97,7 @@ class HandPointerControllerTests(unittest.TestCase):
         self.assertTrue(event["active"])
 
     def test_ok_hand_is_not_used_as_drag_pointer(self):
-        self.assertIsNone(self.pointer.update([make_hand(is_ok=True)], "locked", "person-1", 100))
+        self.assertIsNone(self.pointer.update([make_hand(is_lock_gesture=True)], "locked", "person-1", 100))
 
     def test_disabling_pointer_releases_active_state(self):
         self.pointer.update([make_hand()], "locked", "person-1", 100)
