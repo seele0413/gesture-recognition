@@ -70,7 +70,7 @@ class VGestureTests(unittest.TestCase):
 
 class ControllerLockTests(unittest.TestCase):
     def test_three_v_detections_within_five_frames_lock_same_person(self):
-        lock = ControllerLock()
+        lock = ControllerLock(stable_frames=3)
         self.assertIsNone(lock.observe_lock_candidates(["person-1"], 100))
         self.assertEqual(lock.snapshot()["lock_progress"], 1)
         self.assertIsNone(lock.observe_lock_candidates([], 133))
@@ -96,7 +96,7 @@ class ControllerLockTests(unittest.TestCase):
         self.assertEqual(lock.snapshot()["state"], "unlocked")
 
     def test_switching_candidate_person_resets_lock_progress(self):
-        lock = ControllerLock()
+        lock = ControllerLock(stable_frames=3)
         self.assertIsNone(lock.observe_lock_candidates(["person-1"], 100))
         self.assertIsNone(lock.observe_lock_candidates(["person-1"], 133))
         self.assertEqual(lock.snapshot()["lock_progress"], 2)
