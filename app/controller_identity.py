@@ -97,6 +97,7 @@ class ControllerIdentityManager:
         )
         if current is not None:
             was_missing = self.state in {"suspect", "reacquiring"}
+            self._reset_reacquire_candidate()
             self.state = "locked"
             self.lost_since_ms = None
             if was_missing:
@@ -155,6 +156,7 @@ class ControllerIdentityManager:
             return [("unlocked", "track_timeout")]
         if self.track_id in visible_track_ids:
             was_missing = self.state in {"suspect", "reacquiring"}
+            self._reset_reacquire_candidate()
             self.state = "locked"
             self.lost_since_ms = None
             if was_missing:
