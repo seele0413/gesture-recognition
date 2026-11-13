@@ -25,6 +25,8 @@ flowchart LR
 
 工作流编辑器提供独立的“手势拖拽”开关。开启后，只有已锁定主控人员的手部可以控制指针；伸出食指移动光标，拇指与食指捏合按下，保持捏合移动可拖动工作流节点，松开完成放置。编辑器还提供横向镜像开关，用于适配不同摄像头安装方向。
 
+主控生命周期包含 `unlocked`、`locked`、`suspect` 和 `reacquiring`。人体轨迹首次漏检时进入 `suspect`，默认保留 650 ms；持续不可见后进入 `reacquiring`，总恢复窗口默认 3500 ms。恢复期间暂停普通手势、释放手势指针并取消正在执行的展示工作流；同一 `track_id` 在窗口内重新出现后恢复原 `controller_id` 对应的主控会话。超过窗口才自动解锁。新人员在恢复期间不能通过比耶手势抢占控制权。
+
 指针数据由 MediaPipe 21 点关键点计算，后端使用食指指尖坐标、掌宽归一化捏合距离、双阈值迟滞和自适应指数平滑。当前默认捏合按下/释放阈值为 0.36/0.50，食指伸展夹角门槛为 140°，指针事件最高推送频率为 45 Hz。短暂漏检会保留最后一个光标位置最多 350 ms；若漏检发生在拖拽期间，会立即释放按压状态，避免节点被一直拖住。指针模式会对主控手增加一次更宽但仍经过多人歧义检查的手腕关联尝试。指针事件经 `/ws/events` 单独发布，不进入工作流动作执行通道。启用指针模式时暂停普通手势映射，避免移动和捏合误触发播放器动作；比耶主控锁定仍保留。主控解除或视频流断开时立即释放拖拽状态。
 
 当前网页拖拽实现范围是本项目 `/workflows` 画布中的节点；不会模拟 Windows 系统鼠标，也不承诺驱动任意第三方网页、浏览器原生文件拖放或跨域 iframe。
@@ -69,7 +71,7 @@ flowchart LR
 | `action` | `action`、`params`、`timeout_ms` 100～60000、`on_error` (`stop` / `continue` / `branch`)、`retries` 0～2 |
 | `condition` | `params.field` 只可为 gesture、confidence、handedness、target_id、action；比较方式 eq/ne/gt/gte/lt/lte/in |
 | `delay` | `params.delay_ms` 0～30000 |
-| `wait_event` | 等待 controller_locked、controller_lost 或指定内置 gesture；支持 `timeout_ms` |
+| `wait_event` | 等待 controller_locked、controller_lost（suspect、reacquiring 或 unlocked）或指定内置 gesture；支持 `timeout_ms` |
 | `end` | 空 params，无后继 |
 
 画布位置保存在节点的可选 `position: {"x": number, "y": number}`，范围 0～5000。编辑器参数控件直接读取 `GET /api/actions` 的注册 Schema，不执行或保存用户代码。
