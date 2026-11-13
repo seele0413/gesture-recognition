@@ -160,6 +160,18 @@ class ControllerLockTests(unittest.TestCase):
         self.assertEqual(lock.snapshot()["controller_id"], controller_id)
         self.assertEqual(lock.snapshot()["state"], "suspect")
 
+    def test_verified_track_rebinding_preserves_controller_session(self):
+        lock = ControllerLock(stable_frames=1, window_frames=1)
+        lock.observe_lock_candidates(["person-1"], 100)
+        controller_id = lock.snapshot()["controller_id"]
+        lock.update_tracking(set(), 200)
+        self.assertFalse(lock.rebind_track("person-2"))
+        self.assertEqual(lock.snapshot()["track_id"], "person-1")
+        self.assertTrue(lock.rebind_track("person-2", identity_confirmed=True))
+        self.assertEqual(lock.snapshot()["state"], "locked")
+        self.assertEqual(lock.snapshot()["track_id"], "person-2")
+        self.assertEqual(lock.snapshot()["controller_id"], controller_id)
+
     def test_manual_unlock_clears_controller_identity_and_target(self):
         lock = ControllerLock(stable_frames=1, window_frames=1)
         lock.observe_lock_candidates(["person-1"], 100)
