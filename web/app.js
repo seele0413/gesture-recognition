@@ -4,7 +4,7 @@ const GESTURES = [
   ["Thumb_Up", "竖拇指"],
   ["Thumb_Down", "拇指向下"],
   ["Pointing_Up", "食指向上"],
-  ["Victory", "V 字手势"],
+  ["Victory", "比耶手势（主控锁定）"],
   ["ILoveYou", "我爱你手势"],
 ];
 
@@ -112,7 +112,7 @@ function drawTracks() {
   for (const hand of appState.vision?.hands || []) {
     const points = hand.landmarks || [];
     if (points.length !== 21) continue;
-    const color = hand.is_ok ? "#d7bc74" : "#77c7cb";
+    const color = hand.is_lock_gesture ? "#d7bc74" : "#77c7cb";
     context.strokeStyle = color;
     context.fillStyle = color;
     context.lineWidth = 1.5;
@@ -132,7 +132,7 @@ function drawTracks() {
     const labelWidth = context.measureText(handLabel).width + 10;
     const labelX = points[0].x * width;
     const labelY = Math.max(0, points[0].y * height - 19);
-    context.fillStyle = hand.is_ok ? "#745e2f" : "#315e60";
+    context.fillStyle = hand.is_lock_gesture ? "#745e2f" : "#315e60";
     context.fillRect(labelX, labelY, labelWidth, 17);
     context.fillStyle = "#fff";
     context.fillText(handLabel, labelX + 5, labelY + 12);
@@ -173,17 +173,17 @@ function renderTracks() {
       ? "信号丢失 · 控制暂停"
       : appState.state === "running"
         ? tracks.length
-          ? "保持 OK 手势 · " + (controller.lock_progress || 0) + "/" + (controller.lock_required_frames || 5) + " 帧"
+          ? "保持比耶手势 · " + (controller.lock_progress || 0) + "/" + (controller.lock_required_frames || 3) + "（最近 " + (controller.lock_window_frames || 5) + " 帧）"
           : "未检测到肩部轨迹；请让双肩进入画面并保持清晰"
-        : appState.state === "reconnecting" ? "视频流恢复后需要重新做 OK 手势锁定" : "视频流未启动";
+        : appState.state === "reconnecting" ? "视频流恢复后需要重新做比耶手势锁定" : "视频流未启动";
 
   const vision = appState.vision || {};
   const ambiguousTrackCount = tracks.filter((track) => track.ambiguous).length;
   elements.visionDiagnostics.textContent = "人体轨迹 " + tracks.length
     + " · 明确 " + (tracks.length - ambiguousTrackCount) + " · 歧义 " + ambiguousTrackCount
     + " · 手部 " + (vision.hand_count || 0)
-    + " · OK " + (vision.ok_hand_count || 0)
-    + " · 已关联 OK " + (vision.associated_ok_count || 0)
+    + " · 比耶 " + (vision.lock_gesture_count || 0)
+    + " · 已关联比耶 " + (vision.associated_lock_gesture_count || 0)
     + " · 低置信 " + (vision.low_confidence_hand_count || 0)
     + " · 门槛 " + Math.round((vision.confidence_threshold || 0.6) * 100) + "%";
   const visionMs = appState.last_vision_ms;
@@ -205,16 +205,19 @@ function renderTracks() {
         ? "人体已检测；暂未检测到手部，请举手入镜并避免遮挡"
         : "尚未建立人体轨迹，请确保双肩清晰进入画面"
       : appState.state === "reconnecting"
-        ? "摄像头正在重连；控制已暂停，恢复后需重新做 OK 手势"
+        ? "摄像头正在重连；控制已暂停，恢复后需重新做比耶手势"
         : "等待识别手部";
   } else {
     elements.handDiagnostics.textContent = hands.slice(0, 3).map((hand) => {
       const gestureName = hand.gesture || "未识别内置手势";
       const confidence = Math.round((hand.confidence || 0) * 100);
-      const okState = hand.is_ok ? "OK 已确认" : "OK 未确认：" + hand.ok_reason;
-      return (hand.handedness || "手") + " · " + gestureName + " " + confidence + "% · 稳定 "
-        + (hand.stable_frames || 0) + "/3 · "
-        + okState + " · " + (hand.track_id || hand.association_reason) + " · " + hand.action_reason;
+      const lockState = hand.is_lock_gesture
+        ? "比耶已确认"
+        : "比耶未确认：" + hand.lock_gesture_reason;
+      return (hand.handedness || "手") + " · " + gestureName + " " + confidence + "% · 锁定 "
+        + (appState.controller?.lock_progress || 0) + "/3（5帧窗口） · "
+        + lockState + " · " + (hand.lock_track_id || hand.track_id || hand.lock_association_reason || hand.association_reason)
+        + " · " + hand.action_reason;
     }).join("  /  ");
   }
   elements.trackList.replaceChildren();
@@ -320,8 +323,14 @@ function buildMappings() {
     const select = document.createElement("select");
     select.id = "mapping-" + gesture;
     select.dataset.gesture = gesture;
-    for (const [action, actionLabel] of ACTIONS) select.add(new Option(actionLabel, action));
-    select.value = mappings[gesture] || "none";
+    const reservedForController = gesture === "Victory";
+    const availableActions = reservedForController
+      ? ACTIONS.filter(([action]) => action === "none")
+      : ACTIONS;
+    for (const [action, actionLabel] of availableActions) select.add(new Option(actionLabel, action));
+    select.value = reservedForController ? "none" : mappings[gesture] || "none";
+    select.disabled = reservedForController;
+    if (reservedForController) select.title = "比耶手势专用于主控锁定";
     row.append(gestureLabel, select);
     elements.mappingGrid.append(row);
   }
