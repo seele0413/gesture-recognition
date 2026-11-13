@@ -160,22 +160,31 @@ function renderTracks() {
   }
 
   elements.controllerCard.dataset.state = controller.state;
-  const labels = { unlocked: "未锁定", locked: "已锁定", lost: "跟踪中断 · 控制暂停" };
+  const recoveryStates = ["suspect", "reacquiring"];
+  const isRecovering = recoveryStates.includes(controller.state);
+  const labels = {
+    unlocked: "未锁定",
+    locked: "已锁定",
+    suspect: "主控短暂丢失 · 控制暂停",
+    reacquiring: "正在重新寻找主控 · 控制暂停",
+  };
   elements.controllerStatus.textContent = labels[controller.state] || "未锁定";
   elements.controllerTrackId.textContent = controller.track_id || "--";
   elements.targetLabel.textContent = controller.state === "locked"
-    ? "主控：" + controller.track_id
-    : controller.state === "lost" ? "主控暂时丢失" : "主控未锁定";
+    ? "主控：" + (controller.controller_id || controller.track_id)
+    : isRecovering ? "正在保留原主控身份" : "主控未锁定";
   elements.unlockController.disabled = controller.state === "unlocked";
   elements.controllerDetail.textContent = controller.state === "locked"
     ? "主控轨迹有效"
-    : controller.state === "lost"
-      ? "信号丢失 · 控制暂停"
-      : appState.state === "running"
-        ? tracks.length
-          ? "保持比耶手势 · " + (controller.lock_progress || 0) + "/" + (controller.lock_required_frames || 3) + "（最近 " + (controller.lock_window_frames || 5) + " 帧）"
-          : "未检测到肩部轨迹；请让双肩进入画面并保持清晰"
-        : appState.state === "reconnecting" ? "视频流恢复后需要重新做比耶手势锁定" : "视频流未启动";
+    : controller.state === "suspect"
+      ? "短暂漏检容错中；已暂停新操作，等待原轨迹恢复"
+      : controller.state === "reacquiring"
+        ? "正在重新关联原主控；不会接受其他人员接管"
+        : appState.state === "running"
+          ? tracks.length
+            ? "保持比耶手势 · " + (controller.lock_progress || 0) + "/" + (controller.lock_required_frames || 2) + "（最近 " + (controller.lock_window_frames || 5) + " 帧）"
+            : "未检测到肩部轨迹；请让双肩进入画面并保持清晰"
+          : appState.state === "reconnecting" ? "视频流恢复后需要重新做比耶手势锁定" : "视频流未启动";
 
   const vision = appState.vision || {};
   const ambiguousTrackCount = tracks.filter((track) => track.ambiguous).length;
