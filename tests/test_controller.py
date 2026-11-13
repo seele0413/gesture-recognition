@@ -47,7 +47,14 @@ class VGestureTests(unittest.TestCase):
         self.assertFalse(result["is_v"])
         self.assertIn("分开幅度不足", result["reason"])
 
-    def test_small_hand_is_reported_as_too_small(self):
+    def test_smaller_distant_v_hand_is_recognized(self):
+        points = make_v_hand()
+        for point in points:
+            point.x = 0.5 + (point.x - 0.5) * 0.60
+            point.y = 0.5 + (point.y - 0.5) * 0.60
+        self.assertTrue(analyze_v_gesture(points)["is_v"])
+
+    def test_extremely_small_hand_is_still_rejected(self):
         points = make_v_hand()
         for point in points:
             point.x = 0.5 + (point.x - 0.5) * 0.02
@@ -71,6 +78,14 @@ class ControllerLockTests(unittest.TestCase):
         self.assertIsNone(lock.observe_lock_candidates(["person-1"], 166))
         self.assertIsNone(lock.observe_lock_candidates([], 199))
         self.assertEqual(lock.observe_lock_candidates(["person-1"], 232), "locked")
+        self.assertEqual(lock.snapshot()["track_id"], "person-1")
+
+    def test_two_v_detections_within_five_frames_lock_same_person(self):
+        lock = ControllerLock()
+        self.assertIsNone(lock.observe_lock_candidates(["person-1"], 100))
+        self.assertEqual(lock.snapshot()["lock_progress"], 1)
+        self.assertIsNone(lock.observe_lock_candidates([], 133))
+        self.assertEqual(lock.observe_lock_candidates(["person-1"], 166), "locked")
         self.assertEqual(lock.snapshot()["track_id"], "person-1")
 
     def test_multiple_or_unassociated_v_hands_do_not_lock(self):
