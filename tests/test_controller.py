@@ -165,9 +165,9 @@ class ControllerLockTests(unittest.TestCase):
         lock.observe_lock_candidates(["person-1"], 100)
         controller_id = lock.snapshot()["controller_id"]
         lock.update_tracking(set(), 200)
-        self.assertFalse(lock.rebind_track("person-2"))
+        self.assertFalse(lock.rebind_track("person-2", 300))
         self.assertEqual(lock.snapshot()["track_id"], "person-1")
-        self.assertTrue(lock.rebind_track("person-2", identity_confirmed=True))
+        self.assertTrue(lock.rebind_track("person-2", 300, identity_confirmed=True))
         self.assertEqual(lock.snapshot()["state"], "locked")
         self.assertEqual(lock.snapshot()["track_id"], "person-2")
         self.assertEqual(lock.snapshot()["controller_id"], controller_id)
