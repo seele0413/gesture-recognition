@@ -409,7 +409,7 @@ class WorkflowEngine:
             if expected == "controller_locked":
                 return event.get("type") == "controller" and event.get("state") == "locked"
             if expected == "controller_lost":
-                return event.get("type") == "controller" and event.get("state") in {"lost", "unlocked"}
+                return event.get("type") == "controller" and event.get("state") in {"lost", "suspect", "reacquiring", "unlocked"}
             return event.get("type") == "gesture" and event.get("gesture") == params.get("gesture") and bool(event.get("action_triggered"))
 
         future = asyncio.get_running_loop().create_future()
