@@ -44,6 +44,7 @@ class _Track:
     box: tuple[float, float, float, float]
     torso: tuple[tuple[int, tuple[float, float]], ...]
     last_seen_ms: int
+    first_seen_ms: int
     velocity: tuple[float, float] = (0.0, 0.0)
 
 
@@ -126,6 +127,7 @@ class PoseTrackManager:
                 box=observation["box"],
                 torso=observation["torso"],
                 last_seen_ms=timestamp_ms,
+                first_seen_ms=track.first_seen_ms,
                 velocity=velocity,
             )
             observation_tracks[observation_index] = (
@@ -152,6 +154,7 @@ class PoseTrackManager:
                 box=observation["box"],
                 torso=observation["torso"],
                 last_seen_ms=timestamp_ms,
+                first_seen_ms=timestamp_ms,
             )
             observation_tracks[observation_index] = (track_id, 1.0)
 
@@ -165,6 +168,7 @@ class PoseTrackManager:
                     "track_id": track[0] if track else None,
                     "association_confidence": track[1] if track else 0.0,
                     "ambiguous": track is None,
+                    "first_seen_ms": self._tracks[track[0]].first_seen_ms if track else timestamp_ms,
                     "center": observation["center"],
                     "box_norm": [x, y, width, height],
                     "box": [
