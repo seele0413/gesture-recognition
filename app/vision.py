@@ -230,7 +230,7 @@ class VisionProcessor:
                 self.gate.reset(preserve_cooldowns=True)
                 self._publish_controller("locked", "v_gesture", timestamp_ms)
 
-            transitions = self.controller.update_tracking(visible_track_ids, timestamp_ms)
+            transitions = self.controller.update_tracking(visible_track_ids, timestamp_ms, tracks=tracks)
             if transitions:
                 self.gate.reset(preserve_cooldowns=True)
                 for state, reason in transitions:
@@ -466,9 +466,11 @@ class VisionProcessor:
         }
 
     def _publish_controller(self, state: str, reason: str, timestamp_ms: int) -> None:
+        controller_snapshot = self.controller.snapshot()
         controller_event = build_controller_event(
             state=state,
-            track_id=self.controller.track_id,
+            track_id=controller_snapshot["track_id"],
+            controller_id=controller_snapshot["controller_id"],
             timestamp_ms=int(time.time() * 1000),
             reason=reason,
         )
@@ -512,9 +514,13 @@ class VisionProcessor:
         if controller["state"] != "locked" or not track_id:
             self.gate.reset()
             for hand in hands:
-                if controller["state"] == "lost":
-                    hand["action_reason"] = "主控轨迹暂时丢失，控制已暂停"
-                    hand["reason_code"] = "master_track_lost"
+                if controller["state"] in {"suspect", "reacquiring", "lost"}:
+                    hand["action_reason"] = (
+                        "主控轨迹暂时不可见，正在等待恢复" 
+                        if controller["state"] == "suspect"
+                        else "正在重新寻找原主控，控制已暂停"
+                    )
+                    hand["reason_code"] = "master_track_reacquiring"
                 elif hand["is_lock_gesture"] and hand.get("lock_track_id"):
                     hand["action_reason"] = (
                         f"比耶手势已识别，锁定进度 "
