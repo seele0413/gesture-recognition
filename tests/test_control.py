@@ -143,7 +143,7 @@ class ControlTests(unittest.TestCase):
 
     def test_controller_event_reports_state_and_temporary_track(self):
         event = build_controller_event(
-            state="locked", track_id="person-2", timestamp_ms=1234, reason="ok_gesture"
+            state="locked", track_id="person-2", timestamp_ms=1234, reason="v_gesture"
         )
         self.assertEqual(event["type"], "controller")
         self.assertEqual(event["state"], "locked")
