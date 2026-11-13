@@ -112,21 +112,53 @@ class ControllerLockTests(unittest.TestCase):
             self.assertIsNone(lock.observe_lock_candidates([], timestamp))
         self.assertEqual(lock.snapshot()["lock_progress"], 0)
 
-    def test_lost_track_pauses_then_recovers_or_times_out(self):
-        lock = ControllerLock(stable_frames=1, window_frames=1, lost_timeout_ms=2000)
-        lock.observe_lock_candidates(["person-1"], 100)
-        self.assertEqual(lock.update_tracking(set(), 200), [("lost", "track_unmatched")])
-        self.assertEqual(lock.update_tracking({"person-1"}, 1500), [("locked", "reacquired")])
-        self.assertEqual(lock.update_tracking(set(), 1600), [("lost", "track_unmatched")])
-        self.assertEqual(lock.update_tracking(set(), 3600), [("unlocked", "track_timeout")])
-        self.assertIsNone(lock.snapshot()["track_id"])
-
-    def test_manual_unlock_clears_target(self):
+    def test_track_dropout_enters_suspect_then_reacquiring_before_timeout(self):
         lock = ControllerLock(stable_frames=1, window_frames=1)
         lock.observe_lock_candidates(["person-1"], 100)
+        self.assertEqual(lock.update_tracking(set(), 200), [("suspect", "track_unmatched")])
+        self.assertEqual(lock.snapshot()["state"], "suspect")
+        self.assertEqual(lock.update_tracking(set(), 849), [])
+        self.assertEqual(lock.update_tracking(set(), 850), [("reacquiring", "track_reacquiring")])
+        self.assertEqual(lock.snapshot()["state"], "reacquiring")
+        self.assertEqual(lock.update_tracking(set(), 3699), [])
+        self.assertEqual(lock.update_tracking(set(), 3700), [("unlocked", "track_timeout")])
+        self.assertIsNone(lock.snapshot()["track_id"])
+        self.assertIsNone(lock.snapshot()["controller_id"])
+
+    def test_track_reappearing_during_suspect_recovers_same_controller_session(self):
+        lock = ControllerLock(stable_frames=1, window_frames=1)
+        lock.observe_lock_candidates(["person-1"], 100)
+        controller_id = lock.snapshot()["controller_id"]
+        self.assertEqual(lock.update_tracking(set(), 200), [("suspect", "track_unmatched")])
+        self.assertEqual(lock.update_tracking({"person-1"}, 500), [("locked", "reacquired")])
+        self.assertEqual(lock.snapshot()["controller_id"], controller_id)
+        self.assertEqual(lock.snapshot()["track_id"], "person-1")
+
+    def test_track_reappearing_during_reacquiring_recovers_same_controller_session(self):
+        lock = ControllerLock(stable_frames=1, window_frames=1)
+        lock.observe_lock_candidates(["person-1"], 100)
+        self.assertEqual(lock.update_tracking(set(), 200), [("suspect", "track_unmatched")])
+        self.assertEqual(lock.update_tracking(set(), 850), [("reacquiring", "track_reacquiring")])
+        self.assertEqual(lock.update_tracking({"person-1"}, 1200), [("locked", "reacquired")])
+
+    def test_other_person_cannot_take_over_during_controller_recovery(self):
+        lock = ControllerLock(stable_frames=1, window_frames=1)
+        lock.observe_lock_candidates(["person-1"], 100)
+        controller_id = lock.snapshot()["controller_id"]
+        self.assertEqual(lock.update_tracking(set(), 200), [("suspect", "track_unmatched")])
+        self.assertIsNone(lock.observe_lock_candidates(["person-2"], 300))
+        self.assertEqual(lock.snapshot()["track_id"], "person-1")
+        self.assertEqual(lock.snapshot()["controller_id"], controller_id)
+        self.assertEqual(lock.snapshot()["state"], "suspect")
+
+    def test_manual_unlock_clears_controller_identity_and_target(self):
+        lock = ControllerLock(stable_frames=1, window_frames=1)
+        lock.observe_lock_candidates(["person-1"], 100)
+        self.assertIsNotNone(lock.snapshot()["controller_id"])
         self.assertTrue(lock.unlock())
         self.assertFalse(lock.unlock())
         self.assertEqual(lock.snapshot()["state"], "unlocked")
+        self.assertIsNone(lock.snapshot()["controller_id"])
 
 
 if __name__ == "__main__":
