@@ -184,7 +184,7 @@ function renderTracks() {
     : controller.state === "suspect"
       ? "短暂漏检 · 暂停新操作，等待原轨迹恢复（" + (controller.suspect_grace_ms || 800) + "ms）"
       : ["reacquiring", "lost"].includes(controller.state)
-        ? "正在重新关联原主控 · 控制保持暂停 · 最长 " + (controller.reacquire_timeout_ms || 4000) + "ms"
+        ? "正在重新关联原主控 · 候选 " + (controller.reacquisition_candidate_frames || 0) + "/" + (controller.reacquisition_required_frames || 2) + " · 控制暂停 · 最长 " + (controller.reacquire_timeout_ms || 4000) + "ms"
         : appState.state === "running"
           ? tracks.length
             ? "保持比耶手势 · " + (controller.lock_progress || 0) + "/" + (controller.lock_required_frames || 2) + "（最近 " + (controller.lock_window_frames || 5) + " 帧）"
