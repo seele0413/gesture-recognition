@@ -21,7 +21,7 @@ class ControlStoreTests(unittest.TestCase):
     def test_mappings_are_persisted(self):
         self.assertEqual(self.store.get_mappings(), DEFAULT_MAPPINGS)
         changed = dict(DEFAULT_MAPPINGS)
-        changed["Victory"] = "play_pause"
+        changed["ILoveYou"] = "play_pause"
         self.store.set_mappings(changed)
         self.assertEqual(self.store.get_mappings(), changed)
 
@@ -151,6 +151,21 @@ class ControlStoreTests(unittest.TestCase):
         reopened = ControlStore(self.path)
         self.assertEqual(reopened.get_mappings(), DEFAULT_MAPPINGS)
 
+    def test_previous_default_victory_mute_mapping_migrates_to_reserved_lock_gesture(self):
+        previous = dict(DEFAULT_MAPPINGS)
+        previous["Victory"] = "mute_toggle"
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute(
+                "UPDATE settings SET value = ? WHERE key = ?",
+                (json.dumps(previous), "gesture_mappings"),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        reopened = ControlStore(self.path)
+        self.assertEqual(reopened.get_mappings()["Victory"], "none")
+
     def test_custom_legacy_actions_keep_their_meaning_when_migrated(self):
         connection = sqlite3.connect(self.path)
         custom = dict(LEGACY_DEFAULT_MAPPINGS)
@@ -166,7 +181,7 @@ class ControlStoreTests(unittest.TestCase):
             connection.close()
         reopened = ControlStore(self.path)
         expected = dict(DEFAULT_MAPPINGS)
-        expected["Victory"] = "play_pause"
+        expected["Victory"] = "none"
         expected["Closed_Fist"] = "none"
         self.assertEqual(reopened.get_mappings(), expected)
 
