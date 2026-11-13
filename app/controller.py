@@ -170,6 +170,19 @@ class ControllerLock:
         if self.status == "unlocked" or self.track_id is None:
             return []
 
+        elapsed_ms = (
+            max(0, int(now_ms) - self.lost_since_ms)
+            if self.lost_since_ms is not None
+            else 0
+        )
+        if self.status in {"suspect", "reacquiring"} and elapsed_ms >= self.lost_timeout_ms:
+            self.status = "unlocked"
+            self.controller_id = None
+            self.track_id = None
+            self.lost_since_ms = None
+            self._reset_candidate()
+            return [("unlocked", "track_timeout")]
+
         if self.track_id in visible_track_ids:
             if self.status in {"suspect", "reacquiring"}:
                 self.status = "locked"
@@ -182,19 +195,9 @@ class ControllerLock:
             self.lost_since_ms = int(now_ms)
             return [("suspect", "track_unmatched")]
 
-        assert self.lost_since_ms is not None
-        elapsed_ms = max(0, int(now_ms) - self.lost_since_ms)
         if self.status == "suspect" and elapsed_ms >= self.suspect_grace_ms:
             self.status = "reacquiring"
             return [("reacquiring", "track_reacquiring")]
-
-        if elapsed_ms >= self.lost_timeout_ms:
-            self.status = "unlocked"
-            self.controller_id = None
-            self.track_id = None
-            self.lost_since_ms = None
-            self._reset_candidate()
-            return [("unlocked", "track_timeout")]
         return []
 
     def unlock(self) -> bool:
