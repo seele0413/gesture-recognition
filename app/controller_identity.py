@@ -55,6 +55,8 @@ class ControllerIdentityManager:
         self.reacquisition_count = 0
         self.last_reacquisition_method: str | None = None
         self.last_reason = "not_locked"
+        self._reacquire_candidate_track_id: str | None = None
+        self._reacquire_candidate_frames = 0
 
     def bind(self, track_id: str, tracks: list[dict[str, Any]] | None, now_ms: int) -> str:
         if not track_id:
@@ -69,6 +71,7 @@ class ControllerIdentityManager:
         self.reacquisition_count = 0
         self.last_reacquisition_method = None
         self.last_reason = "controller_acquired"
+        self._reset_reacquire_candidate()
         for track in tracks or []:
             candidate_id = track.get("track_id")
             if candidate_id and candidate_id != self.track_id:
@@ -115,17 +118,27 @@ class ControllerIdentityManager:
         if elapsed_ms >= self.suspect_grace_ms:
             candidate = self._find_reacquisition_candidate(tracks, now_ms)
             if candidate is not None:
-                self.track_id = str(candidate["track_id"])
-                self.state = "locked"
-                self.lost_since_ms = None
-                self.reacquisition_count += 1
-                self.last_reacquisition_method = "pose_geometry"
-                self.last_reason = "reacquired_new_track"
-                self._velocity = (0.0, 0.0)
-                self._anchor = None
-                self._remember_other_tracks(tracks)
-                self._update_anchor(candidate, now_ms)
-                return [("locked", "track_id_rebound")]
+                candidate_id = str(candidate["track_id"])
+                if candidate_id == self._reacquire_candidate_track_id:
+                    self._reacquire_candidate_frames += 1
+                else:
+                    self._reacquire_candidate_track_id = candidate_id
+                    self._reacquire_candidate_frames = 1
+                if self._reacquire_candidate_frames >= 2:
+                    self.track_id = candidate_id
+                    self.state = "locked"
+                    self.lost_since_ms = None
+                    self.reacquisition_count += 1
+                    self.last_reacquisition_method = "pose_geometry"
+                    self.last_reason = "reacquired_new_track"
+                    self._velocity = (0.0, 0.0)
+                    self._anchor = None
+                    self._reset_reacquire_candidate()
+                    self._remember_other_tracks(tracks)
+                    self._update_anchor(candidate, now_ms)
+                    return [("locked", "track_id_rebound")]
+            else:
+                self._reset_reacquire_candidate()
             if self.state == "suspect":
                 self.state = "reacquiring"
                 self.last_reason = "track_reacquiring"
@@ -179,6 +192,9 @@ class ControllerIdentityManager:
             "reacquisition_count": self.reacquisition_count,
             "last_reacquisition_method": self.last_reacquisition_method,
             "last_reason": self.last_reason,
+            "reacquisition_candidate_track_id": self._reacquire_candidate_track_id,
+            "reacquisition_candidate_frames": self._reacquire_candidate_frames,
+            "reacquisition_required_frames": 2,
         }
 
     def _remember_other_tracks(self, tracks: list[dict[str, Any]]) -> None:
@@ -305,7 +321,12 @@ class ControllerIdentityManager:
             return None
         return 0.45 * center_distance + 0.40 * shape_distance + 0.10 * size_log_ratio + 0.05 * aspect_log_ratio
 
+    def _reset_reacquire_candidate(self) -> None:
+        self._reacquire_candidate_track_id = None
+        self._reacquire_candidate_frames = 0
+
     def _expire(self) -> None:
+        self._reset_reacquire_candidate()
         self.state = "unlocked"
         self.controller_id = None
         self.track_id = None
