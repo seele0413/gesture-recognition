@@ -202,7 +202,7 @@ class ControlStore:
     def update_controller(
         self, session_id: str, state: str, track_id: str | None, timestamp_ms: int
     ) -> None:
-        if state not in {"unlocked", "locked", "lost"}:
+        if state not in {"unlocked", "locked", "suspect", "reacquiring", "lost"}:
             raise ValueError("无效的主控状态")
         with self._lock, self._connection() as connection:
             connection.execute(
