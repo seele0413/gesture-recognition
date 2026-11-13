@@ -141,6 +141,27 @@ class ControlTests(unittest.TestCase):
                 landmarks=landmarks[:20],
             )
 
+    def test_controller_event_reports_recovery_state_and_stable_session_id(self):
+        event = build_controller_event(
+            state="suspect",
+            track_id="person-2",
+            controller_id="controller-abc123",
+            timestamp_ms=1234,
+            reason="track_unmatched",
+        )
+        self.assertEqual(event["state"], "suspect")
+        self.assertEqual(event["controller_id"], "controller-abc123")
+        self.assertEqual(event["track_id"], "person-2")
+
+        reacquiring = build_controller_event(
+            state="reacquiring",
+            track_id="person-2",
+            controller_id="controller-abc123",
+            timestamp_ms=1500,
+            reason="track_reacquiring",
+        )
+        self.assertEqual(reacquiring["state"], "reacquiring")
+
     def test_controller_event_reports_state_and_temporary_track(self):
         event = build_controller_event(
             state="locked", track_id="person-2", timestamp_ms=1234, reason="v_gesture"
