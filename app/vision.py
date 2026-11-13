@@ -189,6 +189,7 @@ class VisionProcessor:
                     hand["lock_association_reason"] = lock_association_reason
                 else:
                     hand["lock_association_reason"] = hand["association_reason"]
+                hand["lock_track_id"] = lock_track_id
                 lock_candidates.append(lock_track_id)
             lock_result = self.controller.observe_lock_candidates(lock_candidates, timestamp_ms)
             if lock_result == "locked":
@@ -221,9 +222,7 @@ class VisionProcessor:
             "lock_gesture_count": sum(hand["is_lock_gesture"] for hand in hands),
             "associated_hand_count": sum(hand["track_id"] is not None for hand in hands),
             "associated_lock_gesture_count": sum(
-                hand["is_lock_gesture"]
-                and hand.get("lock_association_reason", hand["association_reason"])
-                not in {"未能关联到人体手腕或唯一人体框", "多人手腕或人体框关联有歧义", "多人手腕关联有歧义"}
+                hand["is_lock_gesture"] and hand.get("lock_track_id") is not None
                 for hand in hands
             ),
             "hands": hand_diagnostics,
@@ -418,6 +417,7 @@ class VisionProcessor:
             "lock_gesture_reason": hand["lock_gesture_reason"],
             "lock_spread_ratio": hand["lock_spread_ratio"],
             "lock_association_reason": hand.get("lock_association_reason", hand["association_reason"]),
+            "lock_track_id": hand.get("lock_track_id"),
             "action": hand["action"],
             "action_reason": hand["action_reason"],
             "reason_code": hand["reason_code"],
@@ -479,7 +479,7 @@ class VisionProcessor:
                 if controller["state"] == "lost":
                     hand["action_reason"] = "主控轨迹暂时丢失，控制已暂停"
                     hand["reason_code"] = "master_track_lost"
-                elif hand["is_lock_gesture"] and hand["track_id"]:
+                elif hand["is_lock_gesture"] and hand.get("lock_track_id"):
                     hand["action_reason"] = (
                         f"比耶手势已识别，锁定进度 "
                         f"{controller['lock_progress']}/{controller['lock_required_frames']} "
