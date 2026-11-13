@@ -28,7 +28,7 @@ DEFAULT_MAPPINGS = {
     "Thumb_Up": "volume_up",
     "Thumb_Down": "volume_down",
     "Pointing_Up": "none",
-    "Victory": "mute_toggle",
+    "Victory": "none",
     "ILoveYou": "none",
 }
 LEGACY_DEFAULT_MAPPINGS = {
@@ -51,10 +51,14 @@ LEGACY_ACTIONS = {
 def migrate_legacy_mappings(value: Mapping[str, str]) -> dict[str, str]:
     if dict(value) == LEGACY_DEFAULT_MAPPINGS:
         return dict(DEFAULT_MAPPINGS)
-    return {
+    migrated = {
         gesture: LEGACY_ACTIONS.get(action, action)
         for gesture, action in value.items()
     }
+    # Victory is now reserved for acquiring the exhibition controller.
+    if "Victory" in migrated:
+        migrated["Victory"] = "none"
+    return migrated
 
 
 def validate_mappings(value: Mapping[str, str]) -> dict[str, str]:
@@ -62,6 +66,8 @@ def validate_mappings(value: Mapping[str, str]) -> dict[str, str]:
         raise ValueError("映射必须且只能包含所有内置手势")
     if any(action not in ACTIONS for action in value.values()):
         raise ValueError("映射包含不支持的网页动作")
+    if value.get("Victory") != "none":
+        raise ValueError("V 字手势已保留用于主控锁定，不能映射普通网页动作")
     return {gesture: value[gesture] for gesture in GESTURES}
 
 
