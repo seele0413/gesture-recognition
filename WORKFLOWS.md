@@ -60,7 +60,7 @@ flowchart LR
 | --- | --- |
 | `gesture_trigger` | `gesture` 为内置手势之一 |
 | `gesture_sequence_trigger` | `gestures` 为 2～5 个内置手势；`sequence_window_ms` 为 1000～30000，默认 5000 |
-| `controller_locked` | 无额外参数；最近 5 帧中至少 3 帧检测到同一主控人员的比耶手势后触发 |
+| `controller_locked` | 无额外参数；最近 5 帧中至少 2 帧检测到同一主控人员的比耶手势后触发 |
 
 节点：
 
