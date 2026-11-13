@@ -160,13 +160,14 @@ function renderTracks() {
   }
 
   elements.controllerCard.dataset.state = controller.state;
-  const recoveryStates = ["suspect", "reacquiring"];
+  const recoveryStates = ["suspect", "reacquiring", "lost"];
   const isRecovering = recoveryStates.includes(controller.state);
   const labels = {
     unlocked: "未锁定",
     locked: "已锁定",
     suspect: "主控短暂丢失 · 控制暂停",
     reacquiring: "正在重新寻找主控 · 控制暂停",
+    lost: "跟踪中断 · 控制暂停",
   };
   elements.controllerStatus.textContent = labels[controller.state] || "未锁定";
   elements.controllerTrackId.textContent = controller.track_id || "--";
@@ -178,7 +179,7 @@ function renderTracks() {
     ? "主控轨迹有效"
     : controller.state === "suspect"
       ? "短暂漏检容错中；已暂停新操作，等待原轨迹恢复"
-      : controller.state === "reacquiring"
+      : controller.state === "reacquiring" || controller.state === "lost"
         ? "正在重新关联原主控；不会接受其他人员接管"
         : appState.state === "running"
           ? tracks.length
