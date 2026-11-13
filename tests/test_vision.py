@@ -48,7 +48,7 @@ class VisionTimingTests(unittest.TestCase):
             processor.lock = threading.RLock()
             processor.frame_index = 0
             processor.max_inference_width = 960
-            processor.lock_acquisition_width = 1280
+            processor.lock_acquisition_width = 1600
             processor.track_manager = PoseTrackManager()
             processor.controller = ControllerLock()
             processor.gate = GestureGate()
