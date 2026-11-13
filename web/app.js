@@ -172,7 +172,7 @@ function renderTracks() {
   elements.controllerStatus.textContent = labels[controller.state] || "未锁定";
   elements.controllerTrackId.textContent = controller.track_id || "--";
   elements.targetLabel.textContent = controller.state === "locked"
-    ? "主控：" + (controller.controller_id || controller.track_id)
+    ? "主控会话：" + (controller.controller_id || controller.track_id)
     : isRecovering ? "正在保留原主控身份" : "主控未锁定";
   elements.unlockController.disabled = controller.state === "unlocked";
   elements.controllerDetail.textContent = controller.state === "locked"
