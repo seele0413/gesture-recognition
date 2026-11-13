@@ -54,7 +54,7 @@ class HandPointerController:
 
         candidates: list[tuple[dict[str, Any], float, bool]] = []
         for hand in hands:
-            if hand.get("track_id") != controller_track_id or hand.get("is_ok"):
+            if hand.get("track_id") != controller_track_id or hand.get("is_lock_gesture"):
                 continue
             landmarks = hand.get("landmarks") or []
             if len(landmarks) < 18:
