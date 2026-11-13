@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import uuid
 from typing import Any, Sequence
 
 
@@ -11,7 +12,8 @@ V_FINGER_EXTENSION_COSINE = 0.15
 V_FINGER_FOLDED_COSINE = 0.78
 V_FINGER_LENGTH_RATIO = 0.045
 V_FINGER_SEPARATION_RATIO = 0.16
-CONTROLLER_LOST_TIMEOUT_MS = 2000
+CONTROLLER_SUSPECT_GRACE_MS = 650
+CONTROLLER_LOST_TIMEOUT_MS = 3500
 
 
 def _xy(point: Any) -> tuple[float, float] | None:
@@ -95,26 +97,32 @@ def is_v_gesture(landmarks: Sequence[Any]) -> bool:
 
 
 class ControllerLock:
-    """Locks one uniquely associated person after repeated V-sign observations."""
+    """Maintains a stable controller session while its current pose track is reacquired."""
 
     def __init__(
         self,
         stable_frames: int = LOCK_STABLE_FRAMES,
         window_frames: int = LOCK_WINDOW_FRAMES,
         lost_timeout_ms: int = CONTROLLER_LOST_TIMEOUT_MS,
+        suspect_grace_ms: int = CONTROLLER_SUSPECT_GRACE_MS,
     ):
         if stable_frames < 1 or window_frames < stable_frames:
             raise ValueError("主控锁定帧数必须满足 1 <= stable_frames <= window_frames")
+        if suspect_grace_ms < 0 or lost_timeout_ms <= suspect_grace_ms:
+            raise ValueError("主控恢复时间必须满足 0 <= suspect_grace_ms < lost_timeout_ms")
         self.stable_frames = int(stable_frames)
         self.window_frames = int(window_frames)
         self.lost_timeout_ms = int(lost_timeout_ms)
+        self.suspect_grace_ms = int(suspect_grace_ms)
         self.status = "unlocked"
+        self.controller_id: str | None = None
         self.track_id: str | None = None
         self.lost_since_ms: int | None = None
         self._candidate_track: str | None = None
         self._candidate_history: list[bool] = []
 
     def observe_lock_candidates(self, track_ids: Sequence[str | None], now_ms: int) -> str | None:
+        # A new candidate must never take over an existing or recovering controller.
         if self.status != "unlocked":
             return None
 
@@ -152,6 +160,7 @@ class ControllerLock:
         if sum(self._candidate_history) < self.stable_frames:
             return None
         self.status = "locked"
+        self.controller_id = f"controller-{uuid.uuid4().hex[:12]}"
         self.track_id = self._candidate_track
         self.lost_since_ms = None
         self._reset_candidate()
@@ -160,19 +169,28 @@ class ControllerLock:
     def update_tracking(self, visible_track_ids: set[str], now_ms: int) -> list[tuple[str, str]]:
         if self.status == "unlocked" or self.track_id is None:
             return []
+
         if self.track_id in visible_track_ids:
-            if self.status == "lost":
+            if self.status in {"suspect", "reacquiring"}:
                 self.status = "locked"
                 self.lost_since_ms = None
                 return [("locked", "reacquired")]
             return []
+
         if self.status == "locked":
-            self.status = "lost"
-            self.lost_since_ms = now_ms
-            return [("lost", "track_unmatched")]
+            self.status = "suspect"
+            self.lost_since_ms = int(now_ms)
+            return [("suspect", "track_unmatched")]
+
         assert self.lost_since_ms is not None
-        if now_ms - self.lost_since_ms >= self.lost_timeout_ms:
+        elapsed_ms = max(0, int(now_ms) - self.lost_since_ms)
+        if self.status == "suspect" and elapsed_ms >= self.suspect_grace_ms:
+            self.status = "reacquiring"
+            return [("reacquiring", "track_reacquiring")]
+
+        if elapsed_ms >= self.lost_timeout_ms:
             self.status = "unlocked"
+            self.controller_id = None
             self.track_id = None
             self.lost_since_ms = None
             self._reset_candidate()
@@ -182,6 +200,7 @@ class ControllerLock:
     def unlock(self) -> bool:
         changed = self.status != "unlocked"
         self.status = "unlocked"
+        self.controller_id = None
         self.track_id = None
         self.lost_since_ms = None
         self._reset_candidate()
@@ -190,8 +209,11 @@ class ControllerLock:
     def snapshot(self) -> dict[str, Any]:
         return {
             "state": self.status,
+            "controller_id": self.controller_id,
             "track_id": self.track_id,
             "lost_since_ms": self.lost_since_ms,
+            "suspect_grace_ms": self.suspect_grace_ms,
+            "lost_timeout_ms": self.lost_timeout_ms,
             "lock_progress": sum(self._candidate_history),
             "lock_required_frames": self.stable_frames,
             "lock_window_frames": self.window_frames,
