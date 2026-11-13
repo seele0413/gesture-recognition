@@ -160,22 +160,36 @@ function renderTracks() {
   }
 
   elements.controllerCard.dataset.state = controller.state;
-  const labels = { unlocked: "未锁定", locked: "已锁定", lost: "跟踪中断 · 控制暂停" };
+  const labels = {
+    unlocked: "未锁定",
+    locked: "已锁定",
+    suspect: "主控暂时丢失 · 等待恢复",
+    reacquiring: "正在重新寻找原主控",
+    lost: "跟踪中断 · 控制暂停",
+  };
   elements.controllerStatus.textContent = labels[controller.state] || "未锁定";
-  elements.controllerTrackId.textContent = controller.track_id || "--";
+  elements.controllerTrackId.textContent = controller.controller_id
+    ? controller.controller_id + " / " + (controller.track_id || "--")
+    : controller.track_id || "--";
   elements.targetLabel.textContent = controller.state === "locked"
-    ? "主控：" + controller.track_id
-    : controller.state === "lost" ? "主控暂时丢失" : "主控未锁定";
+    ? "主控：" + (controller.controller_id || controller.track_id)
+    : ["suspect", "reacquiring", "lost"].includes(controller.state)
+      ? "原主控恢复中"
+      : "主控未锁定";
   elements.unlockController.disabled = controller.state === "unlocked";
   elements.controllerDetail.textContent = controller.state === "locked"
-    ? "主控轨迹有效"
-    : controller.state === "lost"
-      ? "信号丢失 · 控制暂停"
-      : appState.state === "running"
-        ? tracks.length
-          ? "保持比耶手势 · " + (controller.lock_progress || 0) + "/" + (controller.lock_required_frames || 3) + "（最近 " + (controller.lock_window_frames || 5) + " 帧）"
-          : "未检测到肩部轨迹；请让双肩进入画面并保持清晰"
-        : appState.state === "reconnecting" ? "视频流恢复后需要重新做比耶手势锁定" : "视频流未启动";
+    ? controller.last_reacquisition_method
+      ? "主控轨迹有效 · 已恢复 " + (controller.reacquisition_count || 0) + " 次"
+      : "主控身份已绑定 · 轨迹 " + (controller.track_id || "--")
+    : controller.state === "suspect"
+      ? "短暂漏检 · 暂停新操作，等待原轨迹恢复（" + (controller.suspect_grace_ms || 800) + "ms）"
+      : ["reacquiring", "lost"].includes(controller.state)
+        ? "正在重新关联原主控 · 控制保持暂停 · 最长 " + (controller.reacquire_timeout_ms || 4000) + "ms"
+        : appState.state === "running"
+          ? tracks.length
+            ? "保持比耶手势 · " + (controller.lock_progress || 0) + "/" + (controller.lock_required_frames || 2) + "（最近 " + (controller.lock_window_frames || 5) + " 帧）"
+            : "未检测到肩部轨迹；请让双肩进入画面并保持清晰"
+          : appState.state === "reconnecting" ? "视频流恢复后需要重新做比耶手势锁定" : "视频流未启动";
 
   const vision = appState.vision || {};
   const ambiguousTrackCount = tracks.filter((track) => track.ambiguous).length;
