@@ -253,6 +253,8 @@ class VisionProcessor:
             hand_diagnostics = [self._public_hand(hand) for hand in hands]
         diagnostics = {
             "hand_count": len(hands),
+            "pose_inference_width": width,
+            "hand_inference_width": int(gesture_frame.shape[1]),
             "lock_gesture_count": sum(hand["is_lock_gesture"] for hand in hands),
             "associated_hand_count": sum(hand["track_id"] is not None for hand in hands),
             "associated_lock_gesture_count": sum(
