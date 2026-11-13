@@ -129,15 +129,21 @@ def build_gesture_event(
 
 
 def build_controller_event(
-    *, state: str, track_id: str | None, timestamp_ms: int, reason: str
+    *,
+    state: str,
+    track_id: str | None,
+    timestamp_ms: int,
+    reason: str,
+    controller_id: str | None = None,
 ) -> dict[str, object]:
-    if state not in {"unlocked", "locked", "lost"}:
+    if state not in {"unlocked", "locked", "suspect", "reacquiring"}:
         raise ValueError("无效的主控状态")
-    if state == "locked" and not track_id:
-        raise ValueError("锁定状态必须包含 track_id")
+    if state != "unlocked" and not track_id:
+        raise ValueError("主控活动状态必须包含 track_id")
     return {
         "type": "controller",
         "state": state,
+        "controller_id": controller_id,
         "track_id": track_id,
         "timestamp_ms": int(timestamp_ms),
         "reason": reason,
