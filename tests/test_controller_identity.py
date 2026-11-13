@@ -53,7 +53,9 @@ class ControllerIdentityManagerTests(unittest.TestCase):
         controller_id = manager.snapshot()["controller_id"]
         self.assertEqual(manager.update_tracks([], 200), [("suspect", "track_unmatched")])
         candidate = make_track("person-3", first_seen_ms=300)
-        self.assertEqual(manager.update_tracks([candidate], 1000), [("locked", "track_id_rebound")])
+        self.assertEqual(manager.update_tracks([candidate], 1000), [("reacquiring", "track_reacquiring")])
+        self.assertEqual(manager.snapshot()["reacquisition_candidate_frames"], 1)
+        self.assertEqual(manager.update_tracks([candidate], 1033), [("locked", "track_id_rebound")])
         snapshot = manager.snapshot()
         self.assertEqual(snapshot["controller_id"], controller_id)
         self.assertEqual(snapshot["track_id"], "person-3")
