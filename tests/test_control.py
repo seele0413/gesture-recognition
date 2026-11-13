@@ -97,6 +97,10 @@ class ControlTests(unittest.TestCase):
             validate_mappings(invalid)
         with self.assertRaises(ValueError):
             validate_mappings({"Open_Palm": "none"})
+        reserved = dict(DEFAULT_MAPPINGS)
+        reserved["Victory"] = "mute_toggle"
+        with self.assertRaises(ValueError):
+            validate_mappings(reserved)
         self.assertIn("none", ACTIONS)
         self.assertIn("play_pause", ACTIONS)
         self.assertIn("mute_toggle", ACTIONS)
