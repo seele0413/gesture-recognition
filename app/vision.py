@@ -25,7 +25,7 @@ class VisionProcessor:
     """Processes a stream with session-local pose tracks and gesture control."""
 
     DEFAULT_MAX_INFERENCE_WIDTH = MAX_INFERENCE_WIDTH
-    DEFAULT_LOCK_ACQUISITION_WIDTH = 1280
+    DEFAULT_LOCK_ACQUISITION_WIDTH = 1600
     DEFAULT_NUM_POSES = 5
     DEFAULT_NUM_HANDS = 10
 
