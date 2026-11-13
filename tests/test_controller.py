@@ -141,6 +141,15 @@ class ControllerLockTests(unittest.TestCase):
         self.assertEqual(lock.update_tracking(set(), 850), [("reacquiring", "track_reacquiring")])
         self.assertEqual(lock.update_tracking({"person-1"}, 1200), [("locked", "reacquired")])
 
+    def test_track_returning_after_recovery_timeout_does_not_reactivate_old_controller(self):
+        lock = ControllerLock(stable_frames=1, window_frames=1)
+        lock.observe_lock_candidates(["person-1"], 100)
+        controller_id = lock.snapshot()["controller_id"]
+        lock.update_tracking(set(), 200)
+        self.assertEqual(lock.update_tracking({"person-1"}, 3700), [("unlocked", "track_timeout")])
+        self.assertIsNone(lock.snapshot()["controller_id"])
+        self.assertNotEqual(lock.snapshot()["controller_id"], controller_id)
+
     def test_other_person_cannot_take_over_during_controller_recovery(self):
         lock = ControllerLock(stable_frames=1, window_frames=1)
         lock.observe_lock_candidates(["person-1"], 100)
