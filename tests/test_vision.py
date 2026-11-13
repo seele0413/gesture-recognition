@@ -11,6 +11,7 @@ from app.control import GestureGate
 from app.controller import ControllerLock
 from app.database import ControlStore
 from app.tracking import PoseTrackManager
+from app.pointer import HandPointerController
 from app.vision import VisionProcessor
 
 
@@ -51,6 +52,8 @@ class VisionTimingTests(unittest.TestCase):
             processor.track_manager = PoseTrackManager()
             processor.controller = ControllerLock()
             processor.gate = GestureGate()
+            processor.pointer = HandPointerController()
+            processor.pointer_mode_enabled = False
             processor.low_confidence_result_count = 0
             processor.last_timestamp_ms = 0
             processor.pose_landmarker = _PoseLandmarker()
