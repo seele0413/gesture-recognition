@@ -96,7 +96,7 @@ class HandPointerControllerTests(unittest.TestCase):
         self.assertIsNotNone(event)
         self.assertTrue(event["active"])
 
-    def test_ok_hand_is_not_used_as_drag_pointer(self):
+    def test_controller_v_sign_is_not_used_as_drag_pointer(self):
         self.assertIsNone(self.pointer.update([make_hand(is_lock_gesture=True)], "locked", "person-1", 100))
 
     def test_disabling_pointer_releases_active_state(self):
