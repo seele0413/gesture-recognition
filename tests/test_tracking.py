@@ -50,6 +50,19 @@ class PoseTrackTests(unittest.TestCase):
         self.assertLess(predicted_cost, unpredicted_cost)
         self.assertEqual(resumed[0]["track_id"], "person-1")
 
+    def test_track_id_survives_short_controller_recovery_gap(self):
+        tracker = PoseTrackManager()
+        first = tracker.update([pose(0.35)], 640, 480, 100)
+        self.assertEqual(first[0]["track_id"], "person-1")
+        recovered = tracker.update([pose(0.36)], 640, 480, 3000)
+        self.assertEqual(recovered[0]["track_id"], "person-1")
+
+    def test_track_expires_after_recovery_retention_window(self):
+        tracker = PoseTrackManager()
+        tracker.update([pose(0.35)], 640, 480, 100)
+        next_track = tracker.update([pose(0.36)], 640, 480, 3701)
+        self.assertEqual(next_track[0]["track_id"], "person-2")
+
     def test_track_output_contains_pixel_box_and_ambiguity_state(self):
         tracker = PoseTrackManager()
         result = tracker.update([pose(0.5)], 640, 480, 100)
