@@ -15,12 +15,20 @@ from app.vision import VisionProcessor
 
 
 class _PoseLandmarker:
-    def detect_for_video(self, _image, _timestamp_ms):
+    def __init__(self):
+        self.last_image_shape = None
+
+    def detect_for_video(self, image, _timestamp_ms):
+        self.last_image_shape = image.data.shape
         return SimpleNamespace(pose_landmarks=[])
 
 
 class _GestureRecognizer:
-    def recognize_for_video(self, _image, _timestamp_ms):
+    def __init__(self):
+        self.last_image_shape = None
+
+    def recognize_for_video(self, image, _timestamp_ms):
+        self.last_image_shape = image.data.shape
         return SimpleNamespace(hand_landmarks=[], gestures=[], handedness=[])
 
 
@@ -39,6 +47,7 @@ class VisionTimingTests(unittest.TestCase):
             processor.lock = threading.RLock()
             processor.frame_index = 0
             processor.max_inference_width = 960
+            processor.lock_acquisition_width = 1280
             processor.track_manager = PoseTrackManager()
             processor.controller = ControllerLock()
             processor.gate = GestureGate()
@@ -50,6 +59,8 @@ class VisionTimingTests(unittest.TestCase):
             result = processor.process(np.zeros((1080, 1920, 3), dtype=np.uint8), frame_resize_ms=0.25)
 
         self.assertEqual((result["frame_width"], result["frame_height"]), (960, 540))
+        self.assertEqual(processor.pose_landmarker.last_image_shape, (540, 960, 3))
+        self.assertEqual(processor.gesture_recognizer.last_image_shape, (720, 1280, 3))
         timings = result["vision"]["timings"]
         for name in (
             "preprocessing_ms",
