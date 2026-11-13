@@ -46,6 +46,17 @@ class ControlStoreTests(unittest.TestCase):
             connection.close()
         self.assertEqual(ControlStore(self.path).get_gesture_confidence_threshold(), 0.6)
 
+    def test_controller_recovery_states_are_persistable(self):
+        self.store.begin_session("session-recovery", 100)
+        self.store.update_controller("session-recovery", "suspect", "person-1", 200)
+        self.store.update_controller("session-recovery", "reacquiring", "person-1", 900)
+        with sqlite3.connect(self.store.path) as connection:
+            row = connection.execute(
+                "SELECT state, track_id FROM controller_sessions WHERE session_id = ?",
+                ("session-recovery",),
+            ).fetchone()
+        self.assertEqual(row, ("reacquiring", "person-1"))
+
     def test_temporary_session_and_gesture_metadata_are_cleared(self):
         self.store.begin_session("session-1", 100)
         self.store.update_controller("session-1", "locked", "person-1", 120)
