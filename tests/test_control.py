@@ -148,6 +148,24 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(event["type"], "controller")
         self.assertEqual(event["state"], "locked")
         self.assertEqual(event["track_id"], "person-2")
+        self.assertIsNone(event["controller_id"])
+        recovered = build_controller_event(
+            state="reacquiring",
+            track_id="person-2",
+            controller_id="controller-abc",
+            timestamp_ms=1235,
+            reason="track_reacquiring",
+        )
+        self.assertEqual(recovered["state"], "reacquiring")
+        self.assertEqual(recovered["controller_id"], "controller-abc")
+        suspect = build_controller_event(
+            state="suspect",
+            track_id="person-2",
+            controller_id="controller-abc",
+            timestamp_ms=1236,
+            reason="track_unmatched",
+        )
+        self.assertEqual(suspect["state"], "suspect")
         with self.assertRaises(ValueError):
             build_controller_event(state="locked", track_id=None, timestamp_ms=1234, reason="bad")
 
