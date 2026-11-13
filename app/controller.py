@@ -200,10 +200,14 @@ class ControllerLock:
             return [("reacquiring", "track_reacquiring")]
         return []
 
-    def rebind_track(self, new_track_id: str, *, identity_confirmed: bool = False) -> bool:
-        """Attach a new pose track only when an external identity signal confirms it."""
+    def rebind_track(
+        self, new_track_id: str, now_ms: int, *, identity_confirmed: bool = False
+    ) -> bool:
+        """Attach a new pose track only with confirmed identity inside the recovery window."""
         if (
             self.status not in {"suspect", "reacquiring"}
+            or self.lost_since_ms is None
+            or int(now_ms) - self.lost_since_ms >= self.lost_timeout_ms
             or not identity_confirmed
             or not new_track_id
         ):
