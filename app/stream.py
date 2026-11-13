@@ -42,6 +42,24 @@ class _VisionProcessingFailure(RuntimeError):
 
 
 
+def _empty_controller() -> dict[str, Any]:
+    return {
+        "state": "unlocked",
+        "controller_id": None,
+        "track_id": None,
+        "lost_since_ms": None,
+        "recovery_deadline_ms": None,
+        "suspect_grace_ms": 800,
+        "reacquire_timeout_ms": 4000,
+        "reacquisition_count": 0,
+        "last_reacquisition_method": None,
+        "last_reason": "not_locked",
+        "lock_progress": 0,
+        "lock_required_frames": 2,
+        "lock_window_frames": 5,
+    }
+
+
 def _empty_vision() -> dict[str, Any]:
     return {
         "hand_count": 0,
@@ -211,7 +229,7 @@ class StreamManager:
         self._frame_height = 0
         self._vision = _empty_vision()
         self._tracks: list[dict[str, Any]] = []
-        self._controller: dict[str, Any] = {"state": "unlocked", "track_id": None, "lost_since_ms": None}
+        self._controller: dict[str, Any] = _empty_controller()
         self._session_id: str | None = None
         self._frame_sequence = 0
         self._last_frame_at_ms: int | None = None
@@ -246,7 +264,7 @@ class StreamManager:
             self._error = None
             self._latest_jpeg = None
             self._tracks = []
-            self._controller = {"state": "unlocked", "track_id": None, "lost_since_ms": None}
+            self._controller = _empty_controller()
             self._frame_width = 0
             self._frame_height = 0
             self._vision = _empty_vision()
@@ -323,7 +341,7 @@ class StreamManager:
             self._preview_fps = 0.0
             self._ai_fps = 0.0
             self._last_preview_encode_at = None
-            self._controller = {"state": "unlocked", "track_id": None, "lost_since_ms": None}
+            self._controller = _empty_controller()
             status = self.get_status()
         if was_locked:
             self.hub.publish_from_thread(
@@ -343,7 +361,7 @@ class StreamManager:
                 self._controller = processor.unlock_controller()
             else:
                 was_locked = self._controller["state"] != "unlocked"
-                self._controller = {"state": "unlocked", "track_id": None, "lost_since_ms": None}
+                self._controller = _empty_controller()
                 if was_locked:
                     self.hub.publish_from_thread(
                         build_controller_event(
@@ -700,7 +718,7 @@ class StreamManager:
                 self._processor = None
                 self._tracks = []
                 self._vision = _empty_vision()
-                self._controller = {"state": "unlocked", "track_id": None, "lost_since_ms": None}
+                self._controller = _empty_controller()
                 self._latest_jpeg = None
                 self._last_frame_at_ms = None
                 self._last_preview_frame_at_ms = None
@@ -737,7 +755,7 @@ class StreamManager:
             self._vision_frame_sequence = 0
             self._tracks = []
             self._vision = _empty_vision()
-            self._controller = {"state": "unlocked", "track_id": None, "lost_since_ms": None}
+            self._controller = _empty_controller()
             self._processor = None
             self._decoder = None
             self._session_id = None
