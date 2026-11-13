@@ -116,11 +116,14 @@ function renderCamera() {
   if (controller.state === "locked") {
     elements.cameraStatusLabel.textContent = "主控已锁定";
     elements.cameraStatus.dataset.state = "locked";
-  } else if (controller.state === "lost") {
-    elements.cameraStatusLabel.textContent = "主控暂时丢失 · 控制暂停";
+  } else if (controller.state === "suspect") {
+    elements.cameraStatusLabel.textContent = "主控短暂丢失 · 等待恢复";
+    elements.cameraStatus.dataset.state = "suspect";
+  } else if (controller.state === "reacquiring" || controller.state === "lost") {
+    elements.cameraStatusLabel.textContent = "正在重新寻找原主控 · 控制暂停";
     elements.cameraStatus.dataset.state = "lost";
   } else {
-    elements.cameraStatusLabel.textContent = "等待 OK 手势锁定";
+    elements.cameraStatusLabel.textContent = "等待比耶手势锁定";
     elements.cameraStatus.dataset.state = "running";
   }
 }
