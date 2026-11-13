@@ -34,7 +34,7 @@ class _GestureRecognizer:
 
 
 class VisionTimingTests(unittest.TestCase):
-    def test_process_reports_stage_timings_and_uses_shared_width_cap(self):
+    def test_process_uses_high_res_hand_search_before_lock_and_reports_timings(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             processor = VisionProcessor.__new__(VisionProcessor)
             processor.cv2 = cv2
