@@ -97,6 +97,7 @@ class ControllerIdentityManager:
             self.state = "locked"
             self.lost_since_ms = None
             if was_missing:
+                self.reacquisition_count += 1
                 self.last_reacquisition_method = "same_track"
                 self.last_reason = "reacquired_same_track"
             self._remember_other_tracks(tracks)
@@ -144,6 +145,7 @@ class ControllerIdentityManager:
             self.state = "locked"
             self.lost_since_ms = None
             if was_missing:
+                self.reacquisition_count += 1
                 self.last_reacquisition_method = "same_track"
                 self.last_reason = "reacquired_same_track"
                 return [("locked", "reacquired_same_track")]
