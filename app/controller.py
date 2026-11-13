@@ -94,20 +94,28 @@ def is_v_gesture(landmarks: Sequence[Any]) -> bool:
     return analyze_v_gesture(landmarks)["is_v"]
 
 
+from app.controller_identity import ControllerIdentityManager
+
+
 class ControllerLock:
-    """Locks one uniquely associated person after repeated V-sign observations."""
+    """Locks one person from a stable V-sign and delegates identity recovery."""
 
     def __init__(
         self,
         stable_frames: int = LOCK_STABLE_FRAMES,
         window_frames: int = LOCK_WINDOW_FRAMES,
-        lost_timeout_ms: int = CONTROLLER_LOST_TIMEOUT_MS,
+        lost_timeout_ms: int = 4000,
+        suspect_grace_ms: int = 800,
     ):
         if stable_frames < 1 or window_frames < stable_frames:
             raise ValueError("主控锁定帧数必须满足 1 <= stable_frames <= window_frames")
         self.stable_frames = int(stable_frames)
         self.window_frames = int(window_frames)
         self.lost_timeout_ms = int(lost_timeout_ms)
+        self.identity = ControllerIdentityManager(
+            suspect_grace_ms=suspect_grace_ms,
+            reacquire_timeout_ms=self.lost_timeout_ms,
+        )
         self.status = "unlocked"
         self.track_id: str | None = None
         self.lost_since_ms: int | None = None
@@ -122,7 +130,7 @@ class ControllerLock:
             if self._candidate_track is None:
                 return None
             self._append_candidate(False)
-            return self._try_lock()
+            return self._try_lock(now_ms)
 
         if any(track_id is None for track_id in track_ids):
             self._reset_candidate()
@@ -137,7 +145,7 @@ class ControllerLock:
             self._reset_candidate()
             self._candidate_track = candidate
         self._append_candidate(True)
-        return self._try_lock()
+        return self._try_lock(now_ms)
 
     def _append_candidate(self, detected: bool) -> None:
         self._candidate_history.append(bool(detected))
@@ -146,57 +154,52 @@ class ControllerLock:
         if not any(self._candidate_history):
             self._reset_candidate()
 
-    def _try_lock(self) -> str | None:
+    def _try_lock(self, now_ms: int) -> str | None:
         if self._candidate_track is None:
             return None
         if sum(self._candidate_history) < self.stable_frames:
             return None
-        self.status = "locked"
         self.track_id = self._candidate_track
-        self.lost_since_ms = None
+        self.identity.bind(self.track_id, None, now_ms)
+        self._sync_identity()
         self._reset_candidate()
         return "locked"
 
-    def update_tracking(self, visible_track_ids: set[str], now_ms: int) -> list[tuple[str, str]]:
-        if self.status == "unlocked" or self.track_id is None:
-            return []
-        if self.track_id in visible_track_ids:
-            if self.status == "lost":
-                self.status = "locked"
-                self.lost_since_ms = None
-                return [("locked", "reacquired")]
-            return []
-        if self.status == "locked":
-            self.status = "lost"
-            self.lost_since_ms = now_ms
-            return [("lost", "track_unmatched")]
-        assert self.lost_since_ms is not None
-        if now_ms - self.lost_since_ms >= self.lost_timeout_ms:
-            self.status = "unlocked"
-            self.track_id = None
-            self.lost_since_ms = None
-            self._reset_candidate()
-            return [("unlocked", "track_timeout")]
-        return []
+    def update_tracking(
+        self,
+        visible_track_ids: set[str],
+        now_ms: int,
+        tracks: list[dict[str, Any]] | None = None,
+    ) -> list[tuple[str, str]]:
+        if tracks is None:
+            transitions = self.identity.update_track_ids(visible_track_ids, now_ms)
+        else:
+            transitions = self.identity.update_tracks(tracks, now_ms)
+        self._sync_identity()
+        return transitions
 
     def unlock(self) -> bool:
         changed = self.status != "unlocked"
-        self.status = "unlocked"
-        self.track_id = None
-        self.lost_since_ms = None
+        self.identity.reset()
+        self._sync_identity()
         self._reset_candidate()
         return changed
 
     def snapshot(self) -> dict[str, Any]:
         return {
-            "state": self.status,
-            "track_id": self.track_id,
-            "lost_since_ms": self.lost_since_ms,
+            **self.identity.snapshot(),
             "lock_progress": sum(self._candidate_history),
             "lock_required_frames": self.stable_frames,
             "lock_window_frames": self.window_frames,
         }
 
+    def _sync_identity(self) -> None:
+        state = self.identity.snapshot()
+        self.status = state["state"]
+        self.track_id = state["track_id"]
+        self.lost_since_ms = state["lost_since_ms"]
+
     def _reset_candidate(self) -> None:
         self._candidate_track = None
         self._candidate_history = []
+
