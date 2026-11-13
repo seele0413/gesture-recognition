@@ -25,6 +25,7 @@ class VisionProcessor:
     """Processes a stream with session-local pose tracks and gesture control."""
 
     DEFAULT_MAX_INFERENCE_WIDTH = MAX_INFERENCE_WIDTH
+    DEFAULT_LOCK_ACQUISITION_WIDTH = 1280
     DEFAULT_NUM_POSES = 5
     DEFAULT_NUM_HANDS = 10
 
@@ -37,6 +38,7 @@ class VisionProcessor:
         max_inference_width: int = DEFAULT_MAX_INFERENCE_WIDTH,
         num_poses: int = DEFAULT_NUM_POSES,
         num_hands: int = DEFAULT_NUM_HANDS,
+        lock_acquisition_width: int = DEFAULT_LOCK_ACQUISITION_WIDTH,
     ):
         missing = [name for name in MODEL_FILES.values() if not (models_dir / name).is_file()]
         if missing:
@@ -51,6 +53,9 @@ class VisionProcessor:
         self.publish = publish
         self.session_id = session_id
         self.max_inference_width = max(1, int(max_inference_width))
+        self.lock_acquisition_width = max(
+            self.max_inference_width, int(lock_acquisition_width)
+        )
         self.num_poses = max(1, int(num_poses))
         self.num_hands = max(1, int(num_hands))
         self.model_temp_dir: Path | None = None
@@ -135,25 +140,54 @@ class VisionProcessor:
         full_started = time.perf_counter()
         preprocessing_started = full_started
         self.frame_index += 1
-        height, width = frame.shape[:2]
-        if width > self.max_inference_width:
-            scale = self.max_inference_width / width
-            frame = self.cv2.resize(frame, (self.max_inference_width, max(1, round(height * scale))))
-            height, width = frame.shape[:2]
+        source_frame = frame
+        source_height, source_width = source_frame.shape[:2]
 
-        rgb = self.cv2.cvtColor(frame, self.cv2.COLOR_BGR2RGB)
-        image = self.mp.Image(
-            image_format=self.mp.ImageFormat.SRGB,
-            data=self._numpy.ascontiguousarray(rgb),
+        # Keep pose tracking at the normal inference size. While no controller is
+        # locked, give the hand recognizer a larger image so distant V signs retain
+        # more pixels; after lock, return to the normal size to protect latency.
+        pose_frame = source_frame
+        if source_width > self.max_inference_width:
+            pose_scale = self.max_inference_width / source_width
+            pose_frame = self.cv2.resize(
+                source_frame,
+                (self.max_inference_width, max(1, round(source_height * pose_scale))),
+            )
+        height, width = pose_frame.shape[:2]
+
+        controller_state = self.controller.snapshot()["state"]
+        gesture_max_width = (
+            max(self.max_inference_width, getattr(self, "lock_acquisition_width", self.max_inference_width))
+            if controller_state == "unlocked"
+            else self.max_inference_width
         )
+        gesture_frame = source_frame
+        if source_width > gesture_max_width:
+            gesture_scale = gesture_max_width / source_width
+            gesture_frame = self.cv2.resize(
+                source_frame,
+                (gesture_max_width, max(1, round(source_height * gesture_scale))),
+            )
+
+        pose_rgb = self.cv2.cvtColor(pose_frame, self.cv2.COLOR_BGR2RGB)
+        gesture_rgb = self.cv2.cvtColor(gesture_frame, self.cv2.COLOR_BGR2RGB)
+        pose_image = self.mp.Image(
+            image_format=self.mp.ImageFormat.SRGB,
+            data=self._numpy.ascontiguousarray(pose_rgb),
+        )
+        gesture_image = self.mp.Image(
+            image_format=self.mp.ImageFormat.SRGB,
+            data=self._numpy.ascontiguousarray(gesture_rgb),
+        )
+        frame = pose_frame
         preprocessing_ms = frame_resize_ms + (time.perf_counter() - preprocessing_started) * 1000
         timestamp_ms = max(int(time.monotonic() * 1000), self.last_timestamp_ms + 1)
         self.last_timestamp_ms = timestamp_ms
         pose_started = time.perf_counter()
-        poses_result = self.pose_landmarker.detect_for_video(image, timestamp_ms)
+        poses_result = self.pose_landmarker.detect_for_video(pose_image, timestamp_ms)
         pose_inference_ms = (time.perf_counter() - pose_started) * 1000
         gesture_started = time.perf_counter()
-        gestures_result = self.gesture_recognizer.recognize_for_video(image, timestamp_ms)
+        gestures_result = self.gesture_recognizer.recognize_for_video(gesture_image, timestamp_ms)
         gesture_inference_ms = (time.perf_counter() - gesture_started) * 1000
         tracking_started = time.perf_counter()
         tracks = self.track_manager.update(poses_result.pose_landmarks, width, height, timestamp_ms)
