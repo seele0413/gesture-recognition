@@ -469,6 +469,7 @@ class VisionProcessor:
         controller_event = build_controller_event(
             state=state,
             track_id=self.controller.track_id,
+            controller_id=self.controller.controller_id,
             timestamp_ms=int(time.time() * 1000),
             reason=reason,
         )
@@ -512,8 +513,12 @@ class VisionProcessor:
         if controller["state"] != "locked" or not track_id:
             self.gate.reset()
             for hand in hands:
-                if controller["state"] == "lost":
-                    hand["action_reason"] = "主控轨迹暂时丢失，控制已暂停"
+                if controller["state"] in {"suspect", "reacquiring"}:
+                    hand["action_reason"] = (
+                        "主控轨迹暂时不可见，已暂停操作，正在尝试找回原主控"
+                        if controller["state"] == "suspect"
+                        else "正在重新关联原主控，恢复前不会接受其他人的操作"
+                    )
                     hand["reason_code"] = "master_track_lost"
                 elif hand["is_lock_gesture"] and hand.get("lock_track_id"):
                     hand["action_reason"] = (
