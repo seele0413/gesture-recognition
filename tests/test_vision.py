@@ -63,7 +63,7 @@ class VisionTimingTests(unittest.TestCase):
 
         self.assertEqual((result["frame_width"], result["frame_height"]), (960, 540))
         self.assertEqual(processor.pose_landmarker.last_image_shape, (540, 960, 3))
-        self.assertEqual(processor.gesture_recognizer.last_image_shape, (720, 1280, 3))
+        self.assertEqual(processor.gesture_recognizer.last_image_shape, (900, 1600, 3))
         timings = result["vision"]["timings"]
         for name in (
             "preprocessing_ms",
