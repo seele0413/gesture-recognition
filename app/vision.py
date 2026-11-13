@@ -370,7 +370,7 @@ class VisionProcessor:
             return hands
         pointer_hands = []
         for hand in hands:
-            if hand.get("track_id") is not None or hand.get("is_ok"):
+            if hand.get("track_id") is not None or hand.get("is_lock_gesture"):
                 pointer_hands.append(hand)
                 continue
             track_id, _reason = VisionProcessor._associate_hand(
