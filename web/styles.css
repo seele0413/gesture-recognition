@@ -156,6 +156,8 @@ svg { display: block; }
   background: #20231f;
 }
 
+.pip-placeholder[hidden] { display: none; }
+
 .camera-glyph svg { width: 22px; height: 22px; fill: none; stroke: #aeb5aa; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
 .pip-status {
   display: flex;
@@ -214,6 +216,26 @@ svg { display: block; }
   text-shadow: 0 1px 8px rgba(0, 0, 0, .9);
   pointer-events: none;
 }
+
+.scene-panel {
+  position: absolute;
+  z-index: 2;
+  left: clamp(20px, 5vw, 72px);
+  bottom: clamp(42px, 8vh, 96px);
+  width: min(640px, calc(100vw - 40px));
+  padding: 20px 24px;
+  border-left: 3px solid #a9c5b0;
+  color: #f7f7f2;
+  background: rgba(16, 20, 17, .82);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, .24);
+  pointer-events: none;
+}
+
+.scene-panel[hidden] { display: none; }
+.scene-panel h1 { margin: 0; font-size: 30px; font-weight: 650; line-height: 1.25; }
+.scene-panel p { margin: 8px 0 0; color: rgba(247, 247, 242, .82); font-size: 15px; line-height: 1.5; }
+.scene-panel .scene-notice { margin: 0 0 8px; color: #c1d8c6; font-size: 12px; }
+.scene-panel .scene-notice:empty { display: none; }
 
 .display-stage noscript { position: absolute; bottom: 24px; left: 32px; color: #fff; }
 
@@ -351,6 +373,7 @@ svg { display: block; }
 .video-placeholder[hidden] { display: none; }
 .stream-meta { display: flex; flex-wrap: wrap; gap: 8px 18px; padding-top: 11px; color: #7c857c; font-size: 11px; }
 .stream-meta #visionDiagnostics { color: #536357; font-variant-numeric: tabular-nums; }
+.stream-meta #pipelineDiagnostics { color: #536357; font-variant-numeric: tabular-nums; }
 .hand-diagnostics { min-height: 20px; padding-top: 7px; color: #536357; font-size: 11px; line-height: 1.5; }
 .settings-side { display: grid; gap: 16px; }
 .controller-state { display: grid; grid-template-columns: 9px minmax(0, 1fr) auto; align-items: center; gap: 11px; padding: 12px; background: #f5f7f4; }
@@ -370,6 +393,10 @@ svg { display: block; }
 .empty-state { padding: 8px 2px; color: #8b938a; font-size: 11px; }
 
 .mapping-grid { display: grid; gap: 0; }
+.confidence-value { color: #3e6d50; font-size: 14px; font-variant-numeric: tabular-nums; }
+.range-label { display: block; margin: 7px 0 5px; color: #4c564d; font-size: 12px; }
+.confidence-range { display: block; width: 100%; height: 22px; margin: 0; accent-color: #53845f; }
+.confidence-range:focus-visible { outline: 2px solid #9bb2a0; outline-offset: 2px; }
 .mapping-row { display: grid; grid-template-columns: minmax(120px, .8fr) minmax(150px, 1.2fr); align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid #edf0eb; }
 .mapping-row label { color: #4c564d; font-size: 12px; }
 .mapping-row select { width: 100%; min-width: 0; height: 34px; padding: 0 8px; border: 1px solid #dce2da; border-radius: 3px; color: #394239; background: #fff; font-size: 12px; }
@@ -399,6 +426,9 @@ svg { display: block; }
   .camera-pip { top: 62px; right: 14px; width: clamp(148px, 31vw, 220px); }
   .pip-status { font-size: 10px; }
   .gesture-feedback { top: 54px; left: 16px; max-width: 45vw; font-size: 10px; }
+  .scene-panel { left: 16px; bottom: 34px; width: min(460px, calc(100vw - 32px)); padding: 14px 16px; }
+  .scene-panel h1 { font-size: 21px; }
+  .scene-panel p { font-size: 13px; }
   .play-overlay { min-height: 46px; gap: 9px; padding: 0 14px 0 10px; font-size: 13px; }
   .play-symbol { width: 25px; height: 25px; }
   .settings-header { min-height: 64px; padding: 9px 14px; }

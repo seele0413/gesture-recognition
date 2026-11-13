@@ -9,7 +9,8 @@ import sqlite3
 
 from app.database import ControlStore
 from app.events import EventHub
-from app.stream import StreamManager
+from app.stream import StreamManager, _LatestFrameReader
+from app.decoder import PyAVDecoder
 
 
 class FakeCapture:
@@ -48,14 +49,31 @@ class DisconnectAfterOneFrame:
         self.closed = True
 
 
+class BurstDecoder:
+    def __init__(self, frame_count=100):
+        self.frame_count = frame_count
+        self.index = 0
+
+    def read(self):
+        if self.index >= self.frame_count:
+            return False, None
+        frame = np.full((4, 4, 3), self.index, dtype=np.uint8)
+        self.index += 1
+        return True, frame
+
+
 class FakeProcessor:
     def __init__(self, _store, _publish, _models_dir, _session_id):
         self.controller = type("Controller", (), {"snapshot": lambda _self: {"state": "unlocked", "track_id": None}})()
+        self.confidence_threshold = 0.6
+
+    def set_confidence_threshold(self, threshold):
+        self.confidence_threshold = threshold
 
     def unlock_controller(self):
         return {"state": "unlocked", "track_id": None}
 
-    def process(self, frame):
+    def process(self, frame, frame_resize_ms=0.0):
         height, width = frame.shape[:2]
         return {
             "frame": frame,
@@ -68,6 +86,35 @@ class FakeProcessor:
 
     def close(self):
         pass
+
+
+class RecoveringProcessor(FakeProcessor):
+    def __init__(self, store, publish, models_dir, session_id):
+        super().__init__(store, publish, models_dir, session_id)
+        self.failed_once = False
+
+    def process(self, frame, frame_resize_ms=0.0):
+        if not self.failed_once:
+            self.failed_once = True
+            raise ValueError("simulated damaged frame")
+        return super().process(frame, frame_resize_ms)
+
+
+class AlwaysFailProcessor(FakeProcessor):
+    def process(self, _frame, frame_resize_ms=0.0):
+        raise ValueError("simulated repeated frame failure")
+
+
+class BlockingProcessor(FakeProcessor):
+    def __init__(self, store, publish, models_dir, session_id):
+        super().__init__(store, publish, models_dir, session_id)
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    def process(self, frame, frame_resize_ms=0.0):
+        self.entered.set()
+        self.release.wait(timeout=3)
+        return super().process(frame, frame_resize_ms)
 
 
 class StreamManagerTests(unittest.TestCase):
@@ -86,6 +133,24 @@ class StreamManagerTests(unittest.TestCase):
         self.manager.stop()
         self.temp_dir.cleanup()
 
+    def test_latest_frame_reader_discards_backlog_and_keeps_newest_frame(self):
+        decoder = BurstDecoder(frame_count=100)
+        dropped = []
+        reader = _LatestFrameReader(decoder, threading.Event(), lambda: dropped.append(1))
+        reader.start()
+        self.assertTrue(reader.wait_finished(timeout=2))
+
+        item = reader.read(timeout=0.01)
+        self.assertIsNotNone(item)
+        frame, _received_at = item
+        self.assertEqual(int(frame[0, 0, 0]), 99)
+        self.assertEqual(reader.dropped_frames, 99)
+        self.assertEqual(len(dropped), 99)
+        with self.assertRaisesRegex(RuntimeError, "decoder_read_failed"):
+            reader.read(timeout=0.01)
+        reader.stop()
+        reader.join(timeout=1)
+
     def test_substitute_stream_runs_without_camera_hardware(self):
         self.manager.start("rtsp://camera.local/live")
         deadline = time.monotonic() + 5
@@ -100,6 +165,14 @@ class StreamManagerTests(unittest.TestCase):
         self.assertTrue(status["frame_fresh"])
         self.assertGreater(status["frame_sequence"], 0)
         self.assertIsNotNone(status["last_frame_at_ms"])
+        self.assertIsInstance(status["last_vision_ms"], float)
+        self.assertIsInstance(status["last_jpeg_encode_ms"], float)
+        self.assertIsInstance(status["last_queue_delay_ms"], float)
+        self.assertIsInstance(status["preview_fps"], float)
+        self.assertIsInstance(status["ai_processing_fps"], float)
+        self.assertGreater(status["preview_frame_sequence"], 0)
+        self.assertGreater(status["vision_frame_sequence"], 0)
+        self.assertGreaterEqual(status["dropped_frames"], 0)
         self.assertEqual(status["controller"]["state"], "unlocked")
         self.assertIsNotNone(self.manager.get_jpeg())
         connection = sqlite3.connect(self.store.path)
@@ -114,6 +187,113 @@ class StreamManagerTests(unittest.TestCase):
             self.assertEqual(connection.execute("SELECT count(*) FROM controller_sessions").fetchone()[0], 0)
         finally:
             connection.close()
+
+    def test_preview_keeps_advancing_while_ai_processing_is_blocked(self):
+        processors = []
+
+        def processor_factory(store, publish, models_dir, session_id):
+            processor = BlockingProcessor(store, publish, models_dir, session_id)
+            processors.append(processor)
+            return processor
+
+        manager = StreamManager(
+            self.store,
+            EventHub(),
+            capture_factory=lambda _url: FakeCapture(),
+            processor_factory=processor_factory,
+        )
+        try:
+            manager.start("rtsp://camera.local/live")
+            deadline = time.monotonic() + 3
+            while time.monotonic() < deadline and not processors:
+                time.sleep(0.01)
+            self.assertTrue(processors)
+            self.assertTrue(processors[0].entered.wait(timeout=2))
+            sequence_at_ai_start = manager.get_status()["preview_frame_sequence"]
+            deadline = time.monotonic() + 1.5
+            while time.monotonic() < deadline:
+                status = manager.get_status()
+                if status["preview_frame_sequence"] >= sequence_at_ai_start + 5:
+                    break
+                time.sleep(0.02)
+            self.assertGreaterEqual(status["preview_frame_sequence"], sequence_at_ai_start + 5)
+            self.assertEqual(status["frame_sequence"], 0)
+            self.assertTrue(status["frame_ready"])
+            self.assertIsNone(status["last_frame_at_ms"])
+            self.assertIsNotNone(status["last_preview_frame_at_ms"])
+            self.assertGreater(status["dropped_frames"], 0)
+            self.assertIsNotNone(manager.get_jpeg())
+            processors[0].release.set()
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline and manager.get_status()["frame_sequence"] == 0:
+                time.sleep(0.02)
+            self.assertGreater(manager.get_status()["frame_sequence"], 0)
+        finally:
+            if processors:
+                processors[0].release.set()
+            manager.stop()
+
+    def test_confidence_threshold_update_reaches_running_processor(self):
+        self.manager.start("rtsp://camera.local/live")
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline and self.manager.get_status()["state"] != "running":
+            time.sleep(0.02)
+        settings = self.manager.set_gesture_confidence_threshold(0.65)
+        self.assertEqual(settings["gesture_confidence_threshold"], 0.65)
+        self.assertEqual(self.manager._processor.confidence_threshold, 0.65)
+
+    def test_single_processing_error_is_skipped_without_reconnecting(self):
+        capture = FakeCapture()
+        manager = StreamManager(
+            self.store,
+            EventHub(),
+            capture_factory=lambda _url: capture,
+            processor_factory=RecoveringProcessor,
+        )
+        try:
+            manager.start("rtsp://camera.local/live")
+            deadline = time.monotonic() + 4
+            while time.monotonic() < deadline:
+                status = manager.get_status()
+                if status["frame_ready"]:
+                    break
+                time.sleep(0.02)
+            self.assertEqual(status["state"], "running")
+            self.assertTrue(status["frame_ready"])
+            self.assertEqual(status["reconnect_count"], 0)
+        finally:
+            manager.stop()
+
+    def test_repeated_processing_errors_recreate_the_stream_session(self):
+        created_processors = 0
+
+        def processor_factory(store, publish, models_dir, session_id):
+            nonlocal created_processors
+            created_processors += 1
+            processor_type = AlwaysFailProcessor if created_processors == 1 else FakeProcessor
+            return processor_type(store, publish, models_dir, session_id)
+
+        manager = StreamManager(
+            self.store,
+            EventHub(),
+            processor_factory=processor_factory,
+            decoder_factory=lambda _url: FakeCapture(),
+            reconnect_delays=(0.02,),
+        )
+        try:
+            manager.start("rtsp://camera.local/live")
+            deadline = time.monotonic() + 4
+            while time.monotonic() < deadline:
+                status = manager.get_status()
+                if created_processors >= 2 and status["frame_ready"]:
+                    break
+                time.sleep(0.02)
+            self.assertGreaterEqual(created_processors, 2)
+            self.assertGreaterEqual(status["reconnect_count"], 1)
+            self.assertEqual(status["state"], "running")
+            self.assertTrue(status["frame_ready"])
+        finally:
+            manager.stop()
 
     def test_manual_unlock_route_updates_controller_state(self):
         state = self.manager.unlock_controller()

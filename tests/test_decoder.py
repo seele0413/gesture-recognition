@@ -1,12 +1,16 @@
 import unittest
 from types import SimpleNamespace
 
+import numpy as np
+
 from app.decoder import PyAVDecoder
 
 
 class FakeFrame:
     def to_ndarray(self, *, format):
-        return (format, "pixels")
+        if format != "bgr24":
+            raise ValueError("unexpected pixel format")
+        return np.zeros((2, 2, 3), dtype=np.uint8)
 
 
 class FakeContainer:
@@ -52,7 +56,10 @@ class PyAVDecoderTests(unittest.TestCase):
         self.assertEqual(kwargs["timeout"], (3, 4))
         self.assertEqual(kwargs["options"]["rtsp_transport"], "tcp")
         self.assertEqual(container.decoded_stream, 2)
-        self.assertEqual(decoder.read(), (True, ("bgr24", "pixels")))
+        ok, image = decoder.read()
+        self.assertTrue(ok)
+        self.assertEqual(image.shape, (2, 2, 3))
+        self.assertEqual(image.dtype, np.uint8)
         self.assertEqual(decoder.read(), (False, None))
         decoder.close()
         self.assertTrue(container.closed)
