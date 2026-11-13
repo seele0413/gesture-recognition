@@ -3,6 +3,8 @@ from __future__ import annotations
 import math
 from typing import Any, Sequence
 
+from app.controller_identity import ControllerIdentityManager
+
 
 LOCK_STABLE_FRAMES = 2
 LOCK_WINDOW_FRAMES = 5
@@ -11,7 +13,7 @@ V_FINGER_EXTENSION_COSINE = 0.15
 V_FINGER_FOLDED_COSINE = 0.78
 V_FINGER_LENGTH_RATIO = 0.045
 V_FINGER_SEPARATION_RATIO = 0.16
-CONTROLLER_LOST_TIMEOUT_MS = 2000
+CONTROLLER_LOST_TIMEOUT_MS = 4000
 
 
 def _xy(point: Any) -> tuple[float, float] | None:
@@ -94,9 +96,6 @@ def is_v_gesture(landmarks: Sequence[Any]) -> bool:
     return analyze_v_gesture(landmarks)["is_v"]
 
 
-from app.controller_identity import ControllerIdentityManager
-
-
 class ControllerLock:
     """Locks one person from a stable V-sign and delegates identity recovery."""
 
@@ -104,7 +103,7 @@ class ControllerLock:
         self,
         stable_frames: int = LOCK_STABLE_FRAMES,
         window_frames: int = LOCK_WINDOW_FRAMES,
-        lost_timeout_ms: int = 4000,
+        lost_timeout_ms: int = CONTROLLER_LOST_TIMEOUT_MS,
         suspect_grace_ms: int = 800,
     ):
         if stable_frames < 1 or window_frames < stable_frames:
