@@ -16,6 +16,7 @@ const pendingCommands = new Map();
 const pendingPageCommands = new Map();
 
 let pages = new Map();
+let defaultPageId = null;
 let currentPageId = null;
 let pageGeneration = 0;
 let pageReadyWaiter = null;
@@ -46,6 +47,14 @@ function rejectPendingPageCommands(reason) {
   pendingPageCommands.clear();
 }
 
+function rejectPageReadyWaiter(reason) {
+  if (!pageReadyWaiter) return;
+  const waiter = pageReadyWaiter;
+  pageReadyWaiter = null;
+  window.clearTimeout(waiter.timer);
+  waiter.reject(new Error(reason));
+}
+
 function navigatePage(pageId, timeoutMs = COMMAND_TIMEOUT_FALLBACK_MS) {
   const page = pages.get(pageId);
   if (!page) throw new Error("展示主页未登记：" + String(pageId));
@@ -55,12 +64,13 @@ function navigatePage(pageId, timeoutMs = COMMAND_TIMEOUT_FALLBACK_MS) {
   const resolvedPath = new URL(page.path, DISPLAY_ORIGIN);
   if (!page.path.startsWith("/static/pages/")
       || resolvedPath.origin !== DISPLAY_ORIGIN
-      || !resolvedPath.pathname.startsWith("/static/pages/")
+      || resolvedPath.pathname !== page.path
       || resolvedPath.search
       || resolvedPath.hash) {
     throw new Error("展示主页路径不在本地登记范围内");
   }
 
+  rejectPageReadyWaiter("展示页面切换请求已被更新");
   rejectPendingPageCommands("展示页面正在切换，当前页面动作已中止");
   const generation = ++pageGeneration;
   currentPageId = null;
@@ -117,11 +127,17 @@ function sendPageCommand(command, timeoutMs = COMMAND_TIMEOUT_FALLBACK_MS) {
     timer,
     generation: pageGeneration,
   });
-  postToFrame({
-    type: "display:command",
-    generation: pageGeneration,
-    command,
-  });
+  try {
+    postToFrame({
+      type: "display:command",
+      generation: pageGeneration,
+      command,
+    });
+  } catch (error) {
+    pendingPageCommands.delete(key);
+    window.clearTimeout(timer);
+    rejectPromise(error);
+  }
   return promise;
 }
 
@@ -137,7 +153,8 @@ async function executeDisplayCommand(command) {
       return { route: command.params.route, scheduled: true };
     }
     case "web.return_home":
-      if (currentPageId !== "promo") await navigatePage("promo", timeoutMs);
+      if (!defaultPageId) throw new Error("默认展示主页尚未初始化");
+      if (currentPageId !== defaultPageId) await navigatePage(defaultPageId, timeoutMs);
       return await sendPageCommand(command, timeoutMs);
     default:
       return await sendPageCommand(command, timeoutMs);
@@ -216,7 +233,7 @@ function connectDisplayCommands() {
   displaySocket = socket;
   socket.addEventListener("open", () => {
     if (displaySocket === socket) {
-      setShellStatus("connected", "展示控制中心已连接 · " + pageLabel(currentPageId || "promo"));
+      setShellStatus("connected", "展示控制中心已连接 · " + pageLabel(currentPageId || defaultPageId || "展示页"));
     }
   });
   socket.addEventListener("message", (message) => {
@@ -272,7 +289,7 @@ async function initializeDisplayShell() {
           || typeof page.path !== "string" || !page.path.startsWith("/static/pages/")) continue;
       pages.set(page.page_id, page);
     }
-    const defaultPageId = payload.default_page_id;
+    defaultPageId = payload.default_page_id;
     if (typeof defaultPageId !== "string" || !pages.has(defaultPageId)) {
       throw new Error("默认展示主页未在白名单中登记");
     }
@@ -288,9 +305,16 @@ async function initializeDisplayShell() {
 window.addEventListener("pagehide", () => {
   window.clearTimeout(displayReconnectTimer);
   window.clearTimeout(eventReconnectTimer);
-  rejectPendingPageCommands("展示控制中心已关闭");
+  rejectPageReadyWaiter("展示控制中心已离开页面");
+  rejectPendingPageCommands("展示控制中心已离开页面");
   if (displaySocket) displaySocket.close();
   if (eventSocket) eventSocket.close();
+});
+
+window.addEventListener("pageshow", (event) => {
+  if (!event.persisted) return;
+  connectDisplayCommands();
+  connectEvents();
 });
 
 initializeDisplayShell();

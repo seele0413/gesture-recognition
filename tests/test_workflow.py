@@ -12,7 +12,7 @@ from app.ppt_actions import PresentationAdapter
 from app.video_actions import register_video_actions
 from app.workflow import new_workflow
 from app.workflow_validator import validate_workflow
-from app.web_actions import BrowserCommandAdapter
+from app.web_actions import BrowserCommandAdapter, register_web_actions
 
 
 class WorkflowValidatorTests(unittest.TestCase):
@@ -403,6 +403,79 @@ class DisplayCommandTests(unittest.IsolatedAsyncioTestCase):
         await channel.disconnect(socket)
         with self.assertRaises(ConnectionError):
             await pending
+
+    async def test_ack_with_wrong_run_id_is_ignored(self):
+        channel = DisplayCommandChannel()
+        socket = _FakeSocket()
+        await channel.connect(socket)
+        pending = asyncio.create_task(channel.execute(
+            {"run_id": "run-a", "command_id": "command-a", "action": "web.navigate_page",
+             "params": {"page_id": "factory"}}, 1000
+        ))
+        await asyncio.sleep(0)
+        await channel.receive(socket, {
+            "type": "ack", "run_id": "run-b", "command_id": "command-a",
+            "success": True, "result": {"page_id": "product"},
+        })
+        await asyncio.sleep(0)
+        self.assertFalse(pending.done())
+        await channel.receive(socket, {
+            "type": "ack", "run_id": "run-a", "command_id": "command-a",
+            "success": True, "result": {"page_id": "factory"},
+        })
+        self.assertEqual(await pending, {"page_id": "factory"})
+        await channel.disconnect(socket)
+
+    async def test_negative_ack_fails_workflow_action_with_bounded_error(self):
+        channel = DisplayCommandChannel()
+        socket = _FakeSocket()
+        await channel.connect(socket)
+        pending = asyncio.create_task(channel.execute(
+            {"run_id": "run-a", "command_id": "command-b", "action": "web.navigate_page",
+             "params": {"page_id": "missing"}}, 1000
+        ))
+        await asyncio.sleep(0)
+        await channel.receive(socket, {
+            "type": "ack", "run_id": "run-a", "command_id": "command-b",
+            "success": False, "error": "页面未登记",
+        })
+        with self.assertRaisesRegex(RuntimeError, "页面未登记"):
+            await pending
+        await channel.disconnect(socket)
+
+    async def test_timeout_removes_pending_command(self):
+        channel = DisplayCommandChannel()
+        socket = _FakeSocket()
+        await channel.connect(socket)
+        with self.assertRaises(asyncio.TimeoutError):
+            await channel.execute(
+                {"run_id": "run-a", "command_id": "command-timeout", "action": "web.navigate_page",
+                 "params": {"page_id": "product"}}, 10
+            )
+        self.assertEqual(channel._pending, {})
+        await channel.disconnect(socket)
+
+    async def test_registered_navigate_page_action_sends_page_id_and_waits_for_ack(self):
+        channel = DisplayCommandChannel()
+        socket = _FakeSocket()
+        await channel.connect(socket)
+        registry = ActionRegistry()
+        register_web_actions(registry, BrowserCommandAdapter(channel))
+        schema = registry.schema_map()["web.navigate_page"]
+        self.assertEqual(schema["properties"]["page_id"]["enum"], ["promo", "factory", "product"])
+        pending = asyncio.create_task(registry.execute(
+            "web.navigate_page", {"page_id": "factory"},
+            {"run_id": "run-a", "command_id": "command-page", "timeout_ms": 1000},
+        ))
+        await asyncio.sleep(0)
+        self.assertEqual(socket.sent[0]["action"], "web.navigate_page")
+        self.assertEqual(socket.sent[0]["params"], {"page_id": "factory"})
+        await channel.receive(socket, {
+            "type": "ack", "run_id": "run-a", "command_id": "command-page",
+            "success": True, "result": {"page_id": "factory", "changed": True},
+        })
+        self.assertEqual(await pending, {"page_id": "factory", "changed": True})
+        await channel.disconnect(socket)
 
 
 if __name__ == "__main__":

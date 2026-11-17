@@ -99,7 +99,7 @@ flowchart LR
 
 PPT 动作：`ppt.open_deck`、`ppt.start_slideshow`、`ppt.next_slide`、`ppt.previous_slide`、`ppt.goto_slide`、`ppt.end_slideshow`。每个动作都要求登记的 `deck_id`；跳转另需 `slide_number` 1～10000。所有 COM 调用在专用 STA 线程中执行。
 
-外层展示 Shell 收到 `{type:"command", run_id, command_id, action, params, timeout_ms}` 后，先处理页面调度动作，再将普通展示动作通过严格校验来源窗口和同源 origin 的 `postMessage` 转发给当前 iframe 页面，并等待页面返回结果。Shell 最终返回 `{type:"ack", run_id, command_id, success, result, error}`。切换页面时，Shell 等待新页面发送匹配 page_id 与 generation 的 ready 消息后才确认成功；页面路径来自服务端白名单，不接受工作流提供的任意 URL。服务端只接收当前单一 Shell 客户端、且 run/command ID 均匹配的确认。Shell 在页面切换期间持续持有 `/ws/display`，并对已完成 command ID 去重。超时单独记录为 `timeout`，其它错误为 `failed`，取消为 `cancelled`；错误不会静默进入下一个节点。运行记录仅存触发摘要，不保留 21 个手部关键点。
+外层展示 Shell 收到 `{type:"command", run_id, command_id, action, params, timeout_ms}` 后，先处理页面调度动作，再将普通展示动作通过严格校验来源窗口和同源 origin 的 `postMessage` 转发给当前 iframe 页面，并等待页面返回结果。Shell 最终返回 `{type:"ack", run_id, command_id, success, result, error}`。切换页面时，Shell 等待新页面发送匹配 page_id 与 generation 的 ready 消息后才确认成功；页面路径来自服务端白名单，不接受工作流提供的任意 URL。服务端只接收当前单一 Shell 客户端、且 run/command ID 均匹配的确认。Shell 在页面切换期间持续持有 `/ws/display`，并对已完成 command ID 去重。连续发起页面切换时采用最新 generation，旧页面加载等待和旧页面动作会被明确拒绝，不会悬挂到超时；页面离开/进入浏览器后退缓存（BFCache）时清理等待项，并在恢复时重连两条 WebSocket。页面动作转发失败会立即清理 pending 记录。超时单独记录为 `timeout`，其它错误为 `failed`，取消为 `cancelled`；错误不会静默进入下一个节点。运行记录仅存触发摘要，不保留 21 个手部关键点。
 
 ## 编辑与 API
 

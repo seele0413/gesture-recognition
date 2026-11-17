@@ -106,6 +106,26 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(actions["web.navigate_page"]["schema"]["properties"]["page_id"]["enum"],
                          ["promo", "factory", "product"])
 
+    def test_display_shell_keeps_its_channels_and_cleans_up_superseded_navigation(self):
+        shell = self.client.get("/static/display-shell.js").text
+        self.assertIn('new WebSocket(protocol + "//" + window.location.host + "/ws/display")', shell)
+        self.assertIn('new WebSocket(protocol + "//" + window.location.host + "/ws/events")', shell)
+        self.assertIn("defaultPageId = payload.default_page_id", shell)
+        self.assertIn("function rejectPageReadyWaiter(reason)", shell)
+        self.assertIn('rejectPageReadyWaiter("展示页面切换请求已被更新")', shell)
+        self.assertIn('rejectPageReadyWaiter("展示控制中心已离开页面")', shell)
+        self.assertIn('window.addEventListener("pageshow"', shell)
+        self.assertIn("if (event.persisted)", shell)
+        self.assertIn("pendingPageCommands.delete(key)", shell)
+        self.assertIn("resolvedPath.pathname !== page.path", shell)
+
+        promo_script = self.client.get("/static/player.js").text
+        registered_script = self.client.get("/static/display-page.js").text
+        self.assertIn('page_id: "promo"', promo_script)
+        self.assertIn('type: "display:ready"', promo_script)
+        self.assertIn("page_id: pageId", registered_script)
+        self.assertIn('type: "display:ready"', registered_script)
+
     def test_workflow_rejects_unregistered_display_page_ids(self):
         workflow = new_workflow("无效展示页面")
         workflow["nodes"][0].update({
