@@ -6,10 +6,11 @@
     <meta name="theme-color" content="#f1f3f0">
     <title>康晋电气 · 工作流编排</title>
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="/static/styles.css?v=20261117-pointer-3">
-    <link rel="stylesheet" href="/static/workflows.css?v=20261117-pointer-3">
-    <script src="/static/pointer-geometry.js?v=20261117-pointer-3" defer></script>
-    <script src="/static/workflows.js?v=20261117-pointer-3" defer></script>
+    <link rel="stylesheet" href="/static/styles.css?v=20261117-pointer-4">
+    <link rel="stylesheet" href="/static/workflows.css?v=20261117-pointer-4">
+    <script src="/static/pointer-geometry.js?v=20261117-pointer-4" defer></script>
+    <script src="/static/pointer-event-buffer.js?v=20261117-pointer-4" defer></script>
+    <script src="/static/workflows.js?v=20261117-pointer-4" defer></script>
   </head>
   <body class="workflow-page">
     <header class="workflow-header">
@@ -70,6 +71,7 @@
             <button id="pointerMode" class="tool-button" type="button" aria-pressed="false" title="先锁定主控；伸出食指移动，拇指与食指捏合抓取节点，松开完成放置">手势拖拽：关闭</button>
             <button id="pointerMirror" class="tool-button" type="button" aria-pressed="false" title="切换摄像头横向镜像">镜像：关闭</button>
             <button id="pointerCalibrate" class="tool-button" type="button" disabled title="依次对准画布四角并捏合采集，校正摄像头透视偏差">四角校准</button>
+            <button id="pointerDiagnostics" class="tool-button" type="button" aria-pressed="false" title="查看指针事件、帧处理和节点更新性能">指针诊断</button>
             <button id="autoArrange" class="icon-tool" type="button" title="自动排列节点" aria-label="自动排列节点">↔</button>
             <button id="zoomOut" class="icon-tool" type="button" title="缩小画布" aria-label="缩小画布">−</button>
             <span id="zoomLabel" class="zoom-label">100%</span>
@@ -77,6 +79,25 @@
           </div>
         </div>
         <div id="validationMessage" class="validation-message" role="status" aria-live="polite"></div>
+        <aside id="pointerDiagnosticsPanel" class="pointer-diagnostics-panel" hidden aria-label="手势指针性能诊断">
+          <div class="pointer-diagnostics-header">
+            <strong>手势指针诊断</strong>
+            <button id="pointerDiagnosticsClose" class="icon-tool" type="button" aria-label="关闭指针诊断">×</button>
+          </div>
+          <div class="pointer-diagnostics-grid">
+            <div><span>事件频率</span><strong id="pointerDiagRate">--</strong></div>
+            <div><span>事件间隔 P95</span><strong id="pointerDiagGap">--</strong></div>
+            <div><span>RAF 等待 P95</span><strong id="pointerDiagRaf">--</strong></div>
+            <div><span>事件处理最大值</span><strong id="pointerDiagProcess">--</strong></div>
+            <div><span>节点更新最大值</span><strong id="pointerDiagDrag">--</strong></div>
+            <div><span>合并移动样本</span><strong id="pointerDiagCoalesced">0</strong></div>
+          </div>
+          <p id="pointerDiagState" class="pointer-diagnostics-state">等待指针事件</p>
+          <div class="pointer-diagnostics-actions">
+            <button id="pointerDiagnosticsReset" class="tool-button" type="button">重置统计</button>
+            <button id="pointerDiagnosticsExport" class="tool-button" type="button">导出 JSON</button>
+          </div>
+        </aside>
         <div id="canvasViewport" class="canvas-viewport">
           <div id="canvasWorld" class="canvas-world">
             <svg id="edgeLayer" class="edge-layer" aria-hidden="true">

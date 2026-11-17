@@ -18,6 +18,18 @@ const ui = {
   pointerMode: document.getElementById("pointerMode"),
   pointerMirror: document.getElementById("pointerMirror"),
   pointerCalibrate: document.getElementById("pointerCalibrate"),
+  pointerDiagnostics: document.getElementById("pointerDiagnostics"),
+  pointerDiagnosticsPanel: document.getElementById("pointerDiagnosticsPanel"),
+  pointerDiagnosticsClose: document.getElementById("pointerDiagnosticsClose"),
+  pointerDiagnosticsReset: document.getElementById("pointerDiagnosticsReset"),
+  pointerDiagnosticsExport: document.getElementById("pointerDiagnosticsExport"),
+  pointerDiagRate: document.getElementById("pointerDiagRate"),
+  pointerDiagGap: document.getElementById("pointerDiagGap"),
+  pointerDiagRaf: document.getElementById("pointerDiagRaf"),
+  pointerDiagProcess: document.getElementById("pointerDiagProcess"),
+  pointerDiagDrag: document.getElementById("pointerDiagDrag"),
+  pointerDiagCoalesced: document.getElementById("pointerDiagCoalesced"),
+  pointerDiagState: document.getElementById("pointerDiagState"),
   autoArrange: document.getElementById("autoArrange"),
   zoomOut: document.getElementById("zoomOut"),
   zoomIn: document.getElementById("zoomIn"),
@@ -71,9 +83,18 @@ let pointerDownPoint = null;
 let pointerGrabOffset = null;
 let pointerMoved = false;
 let mouseDragOffset = null;
-let latestPointerEvent = null;
+const pointerEventBuffer = new PointerEventBuffer();
 let pointerAnimationFrame = null;
+let pointerDiagnosticsTimer = null;
 let pointerCalibrationSession = null;
+const POINTER_METRIC_SAMPLE_LIMIT = 240;
+const pointerMetrics = {
+  receivedTimes: [], eventGaps: [], rafWaits: [], processDurations: [], dragDurations: [], eventHistory: [],
+  lastReceivedAt: null, lastReceivedPressed: null, lastReceivedActive: null, lastIdentityRejected: false,
+  lastRafScheduledAt: null, received: 0, processed: 0, coalesced: 0, pressTransitions: 0,
+  releaseTransitions: 0, dropouts: 0, identityRejects: 0, dragStarts: 0, dragReleases: 0,
+  dragCancels: 0, currentState: "等待指针事件",
+};
 let pointerIgnoreUntilRelease = false;
 let lastPointerPressed = false;
 const POINTER_CALIBRATION_TARGETS = [
@@ -118,6 +139,156 @@ function loadPointerMirrorPreference() {
   } catch (_error) {
     return false;
   }
+}
+
+function pushMetricSample(samples, value) {
+  if (!Number.isFinite(value)) return;
+  samples.push(value);
+  if (samples.length > POINTER_METRIC_SAMPLE_LIMIT) samples.shift();
+}
+
+function metricPercentile(samples, percentile) {
+  if (!samples.length) return null;
+  const sorted = [...samples].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * percentile) - 1)];
+}
+
+function metricMaximum(samples) {
+  return samples.length ? Math.max(...samples) : null;
+}
+
+function updatePointerDiagnostics() {
+  if (!ui.pointerDiagnosticsPanel || ui.pointerDiagnosticsPanel.hidden) return;
+  const now = performance.now();
+  const recentTimes = pointerMetrics.receivedTimes.filter((value) => now - value <= 5000);
+  let rate = 0;
+  if (recentTimes.length > 1) {
+    const span = recentTimes[recentTimes.length - 1] - recentTimes[0];
+    if (span > 0) rate = (recentTimes.length - 1) * 1000 / span;
+  }
+  if (pointerMetrics.lastReceivedAt === null || now - pointerMetrics.lastReceivedAt > 1500) rate = 0;
+  const formatMs = (value) => value === null ? "--" : value.toFixed(1) + " ms";
+  ui.pointerDiagRate.textContent = rate.toFixed(1) + " Hz";
+  ui.pointerDiagGap.textContent = formatMs(metricPercentile(pointerMetrics.eventGaps, 0.95));
+  ui.pointerDiagRaf.textContent = formatMs(metricPercentile(pointerMetrics.rafWaits, 0.95));
+  ui.pointerDiagProcess.textContent = formatMs(metricMaximum(pointerMetrics.processDurations));
+  ui.pointerDiagDrag.textContent = formatMs(metricMaximum(pointerMetrics.dragDurations));
+  ui.pointerDiagCoalesced.textContent = String(pointerMetrics.coalesced);
+  ui.pointerDiagState.textContent = [
+    pointerMetrics.currentState, "接收 " + pointerMetrics.received, "处理 " + pointerMetrics.processed,
+    "捏合 " + pointerMetrics.pressTransitions + "/" + pointerMetrics.releaseTransitions,
+    "拖拽 " + pointerMetrics.dragStarts + "/" + pointerMetrics.dragReleases,
+    "中断 " + pointerMetrics.dragCancels,
+  ].join(" · ");
+}
+
+function recordPointerReceived(event) {
+  const now = performance.now();
+  const pressed = Boolean(event?.pressed);
+  const active = Boolean(event?.active);
+  const rejected = event?.identity_confirmed === false;
+  if (pointerMetrics.lastReceivedAt !== null) pushMetricSample(pointerMetrics.eventGaps, now - pointerMetrics.lastReceivedAt);
+  if (pointerMetrics.lastReceivedPressed !== null && pressed !== pointerMetrics.lastReceivedPressed) {
+    if (pressed) pointerMetrics.pressTransitions += 1;
+    else pointerMetrics.releaseTransitions += 1;
+  }
+  if (pointerMetrics.lastReceivedActive === true && !active) pointerMetrics.dropouts += 1;
+  if (!pointerMetrics.lastIdentityRejected && rejected) pointerMetrics.identityRejects += 1;
+  pointerMetrics.lastReceivedAt = now;
+  pointerMetrics.lastReceivedPressed = pressed;
+  pointerMetrics.lastReceivedActive = active;
+  pointerMetrics.lastIdentityRejected = rejected;
+  pointerMetrics.received += 1;
+  pushMetricSample(pointerMetrics.receivedTimes, now);
+  pointerMetrics.eventHistory.push({
+    at_ms: Math.round(now), active, pressed, identity_confirmed: !rejected,
+    x: Number.isFinite(Number(event?.x)) ? Number(event.x) : null,
+    y: Number.isFinite(Number(event?.y)) ? Number(event.y) : null,
+  });
+  if (pointerMetrics.eventHistory.length > 120) pointerMetrics.eventHistory.shift();
+  updatePointerDiagnostics();
+}
+
+function recordPointerProcessed(startedAt, event) {
+  pushMetricSample(pointerMetrics.processDurations, performance.now() - startedAt);
+  pointerMetrics.processed += 1;
+  pointerMetrics.currentState = !event?.active
+    ? "指针已释放"
+    : event.identity_confirmed === false
+      ? "身份未确认"
+      : event.pressed
+        ? (pointerDragNodeId ? "节点拖拽中" : "捏合按下")
+        : "光标移动中";
+  updatePointerDiagnostics();
+}
+
+function recordPointerDragUpdate(durationMs) {
+  pushMetricSample(pointerMetrics.dragDurations, durationMs);
+  updatePointerDiagnostics();
+}
+
+function setPointerDiagnosticsOpen(open) {
+  ui.pointerDiagnosticsPanel.hidden = !open;
+  ui.pointerDiagnostics.setAttribute("aria-pressed", String(Boolean(open)));
+  if (open) {
+    updatePointerDiagnostics();
+    if (pointerDiagnosticsTimer === null) pointerDiagnosticsTimer = window.setInterval(updatePointerDiagnostics, 250);
+  } else if (pointerDiagnosticsTimer !== null) {
+    window.clearInterval(pointerDiagnosticsTimer);
+    pointerDiagnosticsTimer = null;
+  }
+}
+
+function resetPointerDiagnostics() {
+  for (const key of ["receivedTimes", "eventGaps", "rafWaits", "processDurations", "dragDurations", "eventHistory"]) {
+    pointerMetrics[key] = [];
+  }
+  for (const key of [
+    "received", "processed", "coalesced", "pressTransitions", "releaseTransitions",
+    "dropouts", "identityRejects", "dragStarts", "dragReleases", "dragCancels",
+  ]) pointerMetrics[key] = 0;
+  pointerMetrics.lastReceivedAt = null;
+  pointerMetrics.lastReceivedPressed = null;
+  pointerMetrics.lastReceivedActive = null;
+  pointerMetrics.lastIdentityRejected = false;
+  pointerMetrics.lastRafScheduledAt = null;
+  pointerMetrics.currentState = "统计已重置，等待指针事件";
+  updatePointerDiagnostics();
+}
+
+async function exportPointerDiagnostics() {
+  let settings = null;
+  try { settings = await api("/api/pointer/settings"); } catch (_error) {}
+  const rect = ui.canvasViewport.getBoundingClientRect();
+  const payload = {
+    exported_at: new Date().toISOString(), pointer_mode_enabled: pointerModeEnabled,
+    mirror_x: pointerMirrorX, calibration_saved: Boolean(pointerCalibration), zoom,
+    viewport: { width: Math.round(rect.width), height: Math.round(rect.height) },
+    canvas: { width: ui.canvasWorld.clientWidth, height: ui.canvasWorld.clientHeight },
+    node_count: workflow?.nodes.length || 0, edge_count: workflow?.edges.length || 0, settings,
+    metrics: {
+      received: pointerMetrics.received, processed: pointerMetrics.processed,
+      coalesced_movement_samples: pointerMetrics.coalesced,
+      press_transitions: pointerMetrics.pressTransitions, release_transitions: pointerMetrics.releaseTransitions,
+      dropouts: pointerMetrics.dropouts, identity_rejections: pointerMetrics.identityRejects,
+      drag_starts: pointerMetrics.dragStarts, drag_releases: pointerMetrics.dragReleases,
+      drag_cancels: pointerMetrics.dragCancels,
+      event_interval_p95_ms: metricPercentile(pointerMetrics.eventGaps, 0.95),
+      raf_wait_p95_ms: metricPercentile(pointerMetrics.rafWaits, 0.95),
+      processing_max_ms: metricMaximum(pointerMetrics.processDurations),
+      node_update_max_ms: metricMaximum(pointerMetrics.dragDurations),
+    },
+    recent_events: pointerMetrics.eventHistory,
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "pointer-diagnostics-" + new Date().toISOString().replace(/[:.]/g, "-") + ".json";
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function loadPointerCalibration() {
@@ -322,8 +493,9 @@ function releaseHandPointer() {
     window.cancelAnimationFrame(pointerAnimationFrame);
     pointerAnimationFrame = null;
   }
-  latestPointerEvent = null;
-  pointerIgnoreUntilRelease = lastPointerPressed;
+  pointerEventBuffer.clear();
+  pointerMetrics.lastRafScheduledAt = null;
+  if (pointerDragNodeId) pointerMetrics.dragCancels += 1;
   pointerPressed = lastPointerPressed;
   pointerDownTarget = null;
   pointerDragNodeId = null;
@@ -357,6 +529,7 @@ function beginHandPointerPress(clientX, clientY) {
       y: worldPoint.y - node.position.y,
     };
     pointerDragNodeId = nodeId;
+    pointerMetrics.dragStarts += 1;
     pointerDownTarget = null;
     return;
   }
@@ -373,6 +546,7 @@ function moveHandPointerPress(clientX, clientY) {
 }
 
 function endHandPointerPress() {
+  if (pointerDragNodeId) pointerMetrics.dragReleases += 1;
   if (!pointerMoved && !pointerDragNodeId && pointerDownTarget instanceof HTMLElement) {
     const target = pointerDownTarget.closest("button, a, [role='button'], input, select, textarea") || pointerDownTarget;
     if (!target.matches(":disabled")) {
@@ -391,7 +565,7 @@ function endHandPointerPress() {
   handPointerCursor.dataset.pressed = "false";
 }
 
-function processHandPointer(event) {
+function processHandPointerEvent(event) {
   lastPointerPressed = Boolean(event?.pressed);
   if (!pointerModeEnabled) return;
   if (!event?.active || event.identity_confirmed === false
@@ -444,16 +618,35 @@ function processHandPointer(event) {
   }
 }
 
+function processHandPointer(event) {
+  const startedAt = performance.now();
+  try {
+    processHandPointerEvent(event);
+  } finally {
+    recordPointerProcessed(startedAt, event);
+  }
+}
+
 function handleHandPointer(event) {
-  latestPointerEvent = event;
+  if (!event || typeof event !== "object") return;
+  lastPointerPressed = Boolean(event.pressed);
+  recordPointerReceived(event);
+  pointerEventBuffer.push(event);
   if (pointerAnimationFrame !== null) return;
+  pointerMetrics.lastRafScheduledAt = performance.now();
   pointerAnimationFrame = window.requestAnimationFrame(() => {
     pointerAnimationFrame = null;
-    const pending = latestPointerEvent;
-    latestPointerEvent = null;
-    processHandPointer(pending);
+    if (pointerMetrics.lastRafScheduledAt !== null) {
+      pushMetricSample(pointerMetrics.rafWaits, performance.now() - pointerMetrics.lastRafScheduledAt);
+    }
+    pointerMetrics.lastRafScheduledAt = null;
+    const batch = pointerEventBuffer.drain();
+    pointerMetrics.coalesced += batch.coalesced;
+    for (const pending of batch.events) processHandPointer(pending);
+    updatePointerDiagnostics();
   });
 }
+
 function currentNode() {
   return workflow?.nodes.find((node) => node.id === selectedNodeId) || null;
 }
@@ -1346,6 +1539,10 @@ ui.deleteNode.addEventListener("click", deleteNode);
 ui.pointerMode.addEventListener("click", () => togglePointerMode());
 ui.pointerMirror.addEventListener("click", () => setPointerMirrorUi(!pointerMirrorX));
 ui.pointerCalibrate.addEventListener("click", startPointerCalibration);
+ui.pointerDiagnostics.addEventListener("click", () => setPointerDiagnosticsOpen(ui.pointerDiagnosticsPanel.hidden));
+ui.pointerDiagnosticsClose.addEventListener("click", () => setPointerDiagnosticsOpen(false));
+ui.pointerDiagnosticsReset.addEventListener("click", resetPointerDiagnostics);
+ui.pointerDiagnosticsExport.addEventListener("click", () => exportPointerDiagnostics().catch((error) => setMessage(error.message, "error")));
 setPointerMirrorUi(pointerMirrorX);
 window.addEventListener("pagehide", () => {
   if (pointerModeEnabled) {
@@ -1357,6 +1554,7 @@ window.addEventListener("pagehide", () => {
     }).catch(() => {});
   }
   if (pointerCalibrationSession) cancelPointerCalibration(false);
+  setPointerDiagnosticsOpen(false);
   releaseHandPointer();
 });
 
