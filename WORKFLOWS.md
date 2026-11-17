@@ -37,6 +37,21 @@ flowchart LR
 
 当前网页拖拽实现范围是本项目 `/workflows` 画布中的节点；不会模拟 Windows 系统鼠标，也不承诺驱动任意第三方网页、浏览器原生文件拖放或跨域 iframe。
 
+## Display Shell 与展示主页注册
+
+首页 `/` 是常驻 Display Shell，不再直接承载某一个具体展示页面。Shell 通过同源 iframe 加载 `app/display_pages.py` 中登记的页面；`GET /api/display/pages` 返回默认页面 ID、页面 ID、标题、说明和本地路径。当前默认页为 `promo`，另有 `factory` 与 `product` 两个模板页。
+
+工作流动作 `web.navigate_page` 只接受登记表中的 `page_id`。它不会执行任意 URL，也不会改变顶层 Shell 地址。Shell 加载新 iframe 页面后，等待页面发送与当前 `shell_generation` 匹配的 `display:ready` 消息，随后才向服务端确认动作成功；因此后继节点会在页面就绪后执行。
+
+新增展示主页的步骤：
+
+1. 在 `web/pages/` 新建一个静态 HTML 页面，路径必须位于本地 `/static/pages/`。
+2. 在 `app/display_pages.py` 的 `DISPLAY_PAGES` 白名单中增加一个唯一的 `page_id`、标题、说明和页面路径。
+3. 页面需要接收通用展示动作时，加载 `/static/display-page.js`，并在 body 上设置与登记 ID 一致的 `data-page-id`；需要自定义动作时，实现同源 `display:command` / `display:result` 消息协议。
+4. 重启服务后，`/api/display/pages` 和 `/api/actions` 会自动公开新登记 ID，工作流动作参数下拉框无需额外修改。
+
+不要把外部 URL 或用户输入的路径加入注册表。页面切换由服务端动作 Schema 与前端 Shell 双重限制在本地登记路径内。Shell 独占 `/ws/display` 与 `/ws/events`，iframe 页面不能另建展示执行连接。
+
 ## JSON 协议
 
 工作流使用 `schema_version: 1`。最小可运行定义：

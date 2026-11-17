@@ -54,6 +54,10 @@ Python Launcher 找不到兼容解释器时，可指定已安装的解释器：
 
 全屏只能由首页上的全屏按钮触发，这是浏览器对全屏 API 的安全限制；WebSocket 手势事件不能直接请求全屏。
 
+## 增加展示主页
+
+新增展示页面时，在 `web/pages/` 创建本地 HTML 文件，并在 `app/display_pages.py` 的 `DISPLAY_PAGES` 白名单中登记唯一 ID、标题、说明和 `/static/pages/...` 路径。页面加载 `/static/display-page.js` 并设置对应的 `data-page-id` 后，即可使用通用展示文本/面板动作。重启服务后，新 ID 会自动出现在工作流的 `web.navigate_page` 动作参数下拉框中；无需修改工作流编辑器，也不需要修改 Display Shell。自定义页面动作需遵循同源 `postMessage` 页面桥协议。不要登记外部 URL 或任意用户输入路径。
+
 ## 本机接口
 
 - GET /：常驻 Display Shell，默认加载登记的 promo 页面。
