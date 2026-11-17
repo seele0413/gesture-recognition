@@ -73,19 +73,46 @@ class ApiTests(unittest.TestCase):
         self.assertNotIn("operator", response.text)
         self.assertNotIn("s3cret", response.text)
 
-    def test_home_is_the_promo_display_and_settings_are_separate(self):
+    def test_home_is_the_persistent_display_shell_and_settings_are_separate(self):
         homepage = self.client.get("/").text
         settings = self.client.get("/settings").text
-        self.assertIn("/media/promo.mp4", homepage)
-        self.assertIn("playsinline loop controls", homepage)
-        self.assertIn('href="/settings"', homepage)
-        self.assertNotIn('target="_blank"', homepage)
+        self.assertIn('id="displayPageFrame"', homepage)
+        self.assertIn("/static/display-shell.js", homepage)
+        self.assertNotIn("/media/promo.mp4", homepage)
         self.assertNotIn('id="rtspUrl"', homepage)
         self.assertNotIn('id="mappingGrid"', homepage)
+        promo = self.client.get("/static/pages/promo.html").text
+        self.assertIn("/media/promo.mp4", promo)
+        self.assertIn("playsinline loop controls", promo)
+        self.assertIn('href="/settings" target="_top"', promo)
+        self.assertNotIn('target="_blank"', promo)
         self.assertIn('id="rtspUrl"', settings)
         self.assertIn('id="mappingGrid"', settings)
         self.assertIn('id="gestureConfidenceRange"', settings)
         self.assertIn('step="0.05"', settings)
+
+    def test_display_page_registry_is_an_explicit_local_allowlist(self):
+        response = self.client.get("/api/display/pages")
+        self.assertEqual(response.status_code, 200)
+        pages = response.json()["pages"]
+        self.assertEqual([page["page_id"] for page in pages], ["promo", "factory", "product"])
+        for page in pages:
+            self.assertTrue(page["path"].startswith("/static/pages/"))
+            self.assertEqual(self.client.get(page["path"]).status_code, 200)
+        actions = {item["name"]: item for item in self.client.get("/api/actions").json()["actions"]}
+        self.assertIn("web.navigate_page", actions)
+        self.assertEqual(actions["web.navigate_page"]["schema"]["properties"]["page_id"]["enum"],
+                         ["promo", "factory", "product"])
+
+    def test_workflow_rejects_unregistered_display_page_ids(self):
+        workflow = new_workflow("无效展示页面")
+        workflow["nodes"][0].update({
+            "action": "web.navigate_page",
+            "params": {"page_id": "external-url"},
+        })
+        response = self.client.post("/api/workflows", json=workflow)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("不是允许的选项", response.text)
 
     def test_home_camera_placeholder_can_be_hidden_when_feed_is_ready(self):
         styles = self.client.get("/static/styles.css").text
@@ -93,7 +120,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn(".pip-placeholder[hidden] { display: none; }", styles)
 
     def test_html_and_static_resources_are_revalidated(self):
-        for path in ("/", "/settings", "/static/app.js", "/static/styles.css"):
+        for path in ("/", "/settings", "/static/app.js", "/static/styles.css", "/static/display-shell.js", "/static/pages/promo.html"):
             response = self.client.get(path)
             self.assertEqual(response.status_code, 200)
             self.assertIn("no-store", response.headers.get("cache-control", ""))

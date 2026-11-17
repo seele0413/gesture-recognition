@@ -4,6 +4,7 @@ from typing import Any
 
 from app.action_engine import ActionRegistry
 from app.display import DisplayCommandChannel
+from app.display_pages import DISPLAY_PAGE_IDS
 
 
 SCENES = ("welcome", "company_intro", "product_intro", "factory_intro", "presentation_mode")
@@ -36,6 +37,7 @@ def register_web_actions(registry: ActionRegistry, adapter: BrowserCommandAdapte
 
     registrations = [
         ("web.navigate_route", {"route": enum_field(ROUTES, "允许的页面")}, ["route"], True),
+        ("web.navigate_page", {"page_id": enum_field(DISPLAY_PAGE_IDS, "登记的展示主页")}, ["page_id"], True),
         ("web.set_scene", {"scene": enum_field(SCENES, "展厅场景")}, ["scene"], True),
         ("web.show_panel", {"panel": enum_field(PANELS, "面板")}, ["panel"], True),
         ("web.hide_panel", {"panel": enum_field(PANELS, "面板")}, ["panel"], True),

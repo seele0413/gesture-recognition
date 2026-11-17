@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field, root_validator
 from app.action_engine import ActionRegistry, WorkflowEngine
 from app.database import ControlStore
 from app.display import DisplayCommandChannel
+from app.display_pages import list_display_pages
 from app.events import EventHub
 from app.ppt_actions import PresentationAdapter, register_ppt_actions
 from app.settings import DATABASE_PATH, MEDIA_ASSETS, PRESENTATION_DECKS, PROMO_VIDEO_PATH, WEB_DIR
@@ -154,6 +155,10 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
         if not asset or not asset["path"].is_file():
             raise HTTPException(status_code=404, detail="未找到已登记的视频素材")
         return FileResponse(asset["path"], media_type="video/mp4")
+
+    @app.get("/api/display/pages")
+    async def get_display_pages() -> dict:
+        return {"pages": list_display_pages()}
 
     @app.get("/api/status")
     async def get_status() -> dict:

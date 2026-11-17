@@ -10,7 +10,7 @@ flowchart LR
   D --> E[WorkflowValidator]
   D --> F[ActionRegistry]
   F --> G[展示命令通道 /ws/display]
-  G --> H[唯一大屏浏览器执行器]
+  G --> H[唯一展示 Shell 浏览器执行器]
   F --> I[PowerPoint STA 线程]
   D --> J[SQLite 工作流与运行日志]
   H --> K[按 command_id 确认]
@@ -19,7 +19,7 @@ flowchart LR
 
 识别层仍只发布已经稳定确认的手势。`WorkflowEngine` 在 FastAPI 事件循环中执行，不占用 RTSP 解码线程或 MediaPipe 推理线程。每次触发最多运行一个展示工作流；主控进入 `suspect` 时保留当前工作流，并在下一节点前等待原主控手部轨迹重新获得唯一匹配；身份匹配恢复后继续，进入 `reacquiring`、解除主控、流断开或展示页断开时取消剩余步骤。
 
-只有主页 `/` 建立 `/ws/display` 执行通道。设置页和工作流编辑器只能收到 `/ws/events` 状态事件，不会执行展示命令。第二个展示执行客户端会以 WebSocket 1013 拒绝。展示页断开后暂停新工作流，重新打开主页即可恢复。
+只有外层展示控制中心 `/` 建立 `/ws/display` 执行通道；该页面始终保留在顶层，内部通过同源 iframe 加载已登记的展示主页。切换 `promo`、`factory`、`product` 时只替换 iframe 内容，外层 WebSocket 不会断开。外层同时持有 `/ws/events` 并将事件转发给当前页面。第二个展示控制中心客户端会以 WebSocket 1013 拒绝。展示控制中心断开后暂停新工作流，重新打开主页即可恢复。
 
 ## 手势指针与网页拖拽
 
@@ -60,7 +60,7 @@ flowchart LR
 }
 ```
 
-定义必须有唯一起点、唯一 ID、可达节点和结束节点。循环不允许。条件节点必须各有一条 `true`、`false` 边；动作错误分支 `on_error: "branch"` 必须各有一条普通边和 `when: "error"` 边。自动重试最多 2 次，并且只对注册表标记为幂等的动作开放。`web.navigate_route` 必须直接连接到结束节点，因为页面离开大屏后执行客户端会断开。
+定义必须有唯一起点、唯一 ID、可达节点和结束节点。循环不允许。条件节点必须各有一条 `true`、`false` 边；动作错误分支 `on_error: "branch"` 必须各有一条普通边和 `when: "error"` 边。自动重试最多 2 次，并且只对注册表标记为幂等的动作开放。`web.navigate_route` 必须直接连接到结束节点，因为离开外层展示控制中心后执行客户端会断开。`web.navigate_page` 只切换登记的展示 iframe，不会断开外层执行通道，可继续连接后续动作节点。
 
 触发器：
 
@@ -88,7 +88,8 @@ flowchart LR
 
 | action | 参数 |
 | --- | --- |
-| `web.navigate_route` | `route`: home / settings / workflows；只能作为最后一个动作 |
+| `web.navigate_route` | `route`: home / settings / workflows；离开展示 Shell 的管理路由，只能作为最后一个动作 |
+| `web.navigate_page` | `page_id`: promo / factory / product；切换已登记的本地展示主页，执行通道保持连接 |
 | `web.set_scene` | `scene`: welcome / company_intro / product_intro / factory_intro / presentation_mode |
 | `web.show_panel`, `web.hide_panel` | `panel`: welcome / company / product / factory / presentation |
 | `web.set_text` | `field`: headline / subhead / notice；`text` 最长 160 字符，使用 textContent 写入 |
@@ -98,7 +99,7 @@ flowchart LR
 
 PPT 动作：`ppt.open_deck`、`ppt.start_slideshow`、`ppt.next_slide`、`ppt.previous_slide`、`ppt.goto_slide`、`ppt.end_slideshow`。每个动作都要求登记的 `deck_id`；跳转另需 `slide_number` 1～10000。所有 COM 调用在专用 STA 线程中执行。
 
-主页收到 `{type:"command", run_id, command_id, action, params, timeout_ms}` 后执行白名单操作，并返回 `{type:"ack", run_id, command_id, success, result, error}`。服务端只接收当前单一执行客户端、且 run/command ID 均匹配的确认。前端在当前页面生命周期内对已完成 command ID 去重。超时单独记录为 `timeout`，其它错误为 `failed`，取消为 `cancelled`；错误不会静默进入下一个节点。运行记录仅存触发摘要，不保留 21 个手部关键点。
+外层展示 Shell 收到 `{type:"command", run_id, command_id, action, params, timeout_ms}` 后，先处理页面调度动作，再将普通展示动作通过严格校验来源窗口和同源 origin 的 `postMessage` 转发给当前 iframe 页面，并等待页面返回结果。Shell 最终返回 `{type:"ack", run_id, command_id, success, result, error}`。切换页面时，Shell 等待新页面发送匹配 page_id 与 generation 的 ready 消息后才确认成功；页面路径来自服务端白名单，不接受工作流提供的任意 URL。服务端只接收当前单一 Shell 客户端、且 run/command ID 均匹配的确认。Shell 在页面切换期间持续持有 `/ws/display`，并对已完成 command ID 去重。超时单独记录为 `timeout`，其它错误为 `failed`，取消为 `cancelled`；错误不会静默进入下一个节点。运行记录仅存触发摘要，不保留 21 个手部关键点。
 
 ## 编辑与 API
 
@@ -116,6 +117,7 @@ PPT 动作：`ppt.open_deck`、`ppt.start_slideshow`、`ppt.next_slide`、`ppt.p
 | GET | `/api/workflow-runs`、`/api/workflow-runs/{run_id}` | 运行与步骤日志 |
 | POST | `/api/workflow-runs/{run_id}/cancel` | 取消活动运行 |
 | GET | `/api/actions` | 动作及参数 Schema |
+| GET | `/api/display/pages` | 已登记展示主页及本地路径 |
 | GET | `/api/media-assets`、`/api/presentations` | 白名单资源与可用状态 |
 | GET | `/api/workflow-status` | 大屏客户端、主控和运行状态 |
 | WebSocket | `/ws/display` | 唯一大屏命令执行与确认 |

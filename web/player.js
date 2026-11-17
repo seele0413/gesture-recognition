@@ -42,7 +42,6 @@ const PANEL_COPY = {
   factory: ["智能制造", "持续提升制造品质"],
   presentation: ["演示模式", "康晋电气企业展示"],
 };
-const ROUTE_PATHS = { home: "/", settings: "/settings", workflows: "/workflows" };
 
 async function api(path) {
   const response = await fetch(path, { cache: "no-store" });
@@ -201,18 +200,6 @@ function handleEvent(event) {
   if (event.action_triggered && !event.workflow_handled) applyAction(event.action);
 }
 
-function connectEvents() {
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const socket = new WebSocket(protocol + "//" + window.location.host + "/ws/events");
-  socket.addEventListener("message", (message) => {
-    try {
-      handleEvent(JSON.parse(message.data));
-    } catch (error) {
-      console.error("无法解析手势事件", error);
-    }
-  });
-  socket.addEventListener("close", () => window.setTimeout(connectEvents, 1500));
-}
 
 function setScene(scene) {
   const scenes = ["welcome", "company_intro", "product_intro", "factory_intro", "presentation_mode"];
@@ -262,12 +249,9 @@ function seekVideo(positionMs) {
 async function executeDisplayAction(action, params, timeoutMs = 10000) {
   const video = elements.video;
   switch (action) {
-    case "web.navigate_route": {
-      const path = ROUTE_PATHS[params.route];
-      if (!path) throw new Error("未登记的展示页面");
-      window.setTimeout(() => window.location.assign(path), 120);
-      return { route: params.route, scheduled: true };
-    }
+    case "web.navigate_route":
+    case "web.navigate_page":
+      throw new Error("页面切换由外层展示控制中心统一处理");
     case "web.set_scene":
       setScene(params.scene);
       return { scene: params.scene };
@@ -330,35 +314,47 @@ async function executeDisplayAction(action, params, timeoutMs = 10000) {
   }
 }
 
-function connectDisplayCommands() {
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const socket = new WebSocket(protocol + "//" + window.location.host + "/ws/display");
-  socket.addEventListener("message", async (message) => {
-    try {
-      const command = JSON.parse(message.data);
-      if (command.type !== "command" || typeof command.run_id !== "string" || typeof command.command_id !== "string") return;
-      const key = command.run_id + ":" + command.command_id;
-      let response = displayCommandResults.get(key);
-      if (!response) {
-        let pending = pendingDisplayCommands.get(key);
-        if (!pending) {
-          pending = executeDisplayAction(command.action, command.params || {}, command.timeout_ms).then(
-            (result) => ({ type: "ack", run_id: command.run_id, command_id: command.command_id, success: true, result }),
-            (error) => ({ type: "ack", run_id: command.run_id, command_id: command.command_id, success: false, error: String(error.message || error).slice(0, 300) }),
-          );
-          pendingDisplayCommands.set(key, pending);
-        }
-        response = await pending;
-        pendingDisplayCommands.delete(key);
-        displayCommandResults.set(key, response);
-        while (displayCommandResults.size > 128) displayCommandResults.delete(displayCommandResults.keys().next().value);
-      }
-      if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(response));
-    } catch (error) {
-      console.error("展示动作执行失败", error);
+function connectPageBridge() {
+  const generation = Number(new URLSearchParams(window.location.search).get("shell_generation") || 0);
+  window.addEventListener("message", async (event) => {
+    if (event.origin !== window.location.origin || event.source !== window.parent) return;
+    const message = event.data;
+    if (!message || typeof message !== "object") return;
+    if (message.type === "display:event") {
+      handleEvent(message.event || {});
+      return;
     }
+    if (message.type !== "display:command" || message.generation !== generation) return;
+    const command = message.command;
+    if (!command || typeof command.run_id !== "string" || typeof command.command_id !== "string") return;
+    const key = command.run_id + ":" + command.command_id;
+    let response = displayCommandResults.get(key);
+    if (!response) {
+      let pending = pendingDisplayCommands.get(key);
+      if (!pending) {
+        pending = executeDisplayAction(command.action, command.params || {}, command.timeout_ms).then(
+          (result) => ({ success: true, result }),
+          (error) => ({ success: false, error: String(error?.message || error).slice(0, 300) }),
+        );
+        pendingDisplayCommands.set(key, pending);
+      }
+      const outcome = await pending;
+      pendingDisplayCommands.delete(key);
+      response = {
+        type: "display:result",
+        generation,
+        run_id: command.run_id,
+        command_id: command.command_id,
+        ...outcome,
+      };
+      displayCommandResults.set(key, response);
+      while (displayCommandResults.size > 128) {
+        displayCommandResults.delete(displayCommandResults.keys().next().value);
+      }
+    }
+    window.parent.postMessage(response, window.location.origin);
   });
-  socket.addEventListener("close", () => window.setTimeout(connectDisplayCommands, 1500));
+  window.parent.postMessage({ type: "display:ready", page_id: "promo", generation }, window.location.origin);
 }
 
 elements.playButton.addEventListener("click", (event) => {
@@ -397,5 +393,4 @@ window.setInterval(refreshStatus, 1100);
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) refreshStatus();
 });
-connectEvents();
-connectDisplayCommands();
+connectPageBridge();
