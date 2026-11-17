@@ -36,5 +36,8 @@ jobs:
         run: |
           node --check web/pointer-geometry.js
           node --check web/pointer-event-buffer.js
+          node --check web/display-shell.js
+          node --check web/display-page.js
+          node --check web/player.js
           node --check web/workflows.js
           node --test tests/pointer-geometry.test.cjs tests/pointer-event-buffer.test.cjs
