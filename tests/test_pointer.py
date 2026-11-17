@@ -24,7 +24,8 @@ def make_hand(*, track_id="person-1", handedness="Right", confidence=0.9, is_loc
 
 class HandPointerControllerTests(unittest.TestCase):
     def setUp(self):
-        self.pointer = HandPointerController(max_update_hz=1000000)
+        self.pointer = HandPointerController(max_update_hz=60)
+        self.pointer.min_update_interval = 0.0
         self.pointer.set_enabled(True)
 
     @staticmethod
@@ -94,6 +95,7 @@ class HandPointerControllerTests(unittest.TestCase):
     def test_pressed_dropout_releases_drag_but_keeps_cursor_briefly(self):
         self.pointer.update([make_hand()], "locked", "person-1", 100)
         self.pointer.update([self.pinch(make_hand(), 0.52)], "locked", "person-1", 120)
+        self.pointer.update([self.pinch(make_hand(), 0.52)], "locked", "person-1", 130)
         release = self.pointer.update([], "locked", "person-1", 140)
         self.assertTrue(release["active"])
         self.assertFalse(release["pressed"])
