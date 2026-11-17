@@ -60,8 +60,10 @@ let linkSourceId = null;
 let zoom = 1;
 let activeRunId = null;
 const nodeStatuses = new Map();
+const POINTER_CALIBRATION_KEY = "gesture-workflow-pointer-calibration-v1";
+const POINTER_MIRROR_KEY = "gesture-workflow-pointer-mirror-v1";
 let pointerModeEnabled = false;
-let pointerMirrorX = false;
+let pointerMirrorX = loadPointerMirrorPreference();
 let pointerPressed = false;
 let pointerDownTarget = null;
 let pointerDragNodeId = null;
@@ -74,7 +76,6 @@ let pointerAnimationFrame = null;
 let pointerCalibrationSession = null;
 let pointerIgnoreUntilRelease = false;
 let lastPointerPressed = false;
-const POINTER_CALIBRATION_KEY = "gesture-workflow-pointer-calibration-v1";
 const POINTER_CALIBRATION_TARGETS = [
   { x: 0.08, y: 0.08, label: "左上" },
   { x: 0.92, y: 0.08, label: "右上" },
@@ -109,6 +110,14 @@ function make(tag, className, text) {
   if (className) element.className = className;
   if (text !== undefined) element.textContent = text;
   return element;
+}
+
+function loadPointerMirrorPreference() {
+  try {
+    return localStorage.getItem(POINTER_MIRROR_KEY) === "true";
+  } catch (_error) {
+    return false;
+  }
 }
 
 function loadPointerCalibration() {
@@ -157,6 +166,7 @@ function setPointerMirrorUi(enabled) {
     setMessage("镜像方向已改变，原四角校准已失效；请重新校准", "ok");
   }
   pointerMirrorX = next;
+  try { localStorage.setItem(POINTER_MIRROR_KEY, String(pointerMirrorX)); } catch (_error) {}
   ui.pointerMirror.textContent = pointerMirrorX ? "镜像：开启" : "镜像：关闭";
   ui.pointerMirror.setAttribute("aria-pressed", String(pointerMirrorX));
   updatePointerCalibrationButton();
@@ -1336,6 +1346,7 @@ ui.deleteNode.addEventListener("click", deleteNode);
 ui.pointerMode.addEventListener("click", () => togglePointerMode());
 ui.pointerMirror.addEventListener("click", () => setPointerMirrorUi(!pointerMirrorX));
 ui.pointerCalibrate.addEventListener("click", startPointerCalibration);
+setPointerMirrorUi(pointerMirrorX);
 window.addEventListener("pagehide", () => {
   if (pointerModeEnabled) {
     fetch("/api/pointer/mode", {
