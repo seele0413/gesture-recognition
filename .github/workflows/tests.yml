@@ -1,0 +1,30 @@
+name: Unit tests
+
+on:
+  push:
+    branches:
+      - feature/v2-architecture
+  pull_request:
+    branches:
+      - main
+      - feature/hand-pointer-drag
+      - feature/v2-architecture
+  workflow_dispatch:
+
+jobs:
+  unittest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements-dev.txt
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
