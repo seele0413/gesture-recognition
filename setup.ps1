@@ -202,7 +202,7 @@ Write-Host "Checking installed dependency consistency..."
 Invoke-NativeCommand -Executable $VenvPython -Arguments @("-m", "pip", "check") -Step "Check dependency consistency"
 
 Write-Host "Checking required package imports..."
-$ImportCheck = 'import av, cv2, fastapi, mediapipe, numpy, uvicorn; print("MediaPipe " + mediapipe.__version__ + ", PyAV " + av.__version__ + ", OpenCV " + cv2.__version__ + ", NumPy " + numpy.__version__)'
+$ImportCheck = 'import av, cv2, fastapi, mediapipe, numpy, uvicorn; print(mediapipe.__version__, av.__version__, cv2.__version__, numpy.__version__)'
 Invoke-NativeCommand -Executable $VenvPython -Arguments @("-c", $ImportCheck) -Step "Verify required package imports"
 
 Write-Host "Downloading and verifying vision models..."
