@@ -6,6 +6,23 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location -LiteralPath $ProjectRoot
 $VenvPython = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
+$LogPath = Join-Path $ProjectRoot "setup.log"
+try {
+    Start-Transcript -Path $LogPath -Append -Force | Out-Null
+} catch {
+    Write-Warning "Could not start setup transcript: $($_.Exception.Message)"
+}
+
+trap {
+    $Failure = $_
+    Write-Host ""
+    Write-Host "SETUP FAILED: $($Failure.Exception.Message)" -ForegroundColor Red
+    Write-Host "Detailed error:" -ForegroundColor Yellow
+    Write-Host ($Failure | Format-List * -Force | Out-String)
+    Write-Host "Setup log: $LogPath" -ForegroundColor Yellow
+    try { Stop-Transcript | Out-Null } catch {}
+    break
+}
 
 function Get-PythonIdentity {
     param([string]$Executable)
@@ -45,6 +62,39 @@ function Get-PythonIdentity {
         }
     } catch {
         return $null
+    }
+}
+
+function Invoke-NativeCommand {
+    param(
+        [string]$Executable,
+        [string[]]$Arguments,
+        [string]$Step
+    )
+
+    Write-Host ""
+    Write-Host ">>> $Step" -ForegroundColor Cyan
+    $PreviousErrorActionPreference = $ErrorActionPreference
+    try {
+        # Native programs may write diagnostics to stderr even when they
+        # return useful output. Do not let PowerShell abort before we inspect
+        # the process exit code and print the real diagnostic.
+        $ErrorActionPreference = 'Continue'
+        $Output = & $Executable @Arguments 2>&1
+        $ExitCode = $LASTEXITCODE
+        foreach ($Line in $Output) {
+            if ($Line -is [System.Management.Automation.ErrorRecord]) {
+                Write-Host $Line.ToString() -ForegroundColor Red
+            } else {
+                Write-Host ([string]$Line)
+            }
+        }
+    } finally {
+        $ErrorActionPreference = $PreviousErrorActionPreference
+    }
+
+    if ($ExitCode -ne 0) {
+        throw "$Step failed with exit code $ExitCode. See $LogPath for the complete output."
     }
 }
 
@@ -136,8 +186,7 @@ Write-Host "Using $SelectedSource Python $SelectedVersion at $($SelectedPython.P
 
 if (-not (Test-Path -LiteralPath $VenvPython -PathType Leaf)) {
     Write-Host "Creating a project-local virtual environment with Python $SelectedVersion..."
-    & $SelectedPython.Path -m venv (Join-Path $ProjectRoot ".venv")
-    if ($LASTEXITCODE -ne 0) { throw "Failed to create the virtual environment." }
+    Invoke-NativeCommand -Executable $SelectedPython.Path -Arguments @("-m", "venv", (Join-Path $ProjectRoot ".venv")) -Step "Create .venv virtual environment"
 } elseif ($PythonPath) {
     $ExistingPython = Find-Python -ExplicitPath $VenvPython
     $ExistingVersion = "$($ExistingPython.Major).$($ExistingPython.Minor)"
@@ -147,22 +196,17 @@ if (-not (Test-Path -LiteralPath $VenvPython -PathType Leaf)) {
 }
 
 Write-Host "Installing Python dependencies into .venv..."
-& $VenvPython -m pip install --disable-pip-version-check --require-virtualenv -r (Join-Path $ProjectRoot "requirements.txt")
-if ($LASTEXITCODE -ne 0) {
-    throw "Dependency installation failed under Python $SelectedVersion. Review pip's output above for the failing package, wheel, or network cause. The system Python was not modified."
-}
+Invoke-NativeCommand -Executable $VenvPython -Arguments @("-m", "pip", "install", "--disable-pip-version-check", "--require-virtualenv", "-r", (Join-Path $ProjectRoot "requirements.txt")) -Step "Install requirements.txt dependencies"
 
 Write-Host "Checking installed dependency consistency..."
-& $VenvPython -m pip check
-if ($LASTEXITCODE -ne 0) { throw "pip check found dependency conflicts in .venv. Review the package conflict details above." }
+Invoke-NativeCommand -Executable $VenvPython -Arguments @("-m", "pip", "check") -Step "Check dependency consistency"
 
 Write-Host "Checking required package imports..."
-& $VenvPython -c 'import av, cv2, fastapi, mediapipe, numpy, uvicorn; print("MediaPipe " + mediapipe.__version__ + ", PyAV " + av.__version__ + ", OpenCV " + cv2.__version__ + ", NumPy " + numpy.__version__)'
-if ($LASTEXITCODE -ne 0) { throw "A required package failed to import in .venv. Review the import error above." }
+$ImportCheck = 'import av, cv2, fastapi, mediapipe, numpy, uvicorn; print("MediaPipe " + mediapipe.__version__ + ", PyAV " + av.__version__ + ", OpenCV " + cv2.__version__ + ", NumPy " + numpy.__version__)'
+Invoke-NativeCommand -Executable $VenvPython -Arguments @("-c", $ImportCheck) -Step "Verify required package imports"
 
 Write-Host "Downloading and verifying vision models..."
-& $VenvPython (Join-Path $ProjectRoot "scripts\download_models.py")
-if ($LASTEXITCODE -ne 0) { throw "Model download failed. Restore network access and run setup.ps1 again." }
+Invoke-NativeCommand -Executable $VenvPython -Arguments @((Join-Path $ProjectRoot "scripts\download_models.py")) -Step "Download and verify vision models"
 
 foreach ($Model in @("gesture_recognizer.task", "pose_landmarker_lite.task")) {
     $ModelPath = Join-Path $ProjectRoot "models\$Model"
@@ -171,4 +215,8 @@ foreach ($Model in @("gesture_recognizer.task", "pose_landmarker_lite.task")) {
     }
 }
 
-Write-Host "Setup complete. Run .\run.ps1 to start the website."
+Write-Host ""
+Write-Host "SETUP COMPLETE. Dependencies and model files were verified." -ForegroundColor Green
+Write-Host "Run .\run.ps1 to start the website."
+Write-Host "Setup log: $LogPath"
+try { Stop-Transcript | Out-Null } catch {}
