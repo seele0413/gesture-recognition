@@ -69,7 +69,7 @@ def analyze_v_gesture(landmarks: Sequence[Any]) -> dict[str, Any]:
         return {"is_v": False, "reason": "手部关键点坐标无效", "spread_ratio": None}
     points = [point for point in point_values if point is not None]
     palm_width = _distance(points[5], points[17])
-    if palm_width <= V_MIN_PALM_WIDTH:
+    if palm_width < V_MIN_PALM_WIDTH or math.isclose(palm_width, V_MIN_PALM_WIDTH, rel_tol=1e-9, abs_tol=1e-9):
         return {"is_v": False, "reason": "手掌在画面中过小，建议靠近摄像头或提高画面分辨率", "spread_ratio": None}
 
     if not _is_extended(landmarks, 5, 6, 8, palm_width):
