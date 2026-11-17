@@ -170,7 +170,8 @@ function updatePointerDiagnostics() {
     const span = recentTimes[recentTimes.length - 1] - recentTimes[0];
     if (span > 0) rate = (recentTimes.length - 1) * 1000 / span;
   }
-  if (pointerMetrics.lastReceivedAt === null || now - pointerMetrics.lastReceivedAt > 1500) rate = 0;
+  const stale = pointerMetrics.lastReceivedAt === null || now - pointerMetrics.lastReceivedAt > 1500;
+  if (stale) rate = 0;
   const formatMs = (value) => value === null ? "--" : value.toFixed(1) + " ms";
   ui.pointerDiagRate.textContent = rate.toFixed(1) + " Hz";
   ui.pointerDiagGap.textContent = formatMs(metricPercentile(pointerMetrics.eventGaps, 0.95));
@@ -179,7 +180,8 @@ function updatePointerDiagnostics() {
   ui.pointerDiagDrag.textContent = formatMs(metricMaximum(pointerMetrics.dragDurations));
   ui.pointerDiagCoalesced.textContent = String(pointerMetrics.coalesced);
   ui.pointerDiagState.textContent = [
-    pointerMetrics.currentState, "接收 " + pointerMetrics.received, "处理 " + pointerMetrics.processed,
+    stale ? "无新指针事件" : pointerMetrics.currentState,
+    "接收 " + pointerMetrics.received, "处理 " + pointerMetrics.processed,
     "捏合 " + pointerMetrics.pressTransitions + "/" + pointerMetrics.releaseTransitions,
     "拖拽 " + pointerMetrics.dragStarts + "/" + pointerMetrics.dragReleases,
     "中断 " + pointerMetrics.dragCancels,
@@ -191,7 +193,11 @@ function recordPointerReceived(event) {
   const pressed = Boolean(event?.pressed);
   const active = Boolean(event?.active);
   const rejected = event?.identity_confirmed === false;
-  if (pointerMetrics.lastReceivedAt !== null) pushMetricSample(pointerMetrics.eventGaps, now - pointerMetrics.lastReceivedAt);
+  if (pointerMetrics.lastReceivedAt !== null) {
+    const gap = now - pointerMetrics.lastReceivedAt;
+    if (gap <= 1500) pushMetricSample(pointerMetrics.eventGaps, gap);
+    else pointerMetrics.eventGaps = [];
+  }
   if (pointerMetrics.lastReceivedPressed !== null && pressed !== pointerMetrics.lastReceivedPressed) {
     if (pressed) pointerMetrics.pressTransitions += 1;
     else pointerMetrics.releaseTransitions += 1;
@@ -210,7 +216,6 @@ function recordPointerReceived(event) {
     y: Number.isFinite(Number(event?.y)) ? Number(event.y) : null,
   });
   if (pointerMetrics.eventHistory.length > 120) pointerMetrics.eventHistory.shift();
-  updatePointerDiagnostics();
 }
 
 function recordPointerProcessed(startedAt, event) {
@@ -223,12 +228,10 @@ function recordPointerProcessed(startedAt, event) {
       : event.pressed
         ? (pointerDragNodeId ? "节点拖拽中" : "捏合按下")
         : "光标移动中";
-  updatePointerDiagnostics();
 }
 
 function recordPointerDragUpdate(durationMs) {
   pushMetricSample(pointerMetrics.dragDurations, durationMs);
-  updatePointerDiagnostics();
 }
 
 function setPointerDiagnosticsOpen(open) {
@@ -649,7 +652,6 @@ function handleHandPointer(event) {
     const batch = pointerEventBuffer.drain();
     pointerMetrics.coalesced += batch.coalesced;
     for (const pending of batch.events) processHandPointer(pending);
-    updatePointerDiagnostics();
   });
 }
 
