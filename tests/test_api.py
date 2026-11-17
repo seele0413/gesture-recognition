@@ -115,7 +115,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn('rejectPageReadyWaiter("展示页面切换请求已被更新")', shell)
         self.assertIn('rejectPageReadyWaiter("展示控制中心已离开页面")', shell)
         self.assertIn('window.addEventListener("pageshow"', shell)
-        self.assertIn("if (event.persisted)", shell)
+        self.assertIn("if (!event.persisted) return;", shell)
         self.assertIn("pendingPageCommands.delete(key)", shell)
         self.assertIn("resolvedPath.pathname !== page.path", shell)
 
