@@ -53,6 +53,31 @@ class HandPointerControllerTests(unittest.TestCase):
         up = self.pointer.update([self.pinch(make_hand(), 0.62)], "locked", "person-1", 160)
         self.assertFalse(up["pressed"])
 
+    def test_suspect_pointer_requires_confirmed_hand_identity(self):
+        self.assertIsNone(self.pointer.update(
+            [make_hand()], "suspect", "person-1", 100,
+            identity_confirmed=False, controller_id="controller-1",
+        ))
+        event = self.pointer.update(
+            [make_hand()], "suspect", "person-1", 120,
+            identity_confirmed=True, controller_id="controller-1",
+        )
+        self.assertIsNotNone(event)
+        self.assertTrue(event["active"])
+        self.assertTrue(event["identity_confirmed"])
+        self.assertEqual(event["controller_id"], "controller-1")
+
+    def test_unconfirmed_suspect_releases_an_active_drag(self):
+        self.pointer.update([make_hand()], "locked", "person-1", 100)
+        pressed = self.pointer.update([self.pinch(make_hand(), 0.52)], "locked", "person-1", 120)
+        self.assertTrue(pressed["pressed"])
+        released = self.pointer.update(
+            [], "suspect", "person-1", 130, identity_confirmed=False, controller_id="controller-1",
+        )
+        self.assertIsNotNone(released)
+        self.assertFalse(released["active"])
+        self.assertFalse(released["pressed"])
+
     def test_short_detection_dropout_keeps_cursor_visible(self):
         first = self.pointer.update([make_hand()], "locked", "person-1", 100)
         self.assertTrue(first["active"])

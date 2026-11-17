@@ -361,12 +361,12 @@ class WorkflowEngine:
         current = next(node_id for node_id, count in incoming.items() if count == 0)
         results: list[dict[str, Any]] = []
         for _ in range(len(nodes) + 1):
-            if not dry_run:
-                await self._wait_for_controller_authority()
             node = nodes[current]
             node_type = node["type"]
             if node_type == "end":
                 break
+            if not dry_run:
+                await self._wait_for_controller_authority()
             started_at = utc_now()
             action_name = node.get("action") if node_type == "action" else node_type
             command_id = uuid4().hex if node_type == "action" and not dry_run else None
