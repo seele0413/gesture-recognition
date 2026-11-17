@@ -136,7 +136,10 @@
   }
 
   function nodePositionFromPointer(worldPoint, grabOffset, canvasSize, nodeSize) {
-    if (!finitePoint(worldPoint) || !finitePoint(grabOffset) || !finitePoint(canvasSize) || !finitePoint(nodeSize)) {
+    if (!finitePoint(worldPoint) || !finitePoint(grabOffset)
+      || !canvasSize || !nodeSize
+      || !Number.isFinite(Number(canvasSize.width)) || !Number.isFinite(Number(canvasSize.height))
+      || !Number.isFinite(Number(nodeSize.width)) || !Number.isFinite(Number(nodeSize.height))) {
       throw new TypeError("无效的节点拖动参数");
     }
     const maxX = Math.max(0, Number(canvasSize.width) - Number(nodeSize.width));
