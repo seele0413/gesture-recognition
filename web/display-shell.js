@@ -52,7 +52,12 @@ function navigatePage(pageId, timeoutMs = COMMAND_TIMEOUT_FALLBACK_MS) {
   if (currentPageId === pageId && elements.frame.contentWindow) {
     return Promise.resolve({ page_id: pageId, title: page.title, changed: false });
   }
-  if (!page.path.startsWith("/static/pages/") || new URL(page.path, DISPLAY_ORIGIN).origin !== DISPLAY_ORIGIN) {
+  const resolvedPath = new URL(page.path, DISPLAY_ORIGIN);
+  if (!page.path.startsWith("/static/pages/")
+      || resolvedPath.origin !== DISPLAY_ORIGIN
+      || !resolvedPath.pathname.startsWith("/static/pages/")
+      || resolvedPath.search
+      || resolvedPath.hash) {
     throw new Error("展示主页路径不在本地登记范围内");
   }
 
@@ -267,10 +272,13 @@ async function initializeDisplayShell() {
           || typeof page.path !== "string" || !page.path.startsWith("/static/pages/")) continue;
       pages.set(page.page_id, page);
     }
-    if (!pages.has("promo")) throw new Error("默认展示主页 promo 未登记");
+    const defaultPageId = payload.default_page_id;
+    if (typeof defaultPageId !== "string" || !pages.has(defaultPageId)) {
+      throw new Error("默认展示主页未在白名单中登记");
+    }
     connectDisplayCommands();
     connectEvents();
-    await navigatePage("promo");
+    await navigatePage(defaultPageId);
   } catch (error) {
     setShellStatus("error", String(error?.message || error));
     console.error("展示控制中心初始化失败", error);

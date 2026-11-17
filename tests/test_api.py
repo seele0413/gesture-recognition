@@ -94,7 +94,9 @@ class ApiTests(unittest.TestCase):
     def test_display_page_registry_is_an_explicit_local_allowlist(self):
         response = self.client.get("/api/display/pages")
         self.assertEqual(response.status_code, 200)
-        pages = response.json()["pages"]
+        payload = response.json()
+        self.assertEqual(payload["default_page_id"], "promo")
+        pages = payload["pages"]
         self.assertEqual([page["page_id"] for page in pages], ["promo", "factory", "product"])
         for page in pages:
             self.assertTrue(page["path"].startswith("/static/pages/"))
