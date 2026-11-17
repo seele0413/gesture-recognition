@@ -952,6 +952,7 @@ function connectWorkflowEvents() {
         releaseHandPointer();
       }
       if (event.type === "stream" && event.state !== "running") {
+        if (pointerCalibrationSession) cancelPointerCalibration(false);
         releaseHandPointer();
       }
       if (event.type === "workflow") {

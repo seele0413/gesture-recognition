@@ -202,3 +202,61 @@
   color: #76521d;
   background: #fff7e8;
 }
+
+
+/* Four-point camera-to-canvas calibration. The overlay never intercepts pointer input. */
+.pointer-calibration-overlay {
+  position: fixed;
+  z-index: 9998;
+  overflow: hidden;
+  border: 1px solid rgba(61, 93, 69, .72);
+  background: rgba(27, 42, 31, .12);
+  pointer-events: none;
+}
+.pointer-calibration-overlay[hidden] { display: none; }
+.pointer-calibration-hint {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  max-width: calc(100% - 24px);
+  padding: 8px 13px;
+  border: 1px solid rgba(255, 255, 255, .65);
+  border-radius: 5px;
+  color: #26352a;
+  background: rgba(255, 255, 255, .94);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, .16);
+  font-size: 12px;
+  font-weight: 650;
+  text-align: center;
+  transform: translateX(-50%);
+}
+.pointer-calibration-target {
+  position: absolute;
+  width: 42px;
+  height: 42px;
+  border: 3px solid #e0a63b;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .22);
+  box-shadow: 0 0 0 5px rgba(224, 166, 59, .2), 0 2px 12px rgba(0, 0, 0, .22);
+  transform: translate(-50%, -50%);
+}
+.pointer-calibration-target::before,
+.pointer-calibration-target::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  background: #e0a63b;
+  content: "";
+  transform: translate(-50%, -50%);
+}
+.pointer-calibration-target::before { width: 58px; height: 2px; }
+.pointer-calibration-target::after { width: 2px; height: 58px; }
+#pointerCalibrate[data-state="calibrated"] {
+  border-color: #4b7956;
+  color: #3e6849;
+  background: #f0f7f1;
+}
+.hand-pointer-cursor {
+  will-change: left, top;
+  transform: translate3d(-50%, -50%, 0);
+}

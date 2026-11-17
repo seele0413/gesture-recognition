@@ -6,9 +6,10 @@
     <meta name="theme-color" content="#f1f3f0">
     <title>康晋电气 · 工作流编排</title>
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="/static/styles.css?v=20261112-pointer-1">
-    <link rel="stylesheet" href="/static/workflows.css?v=20261112-pointer-1">
-    <script src="/static/workflows.js?v=20261112-pointer-1" defer></script>
+    <link rel="stylesheet" href="/static/styles.css?v=20261117-pointer-3">
+    <link rel="stylesheet" href="/static/workflows.css?v=20261117-pointer-3">
+    <script src="/static/pointer-geometry.js?v=20261117-pointer-3" defer></script>
+    <script src="/static/workflows.js?v=20261117-pointer-3" defer></script>
   </head>
   <body class="workflow-page">
     <header class="workflow-header">
@@ -68,6 +69,7 @@
             <button id="linkMode" class="tool-button" type="button" aria-pressed="false">连线</button>
             <button id="pointerMode" class="tool-button" type="button" aria-pressed="false" title="先锁定主控；伸出食指移动，拇指与食指捏合抓取节点，松开完成放置">手势拖拽：关闭</button>
             <button id="pointerMirror" class="tool-button" type="button" aria-pressed="false" title="切换摄像头横向镜像">镜像：关闭</button>
+            <button id="pointerCalibrate" class="tool-button" type="button" disabled title="依次对准画布四角并捏合采集，校正摄像头透视偏差">四角校准</button>
             <button id="autoArrange" class="icon-tool" type="button" title="自动排列节点" aria-label="自动排列节点">↔</button>
             <button id="zoomOut" class="icon-tool" type="button" title="缩小画布" aria-label="缩小画布">−</button>
             <span id="zoomLabel" class="zoom-label">100%</span>
