@@ -72,6 +72,10 @@ let linkSourceId = null;
 let zoom = 1;
 let activeRunId = null;
 const nodeStatuses = new Map();
+const nodeCardsById = new Map();
+const nodeModelsById = new Map();
+let edgeRecords = new Map();
+let edgeKeysByNode = new Map();
 const POINTER_CALIBRATION_KEY = "gesture-workflow-pointer-calibration-v1";
 const POINTER_MIRROR_KEY = "gesture-workflow-pointer-mirror-v1";
 let pointerModeEnabled = false;
@@ -929,6 +933,8 @@ function gestureSelect(value) {
 }
 
 function renderCanvas() {
+  nodeCardsById.clear();
+  nodeModelsById.clear();
   if (!workflow) {
     ui.canvasNodes.replaceChildren();
     drawEdges();
@@ -936,6 +942,7 @@ function renderCanvas() {
   }
   ui.canvasNodes.replaceChildren();
   for (const node of workflow.nodes) {
+    nodeModelsById.set(node.id, node);
     if (!node.position) node.position = { x: 170 + workflow.nodes.indexOf(node) * 290, y: 180 };
     const card = make("article", "canvas-node node-type-" + node.type);
     card.dataset.nodeId = node.id;
@@ -963,6 +970,7 @@ function renderCanvas() {
       event.dataTransfer.effectAllowed = "move";
     });
     card.addEventListener("dragend", () => { mouseDragOffset = null; });
+    nodeCardsById.set(node.id, card);
     ui.canvasNodes.append(card);
   }
   drawEdges();
@@ -983,39 +991,68 @@ function nodeDetail(node) {
   return node.type === "end" ? "成功结束" : "按设定时间等待";
 }
 
-function drawEdges() {
-  const svg = ui.edgeLayer;
-  svg.querySelectorAll("path[data-edge], text[data-edge-label]").forEach((element) => element.remove());
-  if (!workflow) return;
-  const positions = new Map(workflow.nodes.map((node) => [node.id, node.position || { x: 170, y: 180 }]));
-  const root = workflow.nodes.find((node) => !workflow.edges.some((edge) => edge.target === node.id));
-  if (root) {
-    const to = positions.get(root.id);
-    drawPath(svg, 132, 130, to.x, to.y + 53, "trigger", "");
-  }
-  for (const edge of workflow.edges) {
-    const from = positions.get(edge.source);
-    const to = positions.get(edge.target);
-    if (!from || !to) continue;
-    drawPath(svg, from.x + 236, from.y + 53, to.x, to.y + 53, edge.when === "error" ? "error" : edge.source, edge.when || "");
+function indexEdgeForNode(nodeId, key) {
+  if (!nodeId || nodeId === "trigger") return;
+  if (!edgeKeysByNode.has(nodeId)) edgeKeysByNode.set(nodeId, new Set());
+  edgeKeysByNode.get(nodeId).add(key);
+}
+
+function updateEdgeRecord(record) {
+  const source = record.sourceId === "trigger" ? null : nodeModelsById.get(record.sourceId);
+  const target = nodeModelsById.get(record.targetId);
+  if (!target || (record.sourceId !== "trigger" && !source)) return;
+  const x1 = source ? source.position.x + 236 : 132;
+  const y1 = source ? source.position.y + 53 : 130;
+  const x2 = target.position.x;
+  const y2 = target.position.y + 53;
+  const bend = Math.max(38, (x2 - x1) / 2);
+  record.path.setAttribute("d", `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`);
+  if (record.labelElement) {
+    record.labelElement.setAttribute("x", String((x1 + x2) / 2));
+    record.labelElement.setAttribute("y", String((y1 + y2) / 2 - 7));
   }
 }
 
-function drawPath(svg, x1, y1, x2, y2, key, label) {
+function addEdgeRecord(svg, key, sourceId, targetId, styleKey, label) {
   const namespace = "http://www.w3.org/2000/svg";
   const path = document.createElementNS(namespace, "path");
   path.dataset.edge = key;
-  const bend = Math.max(38, (x2 - x1) / 2);
-  path.setAttribute("d", `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`);
-  if (key === "error") path.classList.add("edge-error");
+  path.dataset.source = sourceId;
+  path.dataset.target = targetId;
+  if (styleKey === "error") path.classList.add("edge-error");
   svg.append(path);
+  let labelElement = null;
   if (label) {
-    const text = document.createElementNS(namespace, "text");
-    text.dataset.edgeLabel = key;
-    text.setAttribute("x", String((x1 + x2) / 2));
-    text.setAttribute("y", String((y1 + y2) / 2 - 7));
-    text.textContent = label;
-    svg.append(text);
+    labelElement = document.createElementNS(namespace, "text");
+    labelElement.dataset.edgeLabel = key;
+    labelElement.textContent = label;
+    svg.append(labelElement);
+  }
+  const record = { key, sourceId, targetId, path, labelElement };
+  edgeRecords.set(key, record);
+  indexEdgeForNode(sourceId, key);
+  indexEdgeForNode(targetId, key);
+  updateEdgeRecord(record);
+}
+
+function drawEdges() {
+  const svg = ui.edgeLayer;
+  svg.querySelectorAll("path[data-edge], text[data-edge-label]").forEach((element) => element.remove());
+  edgeRecords.clear();
+  edgeKeysByNode.clear();
+  if (!workflow) return;
+  const root = workflow.nodes.find((node) => !workflow.edges.some((edge) => edge.target === node.id));
+  if (root) addEdgeRecord(svg, "trigger:" + root.id, "trigger", root.id, "trigger", "");
+  workflow.edges.forEach((edge, index) => {
+    const key = "edge:" + index + ":" + edge.source + ":" + edge.target + ":" + (edge.when || "normal");
+    addEdgeRecord(svg, key, edge.source, edge.target, edge.when === "error" ? "error" : edge.source, edge.when || "");
+  });
+}
+
+function drawEdgesForNode(nodeId) {
+  for (const key of edgeKeysByNode.get(nodeId) || []) {
+    const record = edgeRecords.get(key);
+    if (record) updateEdgeRecord(record);
   }
 }
 
@@ -1207,9 +1244,10 @@ function renderWaitEventProperties(node) {
 }
 
 function moveNode(nodeId, clientX, clientY, grabOffset = null) {
-  const node = findNode(nodeId);
+  const startedAt = performance.now();
+  const node = nodeModelsById.get(nodeId) || findNode(nodeId);
   if (!node) return;
-  const card = Array.from(ui.canvasNodes.children).find((element) => element.dataset.nodeId === nodeId);
+  const card = nodeCardsById.get(nodeId);
   const worldPoint = clientToWorld(clientX, clientY);
   const offset = grabOffset || {
     x: (card?.offsetWidth || 236) / 2,
@@ -1225,7 +1263,8 @@ function moveNode(nodeId, clientX, clientY, grabOffset = null) {
     card.style.left = node.position.x + "px";
     card.style.top = node.position.y + "px";
   }
-  drawEdges();
+  drawEdgesForNode(nodeId);
+  recordPointerDragUpdate(performance.now() - startedAt);
 }
 
 function autoArrange() {
