@@ -10,12 +10,39 @@ $VenvPython = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
 function Get-PythonIdentity {
     param([string]$Executable)
 
-    $Probe = & $Executable -c 'import json,struct,sys; print(json.dumps({"path":sys.executable,"major":sys.version_info.major,"minor":sys.version_info.minor,"bits":struct.calcsize("P")*8,"implementation":sys.implementation.name}))' 2>$null
-    if ($LASTEXITCODE -ne 0 -or -not $Probe) {
+    # Avoid embedded quotes in the native -c argument. Windows PowerShell's
+    # legacy native-argument quoting can strip them before Python receives it.
+    # A delimiter-based response is sufficient and keeps the probe quote-free.
+    $ProbeCode = 'import struct,sys; print(chr(124).join((sys.executable,str(sys.version_info.major),str(sys.version_info.minor),str(struct.calcsize(chr(80))*8),sys.implementation.name)))'
+    $PreviousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $Probe = & $Executable -c $ProbeCode 2>&1
+        $ProbeExitCode = $LASTEXITCODE
+    } catch {
+        return $null
+    } finally {
+        $ErrorActionPreference = $PreviousErrorActionPreference
+    }
+
+    if ($ProbeExitCode -ne 0 -or -not $Probe) {
         return $null
     }
+
+    $ProbeText = ($Probe | Out-String).Trim()
+    $Parts = $ProbeText -split '\|', 5
+    if ($Parts.Count -ne 5) {
+        return $null
+    }
+
     try {
-        return (($Probe -join "`n").Trim() | ConvertFrom-Json)
+        return [pscustomobject]@{
+            path = [string]$Parts[0]
+            major = [int]$Parts[1]
+            minor = [int]$Parts[2]
+            bits = [int]$Parts[3]
+            implementation = [string]$Parts[4]
+        }
     } catch {
         return $null
     }
