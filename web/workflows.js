@@ -618,6 +618,8 @@ function processHandPointerEvent(event) {
   } else if (event.pressed && pointerPressed) {
     moveHandPointerPress(point.x, point.y);
   } else if (!event.pressed && pointerPressed) {
+    // The release sample is also the final drag coordinate; apply it before committing the drop.
+    moveHandPointerPress(point.x, point.y);
     endHandPointerPress();
   }
 }
