@@ -58,6 +58,15 @@ class ControlStoreTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.store.set_pointer_settings({"press_threshold": 0.7, "release_threshold": 0.6})
 
+    def test_corrupt_pointer_settings_are_reset_to_safe_defaults(self):
+        with sqlite3.connect(self.path) as connection:
+            connection.execute(
+                "UPDATE settings SET value = ? WHERE key = ?",
+                (json.dumps({"min_cutoff": float("nan")}), "pointer_settings"),
+            )
+        reopened = ControlStore(self.path)
+        self.assertEqual(reopened.get_pointer_settings(), self.store.get_pointer_settings())
+
     def test_controller_recovery_states_are_persistable(self):
         self.store.begin_session("session-recovery", 100)
         self.store.update_controller("session-recovery", "suspect", "person-1", 200)

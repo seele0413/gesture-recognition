@@ -368,6 +368,7 @@ class StreamManager:
             self.hub.publish_from_thread({
                 "type": "pointer", "active": False, "pressed": False,
                 "x": 0.5, "y": 0.5, "track_id": None, "handedness": None,
+                "controller_id": None, "hand_track_id": None, "identity_confirmed": False,
                 "timestamp_ms": int(time.monotonic() * 1000),
             })
         return {"enabled": self._pointer_mode_enabled, "controller": controller}

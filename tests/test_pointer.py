@@ -156,6 +156,34 @@ class HandPointerControllerTests(unittest.TestCase):
         self.assertEqual(settings["press_stable_frames"], 3)
         with self.assertRaises(ValueError):
             self.pointer.set_settings({"press_threshold": 0.6, "release_threshold": 0.5})
+        with self.assertRaises(ValueError):
+            self.pointer.set_settings({"unknown_option": 1})
+        with self.assertRaises(ValueError):
+            self.pointer.set_settings({"beta": float("nan")})
+
+    def test_pointer_event_exposes_controller_and_hand_track_identity(self):
+        hand = make_hand()
+        hand["hand_track_id"] = "hand-7"
+        event = self.pointer.update(
+            [hand], "locked", "person-1", 100, controller_id="controller-7",
+        )
+        self.assertEqual(event["controller_id"], "controller-7")
+        self.assertEqual(event["hand_track_id"], "hand-7")
+        self.assertTrue(event["identity_confirmed"])
+
+    def test_one_euro_filter_handles_repeated_and_reversed_timestamps(self):
+        from app.pointer import OneEuroFilter
+
+        smoother = OneEuroFilter()
+        self.assertEqual(smoother.filter(0.2, 100), 0.2)
+        values = [
+            smoother.filter(0.3, 100),
+            smoother.filter(0.4, 90),
+            smoother.filter(0.5, 101),
+        ]
+        self.assertTrue(all(math.isfinite(value) for value in values))
+        smoother.reset()
+        self.assertEqual(smoother.filter(0.7, 10), 0.7)
 
     def test_controller_v_sign_is_not_used_as_drag_pointer(self):
         self.assertIsNone(self.pointer.update([make_hand(is_lock_gesture=True)], "locked", "person-1", 100))

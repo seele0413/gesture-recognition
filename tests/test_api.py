@@ -197,6 +197,15 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(invalid.status_code, 400)
         self.assertEqual(self.client.get("/api/pointer/settings").json()["min_cutoff"], 1.7)
 
+    def test_pointer_settings_api_rejects_unknown_boolean_and_fractional_integer_values(self):
+        unknown = self.client.put("/api/pointer/settings", json={"unknown_option": 1})
+        self.assertEqual(unknown.status_code, 422)
+        boolean = self.client.put("/api/pointer/settings", json={"beta": True})
+        self.assertEqual(boolean.status_code, 422)
+        fractional = self.client.put("/api/pointer/settings", json={"press_stable_frames": 2.5})
+        self.assertEqual(fractional.status_code, 422)
+        self.assertEqual(self.client.get("/api/pointer/settings").json()["press_stable_frames"], 2)
+
     def test_pointer_mode_api_can_be_enabled_and_disabled(self):
         initial = self.client.get("/api/pointer/mode")
         self.assertEqual(initial.status_code, 200)

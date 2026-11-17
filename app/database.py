@@ -304,14 +304,16 @@ class ControlStore:
     def set_pointer_settings(self, value: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(value, dict):
             raise ValueError("指针设置必须是对象")
-        current = self.get_pointer_settings()
-        clean = validate_pointer_settings({**current, **value})
-        with self._lock, self._connection() as connection:
-            connection.execute(
-                "INSERT INTO settings (key, value) VALUES (?, ?) "
-                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                ("pointer_settings", json.dumps(clean)),
-            )
+        # Keep read/merge/write atomic so concurrent partial updates cannot overwrite one another.
+        with self._lock:
+            current = self.get_pointer_settings()
+            clean = validate_pointer_settings({**current, **value})
+            with self._connection() as connection:
+                connection.execute(
+                    "INSERT INTO settings (key, value) VALUES (?, ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    ("pointer_settings", json.dumps(clean)),
+                )
         return clean
 
     def save_workflow(self, definition: dict[str, Any]) -> dict[str, Any]:

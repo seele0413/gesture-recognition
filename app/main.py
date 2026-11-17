@@ -10,7 +10,7 @@ from urllib.parse import urlsplit
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, root_validator
 
 from app.action_engine import ActionRegistry, WorkflowEngine
 from app.database import ControlStore
@@ -54,6 +54,27 @@ class PointerSettingsRequest(BaseModel):
     release_stable_frames: int | None = None
     max_update_hz: float | None = None
     dropout_grace_ms: int | None = None
+
+    class Config:
+        extra = "forbid"
+
+    @root_validator(pre=True)
+    def reject_invalid_pointer_setting_types(cls, values):
+        if not isinstance(values, dict):
+            return values
+        integer_fields = {"press_stable_frames", "release_stable_frames", "dropout_grace_ms"}
+        numeric_fields = {
+            "min_cutoff", "beta", "derivative_cutoff", "press_threshold",
+            "release_threshold", "max_update_hz",
+        }
+        for name, value in values.items():
+            if name in integer_fields and (isinstance(value, bool) or not isinstance(value, int)):
+                raise ValueError(f"{name} 必须使用整数")
+            if name in numeric_fields and (
+                isinstance(value, bool) or not isinstance(value, (int, float))
+            ):
+                raise ValueError(f"{name} 必须使用数值")
+        return values
 
 
 def _local_origin(origin: str | None) -> bool:

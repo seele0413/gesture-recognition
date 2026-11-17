@@ -27,7 +27,7 @@ flowchart LR
 
 主控生命周期包含 `unlocked`、`locked`、`suspect` 和 `reacquiring`。人体轨迹首次漏检时进入 `suspect`，默认保留 650 ms；系统仅对最近在 LOCKED 状态中观察到的主控手部轨迹做短时连续性匹配。唯一匹配成功时允许该手继续控制，匹配缺失或歧义时暂停手势和指针。工作流在节点边界等待身份确认，确认后继续；进入 `reacquiring` 后释放指针并取消工作流，总恢复窗口默认 3500 ms。同一 `track_id` 在窗口内重新出现后恢复原 `controller_id` 对应的主控会话。超过窗口才自动解锁。新人员在恢复期间不能通过比耶手势抢占控制权。
 
-指针数据由 MediaPipe 21 点关键点计算，后端使用食指指尖坐标、掌宽归一化捏合距离、双阈值迟滞和自适应指数平滑。当前默认捏合按下/释放阈值为 0.36/0.50，食指伸展夹角门槛为 140°，指针事件最高推送频率为 45 Hz。短暂漏检会保留最后一个光标位置最多 350 ms；若漏检发生在拖拽期间，会立即释放按压状态，避免节点被一直拖住。指针模式会对主控手增加一次更宽但仍经过多人歧义检查的手腕关联尝试。指针事件经 `/ws/events` 单独发布，不进入工作流动作执行通道。启用指针模式时暂停普通手势映射，避免移动和捏合误触发播放器动作；比耶主控锁定仍保留。主控解除或视频流断开时立即释放拖拽状态。
+指针数据由 MediaPipe 21 点关键点计算，后端使用食指指尖坐标、掌宽归一化捏合距离、双阈值迟滞和 One Euro 自适应低通滤波。默认 `min_cutoff=1.0`、`beta=0.025`、`derivative_cutoff=1.0`；捏合按下/释放阈值为 0.36/0.50，分别需要连续 2 帧确认；食指伸展夹角门槛为 140°，指针事件最高推送频率为 45 Hz。短暂漏检会保留最后一个光标位置最多 350 ms；若漏检发生在拖拽期间，会立即释放按压状态，避免节点被一直拖住。指针参数保存在 SQLite，可通过 `GET /api/pointer/settings` 读取、通过 `PUT /api/pointer/settings` 部分更新；支持的字段为 `min_cutoff`、`beta`、`derivative_cutoff`、`press_threshold`、`release_threshold`、`press_stable_frames`、`release_stable_frames`、`max_update_hz` 和 `dropout_grace_ms`。指针模式会对主控手增加一次更宽但仍经过多人歧义检查的手腕关联尝试。指针事件经 `/ws/events` 单独发布，不进入工作流动作执行通道。启用指针模式时暂停普通手势映射，避免移动和捏合误触发播放器动作；比耶主控锁定仍保留。主控解除或视频流断开时立即释放拖拽状态.
 
 当前网页拖拽实现范围是本项目 `/workflows` 画布中的节点；不会模拟 Windows 系统鼠标，也不承诺驱动任意第三方网页、浏览器原生文件拖放或跨域 iframe。
 
@@ -114,6 +114,7 @@ PPT 动作：`ppt.open_deck`、`ppt.start_slideshow`、`ppt.next_slide`、`ppt.p
 | GET | `/api/workflow-status` | 大屏客户端、主控和运行状态 |
 | WebSocket | `/ws/display` | 唯一大屏命令执行与确认 |
 | GET / POST | `/api/pointer/mode` | 读取 / 开关手势指针模式 |
+| GET / PUT | `/api/pointer/settings` | 读取 / 持久化指针滤波、捏合阈值、稳定帧数和更新频率 |
 | WebSocket | `/ws/events` | 推送手势、主控、工作流及低频指针事件 |
 
 保存 API 仍沿用本机来源限制。开启动作触发相互重叠的工作流会返回 409；运行中的其它工作流会被拒绝，不会并行争抢展示屏。
