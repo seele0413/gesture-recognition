@@ -17,6 +17,7 @@ from app.control import (
     validate_mappings,
 )
 from app.settings import MEDIA_DIR
+from app.pointer import DEFAULT_POINTER_SETTINGS, validate_pointer_settings
 
 
 class ControlStore:
@@ -156,6 +157,10 @@ class ControlStore:
                 "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
                 ("gesture_confidence_threshold", json.dumps(DEFAULT_GESTURE_CONFIDENCE_THRESHOLD)),
             )
+            connection.execute(
+                "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
+                ("pointer_settings", json.dumps(DEFAULT_POINTER_SETTINGS)),
+            )
             row = connection.execute(
                 "SELECT value FROM settings WHERE key = ?", ("gesture_mappings",)
             ).fetchone()
@@ -175,6 +180,16 @@ class ControlStore:
                 connection.execute(
                     "UPDATE settings SET value = ? WHERE key = ?",
                     (json.dumps(DEFAULT_GESTURE_CONFIDENCE_THRESHOLD), "gesture_confidence_threshold"),
+                )
+            pointer_row = connection.execute(
+                "SELECT value FROM settings WHERE key = ?", ("pointer_settings",)
+            ).fetchone()
+            try:
+                validate_pointer_settings(json.loads(pointer_row["value"]))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                connection.execute(
+                    "UPDATE settings SET value = ? WHERE key = ?",
+                    (json.dumps(DEFAULT_POINTER_SETTINGS), "pointer_settings"),
                 )
             connection.execute(
                 "INSERT OR IGNORE INTO media_assets (asset_id, title, filename, enabled) VALUES (?, ?, ?, 1)",
@@ -278,6 +293,26 @@ class ControlStore:
                 ("gesture_confidence_threshold", json.dumps(threshold)),
             )
         return threshold
+
+    def get_pointer_settings(self) -> dict[str, Any]:
+        with self._lock, self._connection() as connection:
+            row = connection.execute(
+                "SELECT value FROM settings WHERE key = ?", ("pointer_settings",)
+            ).fetchone()
+        return validate_pointer_settings(json.loads(row["value"]))
+
+    def set_pointer_settings(self, value: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            raise ValueError("指针设置必须是对象")
+        current = self.get_pointer_settings()
+        clean = validate_pointer_settings({**current, **value})
+        with self._lock, self._connection() as connection:
+            connection.execute(
+                "INSERT INTO settings (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                ("pointer_settings", json.dumps(clean)),
+            )
+        return clean
 
     def save_workflow(self, definition: dict[str, Any]) -> dict[str, Any]:
         workflow = dict(definition)

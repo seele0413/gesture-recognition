@@ -46,6 +46,18 @@ class ControlStoreTests(unittest.TestCase):
             connection.close()
         self.assertEqual(ControlStore(self.path).get_gesture_confidence_threshold(), 0.6)
 
+    def test_pointer_settings_are_validated_and_persisted(self):
+        defaults = self.store.get_pointer_settings()
+        self.assertEqual(defaults["min_cutoff"], 1.0)
+        updated = self.store.set_pointer_settings({"min_cutoff": 1.8, "press_stable_frames": 3})
+        self.assertEqual(updated["min_cutoff"], 1.8)
+        self.assertEqual(updated["press_stable_frames"], 3)
+        reopened = ControlStore(self.path)
+        self.assertEqual(reopened.get_pointer_settings()["min_cutoff"], 1.8)
+        self.assertEqual(reopened.get_pointer_settings()["press_stable_frames"], 3)
+        with self.assertRaises(ValueError):
+            self.store.set_pointer_settings({"press_threshold": 0.7, "release_threshold": 0.6})
+
     def test_controller_recovery_states_are_persistable(self):
         self.store.begin_session("session-recovery", 100)
         self.store.update_controller("session-recovery", "suspect", "person-1", 200)

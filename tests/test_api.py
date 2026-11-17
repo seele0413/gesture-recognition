@@ -184,6 +184,19 @@ class ApiTests(unittest.TestCase):
         self.assertIn("不是允许的选项", response.text)
         self.assertIn("video.load", {action["name"] for action in self.client.get("/api/actions").json()["actions"]})
 
+    def test_pointer_settings_api_persists_partial_updates_and_rejects_invalid_thresholds(self):
+        initial = self.client.get("/api/pointer/settings")
+        self.assertEqual(initial.status_code, 200)
+        self.assertEqual(initial.json()["press_stable_frames"], 2)
+        updated = self.client.put("/api/pointer/settings", json={"min_cutoff": 1.7, "press_stable_frames": 3})
+        self.assertEqual(updated.status_code, 200, updated.text)
+        self.assertEqual(updated.json()["min_cutoff"], 1.7)
+        self.assertEqual(updated.json()["press_stable_frames"], 3)
+        self.assertEqual(updated.json()["release_threshold"], 0.5)
+        invalid = self.client.put("/api/pointer/settings", json={"press_threshold": 0.7, "release_threshold": 0.6})
+        self.assertEqual(invalid.status_code, 400)
+        self.assertEqual(self.client.get("/api/pointer/settings").json()["min_cutoff"], 1.7)
+
     def test_pointer_mode_api_can_be_enabled_and_disabled(self):
         initial = self.client.get("/api/pointer/mode")
         self.assertEqual(initial.status_code, 200)

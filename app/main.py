@@ -44,6 +44,18 @@ class PointerModeRequest(BaseModel):
     enabled: bool
 
 
+class PointerSettingsRequest(BaseModel):
+    min_cutoff: float | None = None
+    beta: float | None = None
+    derivative_cutoff: float | None = None
+    press_threshold: float | None = None
+    release_threshold: float | None = None
+    press_stable_frames: int | None = None
+    release_stable_frames: int | None = None
+    max_update_hz: float | None = None
+    dropout_grace_ms: int | None = None
+
+
 def _local_origin(origin: str | None) -> bool:
     if not origin:
         return True
@@ -195,6 +207,17 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
     @app.get("/api/actions")
     async def get_actions() -> dict:
         return {"actions": action_registry.describe()}
+
+    @app.get("/api/pointer/settings")
+    async def get_pointer_settings() -> dict:
+        return manager.get_pointer_settings()
+
+    @app.put("/api/pointer/settings")
+    async def put_pointer_settings(payload: PointerSettingsRequest) -> dict:
+        try:
+            return manager.set_pointer_settings(payload.dict(exclude_unset=True, exclude_none=True))
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
 
     @app.get("/api/pointer/mode")
     async def get_pointer_mode() -> dict:

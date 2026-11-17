@@ -555,6 +555,13 @@ class VisionProcessor:
                 self.publish(pointer_event)
             return self.pointer_mode_enabled
 
+    def set_pointer_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
+        with self.lock:
+            pointer_event = self.pointer.reset(self.last_timestamp_ms)
+            if pointer_event:
+                self.publish(pointer_event)
+            return self.pointer.set_settings(settings)
+
     def _process_controller_hands(
         self, hands: list[dict[str, Any]], timestamp_ms: int, *, identity_confirmed: bool = False,
     ) -> list[dict[str, Any]]:
