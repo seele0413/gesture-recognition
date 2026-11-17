@@ -17,6 +17,7 @@ const ui = {
   linkMode: document.getElementById("linkMode"),
   pointerMode: document.getElementById("pointerMode"),
   pointerMirror: document.getElementById("pointerMirror"),
+  pointerCalibrate: document.getElementById("pointerCalibrate"),
   autoArrange: document.getElementById("autoArrange"),
   zoomOut: document.getElementById("zoomOut"),
   zoomIn: document.getElementById("zoomIn"),
@@ -65,11 +66,33 @@ let pointerPressed = false;
 let pointerDownTarget = null;
 let pointerDragNodeId = null;
 let pointerDownPoint = null;
+let pointerGrabOffset = null;
 let pointerMoved = false;
+let mouseDragOffset = null;
+let latestPointerEvent = null;
+let pointerAnimationFrame = null;
+let pointerCalibrationSession = null;
+let pointerIgnoreUntilRelease = false;
+let lastPointerPressed = false;
+const POINTER_CALIBRATION_KEY = "gesture-workflow-pointer-calibration-v1";
+const POINTER_CALIBRATION_TARGETS = [
+  { x: 0.08, y: 0.08, label: "左上" },
+  { x: 0.92, y: 0.08, label: "右上" },
+  { x: 0.92, y: 0.92, label: "右下" },
+  { x: 0.08, y: 0.92, label: "左下" },
+];
+let pointerCalibration = loadPointerCalibration();
 const handPointerCursor = make("div", "hand-pointer-cursor");
 handPointerCursor.hidden = true;
 handPointerCursor.setAttribute("aria-hidden", "true");
 document.body.append(handPointerCursor);
+const pointerCalibrationOverlay = make("div", "pointer-calibration-overlay");
+pointerCalibrationOverlay.hidden = true;
+pointerCalibrationOverlay.setAttribute("aria-hidden", "true");
+const pointerCalibrationHint = make("div", "pointer-calibration-hint");
+const pointerCalibrationTarget = make("div", "pointer-calibration-target");
+pointerCalibrationOverlay.append(pointerCalibrationHint, pointerCalibrationTarget);
+document.body.append(pointerCalibrationOverlay);
 
 async function api(path, options = {}) {
   const response = await fetch(path, { cache: "no-store", ...options, headers: { "Content-Type": "application/json", ...(options.headers || {}) } });
@@ -88,17 +111,55 @@ function make(tag, className, text) {
   return element;
 }
 
+function loadPointerCalibration() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(POINTER_CALIBRATION_KEY) || "null");
+    if (saved?.mirrorX !== pointerMirrorX || !Array.isArray(saved?.matrix)
+      || saved.matrix.length !== 8 || !saved.matrix.every(Number.isFinite)) return null;
+    return saved;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function updatePointerCalibrationButton() {
+  if (!ui.pointerCalibrate) return;
+  const calibrating = Boolean(pointerCalibrationSession);
+  ui.pointerCalibrate.disabled = !pointerModeEnabled && !calibrating;
+  ui.pointerCalibrate.textContent = calibrating
+    ? "取消校准"
+    : pointerCalibration
+      ? "重新校准"
+      : "四角校准";
+  ui.pointerCalibrate.dataset.state = pointerCalibration ? "calibrated" : "idle";
+  ui.pointerCalibrate.title = calibrating
+    ? "取消当前四角校准"
+    : pointerCalibration
+      ? "已完成四角校准；点击可重新采集"
+      : "依次对准画布四角并捏合采集，校正摄像头透视偏差";
+}
+
 function setPointerModeUi(enabled) {
   pointerModeEnabled = Boolean(enabled);
   ui.pointerMode.textContent = pointerModeEnabled ? "手势拖拽：开启" : "手势拖拽：关闭";
   ui.pointerMode.setAttribute("aria-pressed", String(pointerModeEnabled));
   ui.pointerMode.dataset.state = pointerModeEnabled ? "active" : "idle";
+  if (!pointerModeEnabled && pointerCalibrationSession) cancelPointerCalibration(false);
+  updatePointerCalibrationButton();
 }
 
 function setPointerMirrorUi(enabled) {
-  pointerMirrorX = Boolean(enabled);
+  const next = Boolean(enabled);
+  if (next !== pointerMirrorX) {
+    pointerCalibration = null;
+    try { localStorage.removeItem(POINTER_CALIBRATION_KEY); } catch (_error) {}
+    if (pointerCalibrationSession) cancelPointerCalibration(false);
+    setMessage("镜像方向已改变，原四角校准已失效；请重新校准", "ok");
+  }
+  pointerMirrorX = next;
   ui.pointerMirror.textContent = pointerMirrorX ? "镜像：开启" : "镜像：关闭";
   ui.pointerMirror.setAttribute("aria-pressed", String(pointerMirrorX));
+  updatePointerCalibrationButton();
 }
 
 async function refreshPointerMode() {
@@ -121,7 +182,7 @@ async function togglePointerMode() {
     setMessage(response.enabled
       ? controllerLocked
         ? "手势拖拽已开启：伸出食指移动，捏合抓取节点，松开释放"
-        : "手势拖拽已开启；请先在摄像头前完成 OK 主控锁定"
+        : "手势拖拽已开启；请先在摄像头前完成 V 字主控锁定"
       : "手势拖拽已关闭");
   } catch (error) {
     setMessage(error.message, "error");
@@ -130,21 +191,134 @@ async function togglePointerMode() {
   }
 }
 
-function pointerClientPoint(event) {
+function renderPointerCalibrationOverlay() {
+  const session = pointerCalibrationSession;
+  if (!session) {
+    pointerCalibrationOverlay.hidden = true;
+    return;
+  }
   const rect = ui.canvasViewport.getBoundingClientRect();
-  const normalizedX = pointerMirrorX ? 1 - Number(event.x) : Number(event.x);
-  const normalizedY = Number(event.y);
-  return {
-    x: rect.left + Math.min(1, Math.max(0, normalizedX)) * rect.width,
-    y: rect.top + Math.min(1, Math.max(0, normalizedY)) * rect.height,
+  pointerCalibrationOverlay.style.left = rect.left + "px";
+  pointerCalibrationOverlay.style.top = rect.top + "px";
+  pointerCalibrationOverlay.style.width = rect.width + "px";
+  pointerCalibrationOverlay.style.height = rect.height + "px";
+  const target = POINTER_CALIBRATION_TARGETS[session.index];
+  pointerCalibrationTarget.style.left = target.x * 100 + "%";
+  pointerCalibrationTarget.style.top = target.y * 100 + "%";
+  pointerCalibrationHint.textContent = session.awaitingRelease
+    ? "已采集 " + session.points.length + "/4 · 松开捏合后继续"
+    : "请将光标对准" + target.label + "角圆点并捏合确认 · " + (session.index + 1) + "/4";
+  pointerCalibrationOverlay.hidden = false;
+}
+
+function startPointerCalibration() {
+  if (pointerCalibrationSession) {
+    cancelPointerCalibration(true);
+    return;
+  }
+  if (!pointerModeEnabled) {
+    setMessage("请先开启手势拖拽，再进行四角校准", "error");
+    return;
+  }
+  pointerCalibrationSession = {
+    points: [],
+    index: 0,
+    awaitingRelease: lastPointerPressed,
   };
+  pointerPressed = lastPointerPressed;
+  pointerDownTarget = null;
+  pointerDragNodeId = null;
+  pointerGrabOffset = null;
+  pointerDownPoint = null;
+  pointerMoved = false;
+  pointerIgnoreUntilRelease = false;
+  renderPointerCalibrationOverlay();
+  updatePointerCalibrationButton();
+  setMessage("四角校准已开始：依次对准画布左上、右上、右下、左下圆点，每处捏合一次");
+}
+
+function cancelPointerCalibration(showMessage = true) {
+  if (!pointerCalibrationSession) return;
+  pointerCalibrationSession = null;
+  pointerIgnoreUntilRelease = lastPointerPressed;
+  pointerPressed = lastPointerPressed;
+  pointerCalibrationOverlay.hidden = true;
+  updatePointerCalibrationButton();
+  if (showMessage) setMessage("已取消四角校准");
+}
+
+function capturePointerCalibrationPoint(event) {
+  const session = pointerCalibrationSession;
+  if (!session) return;
+  const x = Number(event.x);
+  const y = Number(event.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 1 || y < 0 || y > 1) {
+    cancelPointerCalibration(false);
+    setMessage("校准坐标无效，请重新开始", "error");
+    return;
+  }
+  session.points.push({ x: pointerMirrorX ? 1 - x : x, y });
+  session.index += 1;
+  if (session.index < POINTER_CALIBRATION_TARGETS.length) {
+    session.awaitingRelease = true;
+    renderPointerCalibrationOverlay();
+    return;
+  }
+  try {
+    const matrix = PointerGeometry.solveHomography(
+      session.points,
+      POINTER_CALIBRATION_TARGETS.map(({ x: targetX, y: targetY }) => ({ x: targetX, y: targetY })),
+    );
+    pointerCalibration = { matrix, mirrorX: pointerMirrorX, savedAt: new Date().toISOString() };
+    try { localStorage.setItem(POINTER_CALIBRATION_KEY, JSON.stringify(pointerCalibration)); } catch (_error) {}
+    pointerCalibrationSession = null;
+    pointerCalibrationOverlay.hidden = true;
+    updatePointerCalibrationButton();
+    setMessage("四角校准完成，已保存；现在可以准确抓取节点", "ok");
+  } catch (error) {
+    pointerCalibrationSession = null;
+    pointerCalibrationOverlay.hidden = true;
+    updatePointerCalibrationButton();
+    setMessage(error.message || "四角校准失败，请重新采集", "error");
+  }
+}
+
+function pointerClientPoint(event, useCalibration = true) {
+  const rect = ui.canvasViewport.getBoundingClientRect();
+  const matrix = useCalibration && pointerCalibration?.mirrorX === pointerMirrorX
+    ? pointerCalibration.matrix
+    : null;
+  return PointerGeometry.normalizedToClient(
+    { x: Number(event.x), y: Number(event.y) },
+    rect,
+    pointerMirrorX,
+    matrix,
+  );
+}
+
+function clientToWorld(clientX, clientY) {
+  const rect = ui.canvasViewport.getBoundingClientRect();
+  return PointerGeometry.clientToWorld(
+    { x: clientX, y: clientY },
+    rect,
+    ui.canvasViewport.scrollLeft,
+    ui.canvasViewport.scrollTop,
+    zoom,
+  );
 }
 
 function releaseHandPointer() {
-  pointerPressed = false;
+  if (pointerAnimationFrame !== null) {
+    window.cancelAnimationFrame(pointerAnimationFrame);
+    pointerAnimationFrame = null;
+  }
+  latestPointerEvent = null;
+  pointerIgnoreUntilRelease = lastPointerPressed;
+  pointerPressed = lastPointerPressed;
   pointerDownTarget = null;
   pointerDragNodeId = null;
   pointerDownPoint = null;
+  pointerGrabOffset = null;
   pointerMoved = false;
   handPointerCursor.hidden = true;
   handPointerCursor.dataset.pressed = "false";
@@ -162,9 +336,16 @@ function beginHandPointerPress(clientX, clientY) {
       pointerDownTarget = null;
       return;
     }
+    const node = findNode(nodeId);
+    if (!node) return;
     selectedNodeId = nodeId;
-    renderCanvas();
+    updateNodeSelectionState();
     renderInspector();
+    const worldPoint = clientToWorld(clientX, clientY);
+    pointerGrabOffset = {
+      x: worldPoint.x - node.position.x,
+      y: worldPoint.y - node.position.y,
+    };
     pointerDragNodeId = nodeId;
     pointerDownTarget = null;
     return;
@@ -175,8 +356,10 @@ function beginHandPointerPress(clientX, clientY) {
 function moveHandPointerPress(clientX, clientY) {
   if (!pointerPressed || !pointerDownPoint) return;
   const distance = Math.hypot(clientX - pointerDownPoint.x, clientY - pointerDownPoint.y);
-  if (distance >= 7) pointerMoved = true;
-  if (pointerDragNodeId && pointerMoved) moveNode(pointerDragNodeId, clientX, clientY);
+  if (distance >= 5) pointerMoved = true;
+  if (pointerDragNodeId && pointerMoved) {
+    moveNode(pointerDragNodeId, clientX, clientY, pointerGrabOffset);
+  }
 }
 
 function endHandPointerPress() {
@@ -193,22 +376,54 @@ function endHandPointerPress() {
   pointerDownTarget = null;
   pointerDragNodeId = null;
   pointerDownPoint = null;
+  pointerGrabOffset = null;
   pointerMoved = false;
   handPointerCursor.dataset.pressed = "false";
 }
 
-function handleHandPointer(event) {
+function processHandPointer(event) {
+  lastPointerPressed = Boolean(event?.pressed);
   if (!pointerModeEnabled) return;
-  if (!event.active || !Number.isFinite(Number(event.x)) || !Number.isFinite(Number(event.y))) {
+  if (!event?.active || event.identity_confirmed === false
+    || !Number.isFinite(Number(event.x)) || !Number.isFinite(Number(event.y))) {
+    if (pointerCalibrationSession) cancelPointerCalibration(false);
     releaseHandPointer();
     return;
   }
-  const point = pointerClientPoint(event);
+  const point = pointerClientPoint(event, !pointerCalibrationSession);
   handPointerCursor.hidden = false;
   handPointerCursor.style.left = point.x + "px";
   handPointerCursor.style.top = point.y + "px";
   handPointerCursor.dataset.pressed = String(Boolean(event.pressed));
 
+  if (pointerCalibrationSession) {
+    const session = pointerCalibrationSession;
+    if (session.awaitingRelease) {
+      if (!event.pressed) {
+        session.awaitingRelease = false;
+        pointerPressed = false;
+        renderPointerCalibrationOverlay();
+      }
+      return;
+    }
+    if (event.pressed && !pointerPressed) {
+      pointerPressed = true;
+      session.awaitingRelease = true;
+      capturePointerCalibrationPoint(event);
+      renderPointerCalibrationOverlay();
+    } else if (!event.pressed) {
+      pointerPressed = false;
+    }
+    return;
+  }
+
+  if (pointerIgnoreUntilRelease) {
+    if (!event.pressed) {
+      pointerIgnoreUntilRelease = false;
+      pointerPressed = false;
+    }
+    return;
+  }
   if (event.pressed && !pointerPressed) {
     pointerPressed = true;
     beginHandPointerPress(point.x, point.y);
@@ -217,6 +432,17 @@ function handleHandPointer(event) {
   } else if (!event.pressed && pointerPressed) {
     endHandPointerPress();
   }
+}
+
+function handleHandPointer(event) {
+  latestPointerEvent = event;
+  if (pointerAnimationFrame !== null) return;
+  pointerAnimationFrame = window.requestAnimationFrame(() => {
+    pointerAnimationFrame = null;
+    const pending = latestPointerEvent;
+    latestPointerEvent = null;
+    processHandPointer(pending);
+  });
 }
 function currentNode() {
   return workflow?.nodes.find((node) => node.id === selectedNodeId) || null;
@@ -525,10 +751,15 @@ function renderCanvas() {
     card.append(body);
     card.addEventListener("click", () => selectOrLink(node.id));
     card.addEventListener("dragstart", (event) => {
-      draggingNodeId = node.id;
+      const worldPoint = clientToWorld(event.clientX, event.clientY);
+      mouseDragOffset = {
+        x: worldPoint.x - node.position.x,
+        y: worldPoint.y - node.position.y,
+      };
       event.dataTransfer.setData("text/plain", "node:" + node.id);
       event.dataTransfer.effectAllowed = "move";
     });
+    card.addEventListener("dragend", () => { mouseDragOffset = null; });
     ui.canvasNodes.append(card);
   }
   drawEdges();
@@ -582,6 +813,13 @@ function drawPath(svg, x1, y1, x2, y2, key, label) {
     text.setAttribute("y", String((y1 + y2) / 2 - 7));
     text.textContent = label;
     svg.append(text);
+  }
+}
+
+function updateNodeSelectionState() {
+  for (const card of ui.canvasNodes.children) {
+    card.dataset.selected = String(card.dataset.nodeId === selectedNodeId);
+    card.dataset.linkSource = String(card.dataset.nodeId === linkSourceId);
   }
 }
 
@@ -765,15 +1003,26 @@ function renderWaitEventProperties(node) {
   }
 }
 
-function moveNode(nodeId, clientX, clientY) {
+function moveNode(nodeId, clientX, clientY, grabOffset = null) {
   const node = findNode(nodeId);
   if (!node) return;
-  const rect = ui.canvasViewport.getBoundingClientRect();
-  node.position = {
-    x: Math.max(0, Math.round((clientX - rect.left + ui.canvasViewport.scrollLeft) / zoom - 118)),
-    y: Math.max(0, Math.round((clientY - rect.top + ui.canvasViewport.scrollTop) / zoom - 53)),
+  const card = Array.from(ui.canvasNodes.children).find((element) => element.dataset.nodeId === nodeId);
+  const worldPoint = clientToWorld(clientX, clientY);
+  const offset = grabOffset || {
+    x: (card?.offsetWidth || 236) / 2,
+    y: (card?.offsetHeight || 106) / 2,
   };
-  renderCanvas();
+  node.position = PointerGeometry.nodePositionFromPointer(
+    worldPoint,
+    offset,
+    { width: ui.canvasWorld.clientWidth, height: ui.canvasWorld.clientHeight },
+    { width: card?.offsetWidth || 236, height: card?.offsetHeight || 106 },
+  );
+  if (card) {
+    card.style.left = node.position.x + "px";
+    card.style.top = node.position.y + "px";
+  }
+  drawEdges();
 }
 
 function autoArrange() {
@@ -948,7 +1197,8 @@ function connectWorkflowEvents() {
         handleHandPointer(event);
         return;
       }
-      if (event.type === "controller" && event.state !== "locked") {
+      if (event.type === "controller" && ["unlocked", "reacquiring"].includes(event.state)) {
+        if (pointerCalibrationSession) cancelPointerCalibration(false);
         releaseHandPointer();
       }
       if (event.type === "stream" && event.state !== "running") {
@@ -1085,6 +1335,7 @@ ui.duplicateNode.addEventListener("click", duplicateNode);
 ui.deleteNode.addEventListener("click", deleteNode);
 ui.pointerMode.addEventListener("click", () => togglePointerMode());
 ui.pointerMirror.addEventListener("click", () => setPointerMirrorUi(!pointerMirrorX));
+ui.pointerCalibrate.addEventListener("click", startPointerCalibration);
 window.addEventListener("pagehide", () => {
   if (pointerModeEnabled) {
     fetch("/api/pointer/mode", {
@@ -1094,6 +1345,7 @@ window.addEventListener("pagehide", () => {
       keepalive: true,
     }).catch(() => {});
   }
+  if (pointerCalibrationSession) cancelPointerCalibration(false);
   releaseHandPointer();
 });
 
@@ -1107,13 +1359,17 @@ ui.canvasViewport.addEventListener("drop", (event) => {
     y: Math.max(20, Math.round((event.clientY - rect.top + ui.canvasViewport.scrollTop) / zoom)),
   };
   if (payload.startsWith("node:")) {
-    moveNode(payload.slice(5), event.clientX, event.clientY);
+    moveNode(payload.slice(5), event.clientX, event.clientY, mouseDragOffset);
+    mouseDragOffset = null;
   } else if (payload.startsWith("node-type:")) {
     const node = defaultNode(payload.slice(10)); node.position = position; addNode(node);
   } else if (payload.startsWith("action:")) {
     const node = defaultNode("action", payload.slice(7)); node.position = position; addNode(node);
   }
 });
+window.addEventListener("resize", renderPointerCalibrationOverlay);
+window.addEventListener("scroll", renderPointerCalibrationOverlay, true);
+ui.canvasViewport.addEventListener("scroll", renderPointerCalibrationOverlay, { passive: true });
 
 setInterval(() => {
   refreshRuns().catch(() => {});
