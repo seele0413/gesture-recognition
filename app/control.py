@@ -135,6 +135,7 @@ def build_controller_event(
     timestamp_ms: int,
     reason: str,
     controller_id: str | None = None,
+    identity_confirmed: bool | None = None,
 ) -> dict[str, object]:
     if state not in {"unlocked", "locked", "suspect", "reacquiring"}:
         raise ValueError("无效的主控状态")
@@ -147,6 +148,7 @@ def build_controller_event(
         "track_id": track_id,
         "timestamp_ms": int(timestamp_ms),
         "reason": reason,
+        "identity_confirmed": bool(state == "locked" or identity_confirmed),
     }
 
 

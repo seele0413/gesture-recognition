@@ -31,6 +31,9 @@ class HandPointerController:
         self._x: float | None = None
         self._y: float | None = None
         self._last_valid_timestamp_ms: int | None = None
+        self._controller_id: str | None = None
+        self._hand_track_id: str | None = None
+        self._identity_confirmed = False
         self._last_emit_at = 0.0
 
     def set_enabled(self, enabled: bool, timestamp_ms: int = 0) -> dict[str, Any] | None:
@@ -48,8 +51,12 @@ class HandPointerController:
         controller_state: str,
         controller_track_id: str | None,
         timestamp_ms: int,
+        *,
+        identity_confirmed: bool = False,
+        controller_id: str | None = None,
     ) -> dict[str, Any] | None:
-        if not self.enabled or controller_state != "locked" or not controller_track_id:
+        authorized = controller_state == "locked" or (controller_state == "suspect" and identity_confirmed)
+        if not self.enabled or not authorized or not controller_track_id:
             return self._deactivate(timestamp_ms)
 
         candidates: list[tuple[dict[str, Any], float, bool]] = []
@@ -111,6 +118,9 @@ class HandPointerController:
         self._pressed = pressed
         self._track_id = controller_track_id
         self._handedness = handedness
+        self._controller_id = controller_id
+        self._hand_track_id = hand.get("hand_track_id")
+        self._identity_confirmed = controller_state == "locked" or bool(identity_confirmed)
         self._last_valid_timestamp_ms = int(timestamp_ms)
 
         now = time.monotonic()
@@ -145,6 +155,9 @@ class HandPointerController:
             "y": round(self._y if self._y is not None else 0.5, 5),
             "track_id": self._track_id,
             "handedness": self._handedness,
+            "controller_id": self._controller_id,
+            "hand_track_id": self._hand_track_id,
+            "identity_confirmed": self._identity_confirmed,
             "timestamp_ms": int(timestamp_ms),
         }
 
@@ -156,6 +169,9 @@ class HandPointerController:
         self._pressed = False
         self._track_id = None
         self._handedness = None
+        self._controller_id = None
+        self._hand_track_id = None
+        self._identity_confirmed = False
         self._x = None
         self._y = None
         self._last_valid_timestamp_ms = None

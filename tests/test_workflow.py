@@ -204,30 +204,67 @@ class WorkflowEngineTests(unittest.IsolatedAsyncioTestCase):
         await self.engine._active_task
         self.assertEqual(len(self.calls), 1)
 
-    async def test_controller_suspect_cancels_workflow_and_reacquired_master_can_control(self):
+    async def test_controller_suspect_pauses_workflow_until_hand_identity_is_confirmed(self):
         workflow = self._workflow(action_count=1)
-        workflow["nodes"].insert(0, {"id": "wait", "type": "delay", "params": {"delay_ms": 500}})
+        workflow["nodes"].insert(0, {"id": "wait", "type": "delay", "params": {"delay_ms": 10}})
         workflow["edges"] = [{"source": "wait", "target": "action-0"}, {"source": "action-0", "target": "end"}]
         self.store.save_workflow(workflow)
         await self._trigger()
+        task = self.engine._active_task
         run_id = self.engine._active_run_id
-        await self.engine.on_event({
-            "type": "controller", "state": "suspect", "track_id": "person-a",
-            "controller_id": "controller-test", "reason": "track_unmatched",
-        })
-        await self.engine._active_task
-        run = self.store.get_workflow_run(run_id)
-        self.assertEqual(run["status"], "cancelled")
-        self.assertEqual(self.engine._controller_state, "suspect")
-        rejected = await self._trigger(timestamp=200)
-        self.assertIsNone(rejected)
-        await self.engine.on_event({
-            "type": "controller", "state": "locked", "track_id": "person-a",
-            "controller_id": "controller-test", "reason": "reacquired",
-        })
+        await asyncio.sleep(0)
+        await self.engine.on_event({"type": "controller", "state": "suspect", "track_id": "person-a",
+                                    "controller_id": "controller-test", "reason": "track_unmatched",
+                                    "identity_confirmed": False})
+        await asyncio.sleep(0.03)
+        self.assertFalse(task.done())
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.store.get_workflow_run(run_id)["status"], "running")
+        await self.engine.on_event({"type": "controller", "state": "suspect", "track_id": "person-a",
+                                    "controller_id": "controller-test", "reason": "hand_identity_confirmed",
+                                    "identity_confirmed": True})
+        await task
+        self.assertEqual(self.store.get_workflow_run(run_id)["status"], "success")
+        self.assertEqual([item[0] for item in self.calls], [0])
+
+    async def test_reacquiring_cancels_workflow_paused_during_suspect(self):
+        workflow = self._workflow(action_count=1)
+        workflow["nodes"].insert(0, {"id": "wait", "type": "delay", "params": {"delay_ms": 10}})
+        workflow["edges"] = [{"source": "wait", "target": "action-0"}, {"source": "action-0", "target": "end"}]
+        self.store.save_workflow(workflow)
+        await self._trigger()
+        task = self.engine._active_task
+        run_id = self.engine._active_run_id
+        await asyncio.sleep(0)
+        await self.engine.on_event({"type": "controller", "state": "suspect", "track_id": "person-a",
+                                    "controller_id": "controller-test", "reason": "track_unmatched",
+                                    "identity_confirmed": False})
+        await asyncio.sleep(0.03)
+        self.assertFalse(task.done())
+        await self.engine.on_event({"type": "controller", "state": "reacquiring", "track_id": "person-a",
+                                    "controller_id": "controller-test", "reason": "track_reacquiring"})
+        await task
+        self.assertEqual(self.store.get_workflow_run(run_id)["status"], "cancelled")
+        self.assertEqual(self.calls, [])
+
+    async def test_identity_confirmed_suspect_controller_can_trigger_workflow(self):
+        self.store.save_workflow(self._workflow(action_count=1))
+        await self.engine.on_event({"type": "controller", "state": "suspect", "track_id": "person-a",
+                                    "controller_id": "controller-test", "reason": "hand_identity_confirmed",
+                                    "identity_confirmed": True})
         accepted = await self._trigger(timestamp=300)
         self.assertTrue(accepted["workflow_handled"])
         await self.engine._active_task
+        self.assertEqual(self.store.get_workflow_runs()[0]["status"], "success")
+
+    async def test_controller_locked_trigger_accepts_v_gesture_reason(self):
+        workflow = self._workflow(action_count=1, trigger={"type": "controller_locked"})
+        self.store.save_workflow(workflow)
+        await self.engine.on_event({"type": "controller", "state": "unlocked", "track_id": None})
+        await self.engine.on_event({"type": "controller", "state": "locked", "track_id": "person-a",
+                                    "controller_id": "controller-test", "reason": "v_gesture"})
+        await self.engine._active_task
+        self.assertEqual(self.store.get_workflow_runs()[0]["status"], "success")
 
     async def test_action_timeout_is_recorded_as_timeout_and_stops_following_nodes(self):
         async def slow(_params, _context):

@@ -83,6 +83,9 @@ class WorkflowEngine:
         self._active_workflow_id: str | None = None
         self._controller_track_id: str | None = None
         self._controller_state = "unlocked"
+        self._controller_identity_confirmed = False
+        self._controller_authority_waiters: set[asyncio.Future] = set()
+        self._active_task_started = False
         self._display_connected = False
         self._cancel_reason = ""
         self._sequences: dict[str, list[tuple[str, int]]] = {}
@@ -107,11 +110,18 @@ class WorkflowEngine:
         event_type = event.get("type")
         if event_type == "controller":
             self._controller_state = str(event.get("state", "unlocked"))
-            self._controller_track_id = event.get("track_id") if self._controller_state == "locked" else None
+            self._controller_track_id = event.get("track_id") if self._controller_state in {"locked", "suspect"} else None
+            self._controller_identity_confirmed = (
+                self._controller_state == "locked"
+                or (self._controller_state == "suspect" and bool(event.get("identity_confirmed", False)))
+            )
             self._notify_event_waiters(event)
-            if self._controller_state != "locked":
-                self.cancel_active("主控轨迹暂时丢失或解除，已取消后续工作流动作")
-            elif event.get("reason") in {"ok_gesture", "stream_reconnected"}:
+            if self._controller_identity_confirmed:
+                self._notify_controller_authority_waiters()
+            if self._controller_state not in {"locked", "suspect"}:
+                self._controller_identity_confirmed = False
+                self.cancel_active("主控进入重新关联或已解除，已取消后续工作流动作")
+            elif self._controller_state == "locked" and event.get("reason") in {"ok_gesture", "v_gesture", "stream_reconnected"}:
                 for definition in self.store.get_workflows(enabled_only=True):
                     if definition["trigger"].get("type") == "controller_locked":
                         self._start(definition, event)
@@ -124,7 +134,10 @@ class WorkflowEngine:
         if not event.get("action_triggered"):
             return None
         target_id = str(event.get("target_id", ""))
-        if self._controller_state != "locked" or target_id != self._controller_track_id:
+        authorized = self._controller_state == "locked" or (
+            self._controller_state == "suspect" and self._controller_identity_confirmed
+        )
+        if not authorized or target_id != self._controller_track_id:
             return None
         gesture = event.get("gesture")
         timestamp_ms = int(event.get("timestamp_ms", 0))
@@ -212,6 +225,7 @@ class WorkflowEngine:
         self._active_run_id = run_id
         self._active_workflow_id = definition["id"]
         self._cancel_reason = ""
+        self._active_task_started = False
         self._active_task = asyncio.create_task(self._run(definition, trigger_event, run_id), name=f"workflow-{run_id}")
         self._emit({"type": "workflow", "run_id": run_id, "workflow_id": definition["id"], "status": "pending"})
         return run_id
@@ -246,6 +260,19 @@ class WorkflowEngine:
         if not task or task.done():
             return False
         self._cancel_reason = reason
+        if not self._active_task_started:
+            run_id = self._active_run_id
+            task.cancel()
+            if run_id:
+                self.store.update_workflow_run(run_id, status="cancelled", error=reason, finished_at=utc_now())
+                self._emit({"type": "workflow", "run_id": run_id, "workflow_id": self._active_workflow_id,
+                            "status": "cancelled", "error": reason})
+            if self._active_task is task:
+                self._active_task = None
+                self._active_run_id = None
+                self._active_workflow_id = None
+                self._active_task_started = False
+            return True
         task.cancel()
         return True
 
@@ -269,8 +296,13 @@ class WorkflowEngine:
             if not future.done():
                 future.cancel()
         self._event_waiters.clear()
+        for future in tuple(self._controller_authority_waiters):
+            if not future.done():
+                future.cancel()
+        self._controller_authority_waiters.clear()
 
     async def _run(self, definition: dict[str, Any], event: dict[str, Any], run_id: str) -> None:
+        self._active_task_started = True
         now = utc_now()
         self.store.update_workflow_run(run_id, status="running", started_at=now)
         self._emit({"type": "workflow", "run_id": run_id, "workflow_id": definition["id"], "status": "running"})
@@ -295,6 +327,27 @@ class WorkflowEngine:
                 self._active_run_id = None
                 self._active_workflow_id = None
                 self._active_task = None
+                self._active_task_started = False
+
+    async def _wait_for_controller_authority(self) -> None:
+        while True:
+            if self._controller_state == "locked" or (
+                self._controller_state == "suspect" and self._controller_identity_confirmed
+            ):
+                return
+            if self._controller_state not in {"locked", "suspect"}:
+                raise asyncio.CancelledError
+            future = asyncio.get_running_loop().create_future()
+            self._controller_authority_waiters.add(future)
+            try:
+                await future
+            finally:
+                self._controller_authority_waiters.discard(future)
+
+    def _notify_controller_authority_waiters(self) -> None:
+        for future in tuple(self._controller_authority_waiters):
+            if not future.done():
+                future.set_result(None)
 
     async def _execute_graph(
         self, definition: dict[str, Any], context: dict[str, Any], run_id: str, *, dry_run: bool,
@@ -308,12 +361,12 @@ class WorkflowEngine:
         current = next(node_id for node_id, count in incoming.items() if count == 0)
         results: list[dict[str, Any]] = []
         for _ in range(len(nodes) + 1):
+            if not dry_run:
+                await self._wait_for_controller_authority()
             node = nodes[current]
             node_type = node["type"]
             if node_type == "end":
                 break
-            if not dry_run and self._controller_state != "locked":
-                raise asyncio.CancelledError
             started_at = utc_now()
             action_name = node.get("action") if node_type == "action" else node_type
             command_id = uuid4().hex if node_type == "action" and not dry_run else None
@@ -337,6 +390,8 @@ class WorkflowEngine:
                         attempts = node.get("retries", 0) + 1
                         failure: Exception | None = None
                         for attempt in range(attempts):
+                            if not dry_run:
+                                await self._wait_for_controller_authority()
                             if attempt:
                                 command_id = uuid4().hex
                                 step["command_id"] = command_id
