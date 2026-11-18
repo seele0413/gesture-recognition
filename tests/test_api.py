@@ -14,9 +14,8 @@ class ApiTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.promo_path = Path(self.temp_dir.name) / "promo.mp4"
         self.promo_path.write_bytes(b"test-video-content")
-        self.client = TestClient(
-            create_app(Path(self.temp_dir.name) / "data.sqlite3", self.promo_path)
-        )
+        self.database_path = Path(self.temp_dir.name) / "data.sqlite3"
+        self.client = TestClient(create_app(self.database_path, self.promo_path))
 
     def tearDown(self):
         self.client.close()
@@ -180,6 +179,66 @@ class ApiTests(unittest.TestCase):
         blocked = self.client.delete("/api/display/pages/energy_storage")
         self.assertEqual(blocked.status_code, 409)
         self.assertIn("工作流引用", blocked.text)
+
+    def test_display_page_api_persists_custom_page_after_app_restart(self):
+        created = self.client.post("/api/display/pages", json={
+            "page_id": "restart_check", "title": "重启持久化验证",
+            "url": "https://www.zhcomking.com/restart-check/",
+            "parent_id": "company_website",
+        })
+        self.assertEqual(created.status_code, 201, created.text)
+
+        self.client.close()
+        self.client = TestClient(create_app(self.database_path, self.promo_path))
+        payload = self.client.get("/api/display/pages?include_disabled=true").json()
+        pages = {page["page_id"]: page for page in payload["pages"]}
+        self.assertIn("restart_check", pages)
+        self.assertEqual(pages["restart_check"]["url"], "https://www.zhcomking.com/restart-check/")
+        self.assertEqual(pages["restart_check"]["parent_id"], "company_website")
+        self.assertEqual(
+            [page_id for page_id in ("promo", "factory", "product", "company_website") if page_id in pages],
+            ["promo", "factory", "product", "company_website"],
+        )
+
+        updated = self.client.put("/api/display/pages/restart_check", json={
+            "title": "重启后仍可编辑",
+            "url": "https://www.zhcomking.com/restart-check/index.html",
+        })
+        self.assertEqual(updated.status_code, 200, updated.text)
+        self.assertEqual(updated.json()["page"]["title"], "重启后仍可编辑")
+
+        deleted = self.client.delete("/api/display/pages/restart_check")
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        remaining = self.client.get("/api/display/pages?include_disabled=true").json()["pages"]
+        self.assertNotIn("restart_check", {page["page_id"] for page in remaining})
+
+    def test_display_page_api_rejects_parent_cycles_and_protects_parent_children(self):
+        root = self.client.post("/api/display/pages", json={
+            "page_id": "cycle_root", "title": "层级根页面",
+            "url": "https://www.zhcomking.com/catalog/",
+            "parent_id": "company_website",
+        })
+        self.assertEqual(root.status_code, 201, root.text)
+        child = self.client.post("/api/display/pages", json={
+            "page_id": "cycle_child", "title": "层级子页面",
+            "url": "https://www.zhcomking.com/catalog/product/",
+            "parent_id": "cycle_root",
+        })
+        self.assertEqual(child.status_code, 201, child.text)
+
+        cycle = self.client.put("/api/display/pages/cycle_root", json={
+            "parent_id": "cycle_child",
+        })
+        self.assertEqual(cycle.status_code, 400)
+        self.assertIn("循环", cycle.text)
+
+        blocked_delete = self.client.delete("/api/display/pages/cycle_root")
+        self.assertEqual(blocked_delete.status_code, 409)
+        blocked_disable = self.client.put("/api/display/pages/cycle_root", json={"enabled": False})
+        self.assertEqual(blocked_disable.status_code, 400)
+
+        self.assertEqual(self.client.delete("/api/display/pages/cycle_child").status_code, 200)
+        self.assertEqual(self.client.delete("/api/display/pages/cycle_root").status_code, 200)
 
     def test_display_page_url_validation_rejects_unsafe_destinations(self):
         invalid_urls = [

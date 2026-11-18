@@ -27,6 +27,37 @@ class ControlStoreTests(unittest.TestCase):
         self.assertEqual(reopened.get_display_page("company_website")["url"],
                          "https://www.zhcomking.com/")
 
+    def test_legacy_database_migrates_four_display_pages_without_losing_settings(self):
+        legacy_mappings = dict(DEFAULT_MAPPINGS)
+        legacy_mappings["ILoveYou"] = "play_pause"
+        with sqlite3.connect(self.path) as connection:
+            connection.execute(
+                "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+            )
+            connection.execute(
+                "INSERT INTO settings (key, value) VALUES (?, ?)",
+                ("gesture_mappings", json.dumps(legacy_mappings)),
+            )
+            connection.execute(
+                "INSERT INTO settings (key, value) VALUES (?, ?)",
+                ("gesture_confidence_threshold", json.dumps(0.65)),
+            )
+
+        migrated = ControlStore(self.path)
+        pages = migrated.get_display_pages()
+        self.assertEqual(
+            [page["page_id"] for page in pages],
+            ["promo", "factory", "product", "company_website"],
+        )
+        self.assertEqual(migrated.get_mappings(), legacy_mappings)
+        self.assertEqual(migrated.get_gesture_confidence_threshold(), 0.65)
+
+        reopened = ControlStore(self.path)
+        self.assertEqual(
+            [page["page_id"] for page in reopened.get_display_pages()],
+            ["promo", "factory", "product", "company_website"],
+        )
+
     def test_external_display_pages_can_be_created_updated_and_deleted(self):
         page = self.store.create_display_page({
             "page_id": "product_center", "title": "产品中心子页面",
