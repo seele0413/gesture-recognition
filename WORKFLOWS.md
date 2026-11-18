@@ -39,15 +39,15 @@ flowchart LR
 
 ## Display Shell 与展示主页注册
 
-首页 `/` 是常驻 Display Shell，不再直接承载某一个具体展示页面。Shell 通过同源 iframe 加载 `app/display_pages.py` 中登记的页面；`GET /api/display/pages` 返回默认页面 ID、页面 ID、标题、说明和本地路径。当前默认页为 `promo`，另有 `factory` 与 `product` 两个模板页。
+首页 `/` 是常驻 Display Shell，不再直接承载某一个具体展示页面。Shell 通过 iframe 加载 `app/display_pages.py` 中登记的页面；`GET /api/display/pages` 返回默认页面 ID、页面 ID、标题、说明和页面类型。当前默认页为 `promo`，本地模板页为 `factory` 与 `product`，外部只读展示页为 `company_website`（固定地址 `https://www.zhcomking.com/`）。
 
-工作流动作 `web.navigate_page` 只接受登记表中的 `page_id`。它不会执行任意 URL，也不会改变顶层 Shell 地址。Shell 加载新 iframe 页面后，等待页面发送与当前 `shell_generation` 匹配的 `display:ready` 消息，随后才向服务端确认动作成功；因此后继节点会在页面就绪后执行。
+工作流动作 `web.navigate_page` 只接受登记表中的 `page_id`，不接受工作流传入的 URL。对本地页面，Shell 仍校验 `/static/pages/` 路径，并等待页面发送与当前 `shell_generation` 匹配的 `display:ready` 消息。对外部页面，Shell 只允许代码中固定登记的 HTTPS 地址，设置 `no-referrer` 并等待 iframe 的导航 `load` 事件；由于浏览器同源策略，load 事件不能证明第三方页面内容已成功渲染，现场仍须目视验收。外部页面是只读展示：Shell 不向它转发手势/事件，不向它发送内部动作，切换回本地页后原有通信恢复。外部站点若通过 `X-Frame-Options` 或 CSP `frame-ancestors` 禁止嵌入，浏览器会阻止显示；本项目不会绕过该安全策略，需要网站管理员授权嵌入来源，或改用新窗口展示（新窗口不属于当前 Shell 内嵌方案）。
 
 新增展示主页的步骤：
 
 1. 在 `web/pages/` 新建一个静态 HTML 页面，路径必须位于本地 `/static/pages/`。
 2. 在 `app/display_pages.py` 的 `DISPLAY_PAGES` 白名单中增加一个唯一的 `page_id`、标题、说明和页面路径。
-3. 页面需要接收通用展示动作时，加载 `/static/display-page.js`，并在 body 上设置与登记 ID 一致的 `data-page-id`；需要自定义动作时，实现同源 `display:command` / `display:result` 消息协议。
+3. 本地页面需要接收通用展示动作时，加载 `/static/display-page.js`，并在 body 上设置与登记 ID 一致的 `data-page-id`；需要自定义动作时，实现同源 `display:command` / `display:result` 消息协议。外部只读页面只登记固定 HTTPS 地址，不注入脚本、不转发手势事件。
 4. 重启服务后，`/api/display/pages` 和 `/api/actions` 会自动公开新登记 ID，工作流动作参数下拉框无需额外修改。
 
 不要把外部 URL 或用户输入的路径加入注册表。页面切换由服务端动作 Schema 与前端 Shell 双重限制在本地登记路径内。Shell 独占 `/ws/display` 与 `/ws/events`，iframe 页面不能另建展示执行连接。
@@ -104,7 +104,7 @@ flowchart LR
 | action | 参数 |
 | --- | --- |
 | `web.navigate_route` | `route`: home / settings / workflows；离开展示 Shell 的管理路由，只能作为最后一个动作 |
-| `web.navigate_page` | `page_id`: promo / factory / product；切换已登记的本地展示主页，执行通道保持连接 |
+| `web.navigate_page` | `page_id`: promo / factory / product / company_website；切换已登记展示主页，执行通道保持连接；外部官网仅整页展示 |
 | `web.set_scene` | `scene`: welcome / company_intro / product_intro / factory_intro / presentation_mode |
 | `web.show_panel`, `web.hide_panel` | `panel`: welcome / company / product / factory / presentation |
 | `web.set_text` | `field`: headline / subhead / notice；`text` 最长 160 字符，使用 textContent 写入 |
@@ -177,3 +177,8 @@ PRESENTATION_DECKS = {
 ```
 
 真实展厅摄像头、实际 PowerPoint 安装、60 分钟资源稳定性和现场交互验收不属于自动化模拟结果；部署前需在目标展示机完成这些检查。
+
+
+## 离线工作流编排
+
+工作流的创建、编辑、鼠标拖拽、参数设置、保存、校验和 dry-run 不依赖摄像头。摄像头只用于真实手势触发工作流，以及开启“手势拖拽”指针模式。编辑器会在尝试开启手势拖拽时检查视频流状态；未启动摄像头时给出提示，但不影响鼠标和键盘编辑。

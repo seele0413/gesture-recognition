@@ -360,6 +360,13 @@ async function refreshPointerMode() {
 async function togglePointerMode() {
   ui.pointerMode.disabled = true;
   try {
+    if (!pointerModeEnabled) {
+      const streamStatus = await api("/api/status");
+      if (streamStatus.state !== "running") {
+        setMessage("手势拖拽需要先启动摄像头视频流；鼠标和键盘编辑不受影响", "error");
+        return;
+      }
+    }
     const response = await api("/api/pointer/mode", {
       method: "POST",
       body: JSON.stringify({ enabled: !pointerModeEnabled }),

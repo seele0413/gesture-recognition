@@ -68,7 +68,8 @@
               <select id="edgeWhen"><option value="">常规</option><option value="true">true</option><option value="false">false</option><option value="error">error</option></select>
             </label>
             <button id="linkMode" class="tool-button" type="button" aria-pressed="false">连线</button>
-            <button id="pointerMode" class="tool-button" type="button" aria-pressed="false" title="先锁定主控；伸出食指移动，拇指与食指捏合抓取节点，松开完成放置">手势拖拽：关闭</button>
+            <button id="pointerMode" class="tool-button" type="button" aria-pressed="false" title="仅开启摄像头手势指针；鼠标和键盘始终可以编辑工作流">手势拖拽：关闭</button>
+            <span class="pointer-mode-hint">鼠标/键盘编辑无需摄像头；仅手势拖拽需要摄像头</span>
             <button id="pointerMirror" class="tool-button" type="button" aria-pressed="false" title="切换摄像头横向镜像">镜像：关闭</button>
             <button id="pointerCalibrate" class="tool-button" type="button" disabled title="依次对准画布四角并捏合采集，校正摄像头透视偏差">四角校准</button>
             <button id="pointerDiagnostics" class="tool-button" type="button" aria-pressed="false" title="查看指针事件、帧处理和节点更新性能">指针诊断</button>

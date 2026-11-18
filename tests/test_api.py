@@ -97,14 +97,21 @@ class ApiTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["default_page_id"], "promo")
         pages = payload["pages"]
-        self.assertEqual([page["page_id"] for page in pages], ["promo", "factory", "product"])
+        self.assertEqual([page["page_id"] for page in pages],
+                         ["promo", "factory", "product", "company_website"])
         for page in pages:
-            self.assertTrue(page["path"].startswith("/static/pages/"))
-            self.assertEqual(self.client.get(page["path"]).status_code, 200)
+            if page["page_type"] == "local":
+                self.assertTrue(page["path"].startswith("/static/pages/"))
+                self.assertEqual(self.client.get(page["path"]).status_code, 200)
+                self.assertIsNone(page["url"])
+            else:
+                self.assertEqual(page["page_type"], "external")
+                self.assertIsNone(page["path"])
+                self.assertEqual(page["url"], "https://www.zhcomking.com/")
         actions = {item["name"]: item for item in self.client.get("/api/actions").json()["actions"]}
         self.assertIn("web.navigate_page", actions)
         self.assertEqual(actions["web.navigate_page"]["schema"]["properties"]["page_id"]["enum"],
-                         ["promo", "factory", "product"])
+                         ["promo", "factory", "product", "company_website"])
 
     def test_display_shell_keeps_its_channels_and_cleans_up_superseded_navigation(self):
         shell = self.client.get("/static/display-shell.js").text
@@ -118,6 +125,11 @@ class ApiTests(unittest.TestCase):
         self.assertIn("if (!event.persisted) return;", shell)
         self.assertIn("pendingPageCommands.delete(key)", shell)
         self.assertIn("resolvedPath.pathname !== page.path", shell)
+        self.assertIn('ALLOWED_EXTERNAL_PAGE_URLS = new Set(["https://www.zhcomking.com/"])', shell)
+        self.assertIn('pageType === "external"', shell)
+        self.assertIn("handleExternalFrameLoad", shell)
+        self.assertIn('elements.frame.referrerPolicy = "no-referrer"', shell)
+        self.assertIn("visual_verification_required: pageType === \"external\"", shell)
 
         promo_script = self.client.get("/static/player.js").text
         registered_script = self.client.get("/static/display-page.js").text
@@ -125,6 +137,13 @@ class ApiTests(unittest.TestCase):
         self.assertIn('type: "display:ready"', promo_script)
         self.assertIn("page_id: pageId", registered_script)
         self.assertIn('type: "display:ready"', registered_script)
+
+    def test_workflow_creation_does_not_require_camera_stream(self):
+        self.assertEqual(self.client.get("/api/status").json()["state"], "stopped")
+        workflow = new_workflow("离线编排工作流")
+        response = self.client.post("/api/workflows", json=workflow)
+        self.assertEqual(response.status_code, 201, response.text)
+        self.assertEqual(response.json()["workflow"]["name"], "离线编排工作流")
 
     def test_workflow_rejects_unregistered_display_page_ids(self):
         workflow = new_workflow("无效展示页面")

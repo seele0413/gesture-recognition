@@ -10,6 +10,7 @@ const ROUTE_PATHS = Object.freeze({
   workflows: "/workflows",
 });
 const DISPLAY_ORIGIN = window.location.origin;
+const ALLOWED_EXTERNAL_PAGE_URLS = new Set(["https://www.zhcomking.com/"]);
 const COMMAND_TIMEOUT_FALLBACK_MS = 10000;
 const commandResults = new Map();
 const pendingCommands = new Map();
@@ -36,7 +37,11 @@ function pageLabel(pageId) {
 
 function postToFrame(message) {
   if (!elements.frame.contentWindow) throw new Error("展示页面尚未创建");
+  // External pages are display-only. Never send internal gesture/events or commands
+  // to a third-party origin.
+  if (pages.get(currentPageId)?.page_type === "external") return false;
   elements.frame.contentWindow.postMessage(message, DISPLAY_ORIGIN);
+  return true;
 }
 
 function rejectPendingPageCommands(reason) {
@@ -61,13 +66,36 @@ function navigatePage(pageId, timeoutMs = COMMAND_TIMEOUT_FALLBACK_MS) {
   if (currentPageId === pageId && elements.frame.contentWindow) {
     return Promise.resolve({ page_id: pageId, title: page.title, changed: false });
   }
-  const resolvedPath = new URL(page.path, DISPLAY_ORIGIN);
-  if (!page.path.startsWith("/static/pages/")
-      || resolvedPath.origin !== DISPLAY_ORIGIN
-      || resolvedPath.pathname !== page.path
-      || resolvedPath.search
-      || resolvedPath.hash) {
-    throw new Error("展示主页路径不在本地登记范围内");
+
+  const pageType = page.page_type || "local";
+  let destination;
+  if (pageType === "local") {
+    const resolvedPath = new URL(page.path, DISPLAY_ORIGIN);
+    if (typeof page.path !== "string"
+        || !page.path.startsWith("/static/pages/")
+        || resolvedPath.origin !== DISPLAY_ORIGIN
+        || resolvedPath.pathname !== page.path
+        || resolvedPath.search
+        || resolvedPath.hash) {
+      throw new Error("展示主页路径不在本地登记范围内");
+    }
+    destination = resolvedPath;
+  } else if (pageType === "external") {
+    let resolvedUrl;
+    try {
+      resolvedUrl = new URL(page.url);
+    } catch (_error) {
+      throw new Error("外部展示网页地址无效");
+    }
+    if (resolvedUrl.protocol !== "https:"
+        || resolvedUrl.username
+        || resolvedUrl.password
+        || !ALLOWED_EXTERNAL_PAGE_URLS.has(resolvedUrl.href)) {
+      throw new Error("外部展示网页不在 HTTPS 白名单中");
+    }
+    destination = resolvedUrl;
+  } else {
+    throw new Error("不支持的展示页面类型");
   }
 
   rejectPageReadyWaiter("展示页面切换请求已被更新");
@@ -86,25 +114,53 @@ function navigatePage(pageId, timeoutMs = COMMAND_TIMEOUT_FALLBACK_MS) {
     pageReadyWaiter = {
       generation,
       pageId,
+      pageType,
+      url: pageType === "external" ? destination.href : null,
       timer,
       resolve: () => {
         currentPageId = pageId;
         pageReadyWaiter = null;
-        setShellStatus(displaySocket?.readyState === WebSocket.OPEN ? "connected" : "connecting",
-          "展示控制中心 · " + page.title);
-        resolve({ page_id: pageId, title: page.title, changed: true });
+        const connectedState = displaySocket?.readyState === WebSocket.OPEN ? "connected" : "connecting";
+        setShellStatus(connectedState, pageType === "external"
+          ? "外部网页导航已完成 · " + page.title
+          : "展示控制中心 · " + page.title);
+        resolve({
+          page_id: pageId,
+          title: page.title,
+          changed: true,
+          navigation_completed: pageType === "external",
+          visual_verification_required: pageType === "external",
+        });
       },
       reject,
     };
-    const url = new URL(page.path, DISPLAY_ORIGIN);
-    url.searchParams.set("shell_generation", String(generation));
-    elements.frame.src = url.pathname + url.search;
+
+    if (pageType === "external") {
+      elements.frame.referrerPolicy = "no-referrer";
+      elements.frame.src = destination.href;
+      return;
+    }
+
+    elements.frame.referrerPolicy = "same-origin";
+    destination.searchParams.set("shell_generation", String(generation));
+    elements.frame.src = destination.pathname + destination.search;
   });
+}
+
+function handleExternalFrameLoad() {
+  const waiter = pageReadyWaiter;
+  if (!waiter || waiter.pageType !== "external" || !waiter.url) return;
+  if (elements.frame.src !== waiter.url) return;
+  window.clearTimeout(waiter.timer);
+  waiter.resolve();
 }
 
 function sendPageCommand(command, timeoutMs = COMMAND_TIMEOUT_FALLBACK_MS) {
   if (!currentPageId || !elements.frame.contentWindow) {
     return Promise.reject(new Error("当前没有已就绪的展示主页"));
+  }
+  if (pages.get(currentPageId)?.page_type === "external") {
+    return Promise.reject(new Error("外部官网当前仅支持整页展示和页面切换，不支持内部动作"));
   }
   const key = command.run_id + ":" + command.command_id;
   if (pendingPageCommands.has(key)) return pendingPageCommands.get(key).promise;
@@ -203,6 +259,7 @@ async function handleDisplayCommand(socket, command) {
 }
 
 function handleFrameMessage(event) {
+  if (pages.get(currentPageId)?.page_type === "external") return;
   if (event.origin !== DISPLAY_ORIGIN || event.source !== elements.frame.contentWindow) return;
   const message = event.data;
   if (!message || typeof message !== "object") return;
@@ -277,6 +334,7 @@ function connectEvents() {
 }
 
 window.addEventListener("message", handleFrameMessage);
+elements.frame.addEventListener("load", handleExternalFrameLoad);
 
 async function initializeDisplayShell() {
   try {
@@ -285,9 +343,14 @@ async function initializeDisplayShell() {
     const payload = await response.json();
     if (!Array.isArray(payload.pages)) throw new Error("展示主页登记表格式无效");
     for (const page of payload.pages) {
-      if (!page || typeof page.page_id !== "string" || typeof page.title !== "string"
-          || typeof page.path !== "string" || !page.path.startsWith("/static/pages/")) continue;
-      pages.set(page.page_id, page);
+      if (!page || typeof page.page_id !== "string" || typeof page.title !== "string") continue;
+      const pageType = page.page_type || "local";
+      if (pageType === "local" && typeof page.path === "string" && page.path.startsWith("/static/pages/")) {
+        pages.set(page.page_id, page);
+      } else if (pageType === "external" && typeof page.url === "string"
+          && ALLOWED_EXTERNAL_PAGE_URLS.has(page.url)) {
+        pages.set(page.page_id, page);
+      }
     }
     defaultPageId = payload.default_page_id;
     if (typeof defaultPageId !== "string" || !pages.has(defaultPageId)) {

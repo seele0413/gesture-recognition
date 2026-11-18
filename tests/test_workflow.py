@@ -462,7 +462,7 @@ class DisplayCommandTests(unittest.IsolatedAsyncioTestCase):
         registry = ActionRegistry()
         register_web_actions(registry, BrowserCommandAdapter(channel))
         schema = registry.schema_map()["web.navigate_page"]
-        self.assertEqual(schema["properties"]["page_id"]["enum"], ["promo", "factory", "product"])
+        self.assertEqual(schema["properties"]["page_id"]["enum"], ["promo", "factory", "product", "company_website"])
         pending = asyncio.create_task(registry.execute(
             "web.navigate_page", {"page_id": "factory"},
             {"run_id": "run-a", "command_id": "command-page", "timeout_ms": 1000},
