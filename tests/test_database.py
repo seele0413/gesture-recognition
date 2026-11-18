@@ -23,14 +23,15 @@ class ControlStoreTests(unittest.TestCase):
         self.assertEqual([page["page_id"] for page in pages],
                          ["promo", "factory", "product", "company_website"])
         self.assertEqual(self.store.get_default_display_page_id(), "promo")
-        reopened = ControlStore(self.path)
+        reopened = ControlStore(legacy_path)
         self.assertEqual(reopened.get_display_page("company_website")["url"],
                          "https://www.zhcomking.com/")
 
     def test_legacy_database_migrates_four_display_pages_without_losing_settings(self):
+        legacy_path = Path(self.temp_dir.name) / "legacy.sqlite3"
         legacy_mappings = dict(DEFAULT_MAPPINGS)
         legacy_mappings["ILoveYou"] = "play_pause"
-        with sqlite3.connect(self.path) as connection:
+        with sqlite3.connect(legacy_path) as connection:
             connection.execute(
                 "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
             )
@@ -43,7 +44,7 @@ class ControlStoreTests(unittest.TestCase):
                 ("gesture_confidence_threshold", json.dumps(0.65)),
             )
 
-        migrated = ControlStore(self.path)
+        migrated = ControlStore(legacy_path)
         pages = migrated.get_display_pages()
         self.assertEqual(
             [page["page_id"] for page in pages],
