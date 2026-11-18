@@ -165,7 +165,7 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
         if not _local_origin(request.headers.get("origin")):
             return StreamingResponse(iter([b"Local access only"]), status_code=403)
         response = await call_next(request)
-        if request.url.path in {"/", "/settings", "/workflows"} or request.url.path.startswith(("/static/", "/api/")):
+        if request.url.path in {"/", "/settings", "/workflows", "/display-pages"} or request.url.path.startswith(("/static/", "/api/")):
             response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         return response
 
@@ -180,6 +180,10 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
     @app.get("/workflows")
     async def workflows_page() -> FileResponse:
         return FileResponse(WEB_DIR / "workflows.html")
+
+    @app.get("/display-pages")
+    async def display_pages_page() -> FileResponse:
+        return FileResponse(WEB_DIR / "display-pages.html")
 
     @app.get("/media/promo.mp4")
     async def promo_video() -> FileResponse:
