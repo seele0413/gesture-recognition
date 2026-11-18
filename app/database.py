@@ -649,6 +649,12 @@ class ControlStore:
             raise ValueError("该页面仍被工作流引用，请先修改或删除相关工作流")
         if not values["enabled"]:
             with self._lock, self._connection() as connection:
+                default_row = connection.execute(
+                    "SELECT value FROM settings WHERE key = ?", ("display_default_page_id",)
+                ).fetchone()
+                default_id = json.loads(default_row["value"]) if default_row else DEFAULT_DISPLAY_PAGE_ID
+                if default_id == page_id:
+                    raise ValueError("默认展示页面不能停用，请先更换默认页面")
                 if connection.execute(
                     "SELECT 1 FROM display_pages WHERE parent_id = ? AND enabled = 1 LIMIT 1",
                     (page_id,),

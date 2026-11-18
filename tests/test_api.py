@@ -211,6 +211,19 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/display/pages").json()["default_page_id"], "company_website")
         invalid = self.client.post("/api/display/default", json={"page_id": "missing"})
         self.assertEqual(invalid.status_code, 400)
+        disabled_default = self.client.put(
+            "/api/display/pages/company_website", json={"enabled": False}
+        )
+        self.assertEqual(disabled_default.status_code, 400)
+
+    def test_display_page_management_ui_is_served(self):
+        page = self.client.get("/display-pages")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("展示网页管理", page.text)
+        self.assertIn("/static/display-pages.js", page.text)
+        self.assertIn("/static/display-pages.css", page.text)
+        self.assertEqual(self.client.get("/static/display-pages.js").status_code, 200)
+        self.assertEqual(self.client.get("/static/display-pages.css").status_code, 200)
 
     def test_workflow_creation_does_not_require_camera_stream(self):
         self.assertEqual(self.client.get("/api/status").json()["state"], "stopped")
@@ -235,7 +248,9 @@ class ApiTests(unittest.TestCase):
         self.assertIn(".pip-placeholder[hidden] { display: none; }", styles)
 
     def test_html_and_static_resources_are_revalidated(self):
-        for path in ("/", "/settings", "/static/app.js", "/static/styles.css", "/static/display-shell.js", "/static/pages/promo.html"):
+        for path in ("/", "/settings", "/workflows", "/display-pages", "/static/app.js",
+                     "/static/styles.css", "/static/display-shell.js", "/static/display-pages.js",
+                     "/static/display-pages.css", "/static/pages/promo.html"):
             response = self.client.get(path)
             self.assertEqual(response.status_code, 200)
             self.assertIn("no-store", response.headers.get("cache-control", ""))
