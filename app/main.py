@@ -412,6 +412,9 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
     async def workflow_status() -> dict:
         return {
             "display_connected": display_channel.connected,
+            "display_ready": display_channel.ready,
+            "display_page_id": display_channel.ready_page_id,
+            "display_generation": display_channel.ready_generation,
             "active_run_id": workflow_engine.active_run_id,
             "controller": manager.get_status().get("controller", {"state": "unlocked", "track_id": None}),
         }
