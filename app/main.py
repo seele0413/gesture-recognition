@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sqlite3
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -15,7 +16,7 @@ from pydantic import BaseModel, Field, root_validator
 from app.action_engine import ActionRegistry, WorkflowEngine
 from app.database import ControlStore
 from app.display import DisplayCommandChannel
-from app.display_pages import DEFAULT_DISPLAY_PAGE_ID, list_display_pages
+from app.display_pages import normalize_external_url, validate_display_page_id
 from app.events import EventHub
 from app.ppt_actions import PresentationAdapter, register_ppt_actions
 from app.settings import DATABASE_PATH, MEDIA_ASSETS, PRESENTATION_DECKS, PROMO_VIDEO_PATH, WEB_DIR
@@ -35,6 +36,43 @@ class MappingsRequest(BaseModel):
 
 class RecognitionSettingsRequest(BaseModel):
     gesture_confidence_threshold: float
+
+
+class DisplayPageCreateRequest(BaseModel):
+    page_id: str
+    title: str
+    url: str
+    description: str = ""
+    parent_id: str | None = None
+    enabled: bool = True
+
+    class Config:
+        extra = "forbid"
+
+
+class DisplayPageUpdateRequest(BaseModel):
+    title: str | None = None
+    url: str | None = None
+    description: str | None = None
+    parent_id: str | None = None
+    enabled: bool | None = None
+
+    class Config:
+        extra = "forbid"
+
+
+class DisplayUrlRequest(BaseModel):
+    url: str
+
+    class Config:
+        extra = "forbid"
+
+
+class DefaultDisplayPageRequest(BaseModel):
+    page_id: str
+
+    class Config:
+        extra = "forbid"
 
 
 class WorkflowDryRunRequest(BaseModel):
@@ -96,7 +134,7 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
     display_channel = DisplayCommandChannel()
     browser_adapter = BrowserCommandAdapter(display_channel)
     action_registry = ActionRegistry()
-    register_web_actions(action_registry, browser_adapter)
+    register_web_actions(action_registry, browser_adapter, store.get_display_page_ids)
     register_video_actions(action_registry, store, browser_adapter)
     presentation_adapter = PresentationAdapter(store)
     register_ppt_actions(action_registry, store, presentation_adapter)
@@ -156,9 +194,105 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
             raise HTTPException(status_code=404, detail="未找到已登记的视频素材")
         return FileResponse(asset["path"], media_type="video/mp4")
 
+    def validate_external_page_values(values: dict[str, Any], current_page_id: str | None = None) -> dict[str, Any]:
+        page_id = validate_display_page_id(current_page_id or values.get("page_id"))
+        title = values.get("title")
+        description = values.get("description", "")
+        if not isinstance(title, str) or not 1 <= len(title.strip()) <= 120:
+            raise ValueError("页面名称长度必须为 1～120 个字符")
+        if not isinstance(description, str) or len(description) > 500:
+            raise ValueError("页面说明不能超过 500 个字符")
+        normalized_url = normalize_external_url(values.get("url"))
+        parent_id = values.get("parent_id")
+        if parent_id is not None:
+            parent_id = validate_display_page_id(parent_id)
+            if parent_id == page_id:
+                raise ValueError("页面不能将自己设置为父页面")
+            parent = store.get_display_page(parent_id)
+            if not parent or parent["page_type"] != "external" or not parent["enabled"]:
+                raise ValueError("父页面必须是已启用的外部网页")
+            ancestor = parent
+            visited: set[str] = set()
+            while ancestor:
+                ancestor_id = ancestor["page_id"]
+                if ancestor_id == page_id or ancestor_id in visited:
+                    raise ValueError("页面父子关系不能形成循环")
+                visited.add(ancestor_id)
+                ancestor = store.get_display_page(ancestor["parent_id"]) if ancestor["parent_id"] else None
+            if urlsplit(parent["url"]).hostname != urlsplit(normalized_url).hostname:
+                raise ValueError("子页面必须与父页面属于同一个域名")
+        return {
+            "page_id": page_id,
+            "title": title.strip(),
+            "description": description.strip(),
+            "url": normalized_url,
+            "parent_id": parent_id,
+            "page_type": "external",
+            "enabled": bool(values.get("enabled", True)),
+        }
+
     @app.get("/api/display/pages")
-    async def get_display_pages() -> dict:
-        return {"default_page_id": DEFAULT_DISPLAY_PAGE_ID, "pages": list_display_pages()}
+    async def get_display_pages(include_disabled: bool = False) -> dict:
+        return {
+            "default_page_id": store.get_default_display_page_id(),
+            "pages": store.get_display_pages(include_disabled=include_disabled),
+        }
+
+    @app.post("/api/display/pages/validate-url")
+    async def validate_display_url(payload: DisplayUrlRequest) -> dict:
+        try:
+            normalized = normalize_external_url(payload.url)
+            return {"valid": True, "url": normalized, "hostname": urlsplit(normalized).hostname}
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+    @app.post("/api/display/pages", status_code=201)
+    async def create_display_page(payload: DisplayPageCreateRequest) -> dict:
+        try:
+            clean = validate_external_page_values(payload.dict())
+            return {"page": store.create_display_page(clean)}
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        except sqlite3.IntegrityError as error:
+            raise HTTPException(status_code=409, detail="页面 ID 已存在或父页面关系无效") from error
+
+    @app.put("/api/display/pages/{page_id}")
+    async def update_display_page(page_id: str, payload: DisplayPageUpdateRequest) -> dict:
+        current = store.get_display_page(page_id)
+        if not current:
+            raise HTTPException(status_code=404, detail="展示页面不存在")
+        if current["page_type"] != "external":
+            raise HTTPException(status_code=400, detail="内置本地展示页面不能通过网页管理接口修改")
+        values = {
+            "title": current["title"],
+            "description": current["description"],
+            "url": current["url"],
+            "parent_id": current["parent_id"],
+            "enabled": current["enabled"],
+        }
+        values.update(payload.dict(exclude_unset=True))
+        try:
+            clean = validate_external_page_values(values, current_page_id=page_id)
+            return {"page": store.update_display_page(page_id, clean)}
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+    @app.delete("/api/display/pages/{page_id}")
+    async def delete_display_page(page_id: str) -> dict:
+        try:
+            deleted = store.delete_display_page(page_id)
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        if not deleted:
+            raise HTTPException(status_code=404, detail="展示页面不存在")
+        return {"deleted": True}
+
+    @app.post("/api/display/default")
+    async def set_default_display_page(payload: DefaultDisplayPageRequest) -> dict:
+        try:
+            return {"default_page_id": store.set_default_display_page_id(payload.page_id)}
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
 
     @app.get("/api/status")
     async def get_status() -> dict:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 from app.action_engine import ActionRegistry
 from app.display import DisplayCommandChannel
@@ -24,11 +24,18 @@ class BrowserCommandAdapter:
         )
 
 
-def register_web_actions(registry: ActionRegistry, adapter: BrowserCommandAdapter) -> None:
+def register_web_actions(
+    registry: ActionRegistry,
+    adapter: BrowserCommandAdapter,
+    page_ids_provider: Callable[[], tuple[str, ...]] | None = None,
+) -> None:
     no_params = {}
+    get_page_ids = page_ids_provider or (lambda: DISPLAY_PAGE_IDS)
 
     def browser(action: str):
         async def run(params: dict[str, Any], context: dict[str, Any]):
+            if action == "web.navigate_page" and params.get("page_id") not in set(get_page_ids()):
+                raise ValueError("目标展示页面不存在或已停用")
             return await adapter.execute(action, params, context)
         return run
 
@@ -48,4 +55,16 @@ def register_web_actions(registry: ActionRegistry, adapter: BrowserCommandAdapte
         ("web.return_home", no_params, [], True),
     ]
     for name, properties, required, idempotent in registrations:
-        registry.register(name, properties=properties, required=required, handler=browser(name), idempotent=idempotent)
+        properties_provider = None
+        if name == "web.navigate_page":
+            properties_provider = lambda: {
+                "page_id": enum_field(tuple(get_page_ids()), "登记的展示页面")
+            }
+        registry.register(
+            name,
+            properties=properties,
+            required=required,
+            handler=browser(name),
+            idempotent=idempotent,
+            properties_provider=properties_provider,
+        )

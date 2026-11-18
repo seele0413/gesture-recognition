@@ -18,6 +18,56 @@ class ControlStoreTests(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
+    def test_display_pages_are_seeded_and_persisted(self):
+        pages = self.store.get_display_pages()
+        self.assertEqual([page["page_id"] for page in pages],
+                         ["promo", "factory", "product", "company_website"])
+        self.assertEqual(self.store.get_default_display_page_id(), "promo")
+        reopened = ControlStore(self.path)
+        self.assertEqual(reopened.get_display_page("company_website")["url"],
+                         "https://www.zhcomking.com/")
+
+    def test_external_display_pages_can_be_created_updated_and_deleted(self):
+        page = self.store.create_display_page({
+            "page_id": "product_center", "title": "产品中心子页面",
+            "description": "产品分类入口", "url": "https://www.zhcomking.com/products/",
+            "page_type": "external", "parent_id": "company_website", "enabled": True,
+        })
+        self.assertEqual(page["parent_id"], "company_website")
+        updated = self.store.update_display_page("product_center", {
+            "title": "产品中心", "description": "官网产品目录",
+            "url": "https://www.zhcomking.com/products/index.html",
+            "parent_id": "company_website", "enabled": True,
+        })
+        self.assertEqual(updated["title"], "产品中心")
+        self.assertTrue(self.store.delete_display_page("product_center"))
+        self.assertIsNone(self.store.get_display_page("product_center"))
+
+    def test_display_page_default_cannot_be_deleted(self):
+        with self.assertRaisesRegex(ValueError, "默认展示页面"):
+            self.store.delete_display_page("company_website")
+        self.store.set_default_display_page_id("company_website")
+        with self.assertRaisesRegex(ValueError, "默认展示页面"):
+            self.store.delete_display_page("company_website")
+
+    def test_display_page_with_children_cannot_be_deleted(self):
+        self.store.create_display_page({
+            "page_id": "product_center", "title": "产品中心",
+            "url": "https://www.zhcomking.com/products/", "page_type": "external",
+            "parent_id": "company_website", "enabled": True,
+        })
+        with self.assertRaisesRegex(ValueError, "子页面"):
+            self.store.delete_display_page("company_website")
+
+    def test_display_page_referenced_by_workflow_cannot_be_deleted(self):
+        workflow = new_workflow("引用网页的工作流")
+        workflow["nodes"][0].update({
+            "action": "web.navigate_page", "params": {"page_id": "company_website"},
+        })
+        self.store.save_workflow(workflow)
+        with self.assertRaisesRegex(ValueError, "工作流引用"):
+            self.store.delete_display_page("company_website")
+
     def test_mappings_are_persisted(self):
         self.assertEqual(self.store.get_mappings(), DEFAULT_MAPPINGS)
         changed = dict(DEFAULT_MAPPINGS)
