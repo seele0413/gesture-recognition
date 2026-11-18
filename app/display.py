@@ -8,7 +8,7 @@ from fastapi import WebSocket
 
 
 class DisplayCommandChannel:
-    """A single active browser executor with page-readiness matched acknowledgements."""
+    """A single active browser executor with connection and page-readiness state."""
 
     def __init__(self) -> None:
         self._active: WebSocket | None = None
@@ -18,6 +18,7 @@ class DisplayCommandChannel:
         self._ready_page_id: str | None = None
         self._ready_generation: int | None = None
         self.on_state_change: Callable[[bool], None] | None = None
+        self.on_ready_change: Callable[[bool], None] | None = None
 
     @property
     def connected(self) -> bool:
@@ -51,8 +52,8 @@ class DisplayCommandChannel:
                     future.set_result(None)
             self._ready_waiters.clear()
 
-        if current != previous and self.on_state_change:
-            self.on_state_change(current)
+        if current != previous and self.on_ready_change:
+            self.on_ready_change(current)
 
     async def connect(self, websocket: WebSocket) -> bool:
         async with self._lock:
@@ -61,7 +62,10 @@ class DisplayCommandChannel:
                 return False
             await websocket.accept()
             self._active = websocket
-            self._set_ready(False)
+            self._ready_page_id = None
+            self._ready_generation = None
+        if self.on_state_change:
+            self.on_state_change(True)
         return True
 
     async def disconnect(self, websocket: WebSocket) -> None:
@@ -81,6 +85,8 @@ class DisplayCommandChannel:
         for future in ready_waiters:
             if not future.done():
                 future.set_exception(ConnectionError("展示页面尚未就绪，执行客户端已断开"))
+        if self.on_state_change:
+            self.on_state_change(False)
 
     async def receive(self, websocket: WebSocket, message: Any) -> None:
         if websocket is not self._active or not isinstance(message, dict):
