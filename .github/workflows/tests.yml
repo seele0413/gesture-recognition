@@ -40,4 +40,4 @@ jobs:
           node --check web/display-page.js
           node --check web/player.js
           node --check web/workflows.js
-          node --test tests/pointer-geometry.test.cjs tests/pointer-event-buffer.test.cjs
+          node --test tests/pointer-geometry.test.cjs tests/pointer-event-buffer.test.cjs tests/workflow-browser-bootstrap.test.cjs
