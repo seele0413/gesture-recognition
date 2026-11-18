@@ -239,13 +239,13 @@ async function savePage(event) {
   elements.formError.textContent = "";
   const pageId = editingPageId || elements.pageId.value.trim();
   const payload = {
-    page_id: pageId,
     title: elements.title.value.trim(),
     url: elements.url.value.trim(),
     description: elements.description.value.trim(),
     parent_id: elements.parent.value || null,
     enabled: elements.enabled.checked,
   };
+  if (!editingPageId) payload.page_id = pageId;
   elements.save.disabled = true;
   try {
     const path = editingPageId
