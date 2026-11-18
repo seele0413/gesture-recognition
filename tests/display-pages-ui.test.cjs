@@ -36,7 +36,36 @@ function walk(node, visit) {
   for (const child of node.children || []) walk(child, visit);
 }
 
-async function createHarness(initialPages) {
+function findPageNode(tree, titleText) {
+  let result = null;
+  walk(tree, (node) => {
+    if (node.className !== "page-node") return;
+    let title = "";
+    walk(node, (nested) => {
+      if (nested.className === "page-node-title") title = nested.textContent;
+    });
+    if (title === titleText) result = node;
+  });
+  return result;
+}
+
+function findButton(node, label) {
+  let result = null;
+  walk(node, (child) => {
+    if (child.tagName === "button" && child.textContent === label) result = child;
+  });
+  return result;
+}
+
+function labelsIn(node) {
+  const labels = [];
+  walk(node, (child) => {
+    if (child.textContent) labels.push(child.textContent);
+  });
+  return labels;
+}
+
+async function createHarness(initialPages, initialDefaultPageId = "promo") {
   const ids = [
     "pageConnection", "pageConnectionLabel", "pageStatus", "pageCount", "pageTree",
     "addPage", "pageDialog", "pageForm", "pageDialogTitle", "pageId", "pageTitle",
@@ -44,29 +73,80 @@ async function createHarness(initialPages) {
     "pageFormError", "validatePageUrl", "savePage", "cancelPageDialog", "closePageDialog",
   ];
   const elements = new Map(ids.map((id) => [id, new FakeElement(id)]));
-  const pages = initialPages.map((page) => ({ ...page }));
+  const state = {
+    pages: initialPages.map((page) => ({ ...page })),
+    defaultPageId: initialDefaultPageId,
+  };
   const requests = [];
+  const fetch = async (url, options = {}) => {
+    requests.push({ url, options });
+    const method = options.method || "GET";
+
+    if (url === "/api/display/pages?include_disabled=true" && method === "GET") {
+      return {
+        ok: true,
+        json: async () => ({ pages: state.pages, default_page_id: state.defaultPageId }),
+      };
+    }
+    if (url === "/api/display/pages/validate-url" && method === "POST") {
+      const payload = JSON.parse(options.body);
+      const parsed = new URL(payload.url);
+      return {
+        ok: true,
+        json: async () => ({
+          valid: true,
+          url: parsed.toString(),
+          hostname: parsed.hostname,
+        }),
+      };
+    }
+    if (url === "/api/display/pages" && method === "POST") {
+      const payload = JSON.parse(options.body);
+      const page = {
+        ...payload,
+        path: null,
+        page_type: "external",
+        sort_order: state.pages.length,
+      };
+      state.pages.push(page);
+      return { ok: true, json: async () => ({ page }) };
+    }
+    if (url === "/api/display/default" && method === "POST") {
+      state.defaultPageId = JSON.parse(options.body).page_id;
+      return {
+        ok: true,
+        json: async () => ({ default_page_id: state.defaultPageId }),
+      };
+    }
+    if (url.startsWith("/api/display/pages/")) {
+      const pageId = decodeURIComponent(url.split("/").pop());
+      const index = state.pages.findIndex((page) => page.page_id === pageId);
+      if (index < 0) {
+        return { ok: false, json: async () => ({ detail: "展示页面不存在" }) };
+      }
+      if (method === "PUT") {
+        const changes = JSON.parse(options.body);
+        Object.assign(state.pages[index], changes);
+        return { ok: true, json: async () => ({ page: state.pages[index] }) };
+      }
+      if (method === "DELETE") {
+        state.pages.splice(index, 1);
+        return { ok: true, json: async () => ({ deleted: true }) };
+      }
+    }
+    throw new Error("Unexpected test request: " + url + " " + method);
+  };
   const document = {
     getElementById(id) { return elements.get(id); },
     createElement(tagName) { return new FakeElement(tagName); },
   };
-  const fetch = async (url, options = {}) => {
-    requests.push({ url, options });
-    if (url === "/api/display/pages?include_disabled=true") {
-      return { ok: true, json: async () => ({ pages, default_page_id: "promo" }) };
-    }
-    if (url.startsWith("/api/display/pages/") && options.method === "PUT") {
-      const pageId = decodeURIComponent(url.split("/").pop());
-      const changes = JSON.parse(options.body);
-      const index = pages.findIndex((page) => page.page_id === pageId);
-      Object.assign(pages[index], changes);
-      return { ok: true, json: async () => ({ page: pages[index] }) };
-    }
-    throw new Error("Unexpected test request: " + url + " " + (options.method || "GET"));
-  };
-  vm.runInNewContext(source, { document, fetch, window: { confirm: () => true } });
+  vm.runInNewContext(source, {
+    document,
+    fetch,
+    window: { confirm: () => true },
+  });
   await new Promise((resolve) => setImmediate(resolve));
-  return { elements, pages, requests };
+  return { elements, pages: state.pages, requests, state };
 }
 
 const pageFixtures = [
@@ -83,10 +163,7 @@ const pageFixtures = [
 
 test("page manager renders workflow and iframe verification states separately", async () => {
   const { elements } = await createHarness(pageFixtures);
-  const labels = [];
-  walk(elements.get("pageTree"), (node) => {
-    if (node.textContent) labels.push(node.textContent);
-  });
+  const labels = labelsIn(elements.get("pageTree"));
   assert.ok(labels.includes("工作流可调用"));
   assert.ok(labels.includes("工作流不可调用"));
   assert.ok(labels.includes("嵌入兼容性待现场验证"));
@@ -94,22 +171,10 @@ test("page manager renders workflow and iframe verification states separately", 
 
 test("editing a disabled child preserves its disabled parent in the submitted form", async () => {
   const { elements, requests } = await createHarness(pageFixtures);
-  let childItem = null;
-  walk(elements.get("pageTree"), (node) => {
-    if (node.className === "page-node") {
-      let title = "";
-      walk(node, (nested) => {
-        if (nested.className === "page-node-title") title = nested.textContent;
-      });
-      if (title === "已停用子页面") childItem = node;
-    }
-  });
+  const childItem = findPageNode(elements.get("pageTree"), "已停用子页面");
   assert.ok(childItem, "disabled child should appear in the hierarchy");
 
-  let editButton = null;
-  walk(childItem, (node) => {
-    if (node.tagName === "button" && node.textContent === "编辑") editButton = node;
-  });
+  const editButton = findButton(childItem, "编辑");
   assert.ok(editButton, "external page should expose an edit action");
   editButton.listeners.click();
 
@@ -127,4 +192,92 @@ test("editing a disabled child preserves its disabled parent in the submitted fo
   );
   assert.ok(update, "edit should submit an update request");
   assert.equal(JSON.parse(update.options.body).parent_id, "disabled_parent");
+});
+
+test("built-in local pages can be selected as the default page", async () => {
+  const { elements, requests, state } = await createHarness(pageFixtures, "company_website");
+  const promoNode = findPageNode(elements.get("pageTree"), "企业宣传片");
+  assert.ok(promoNode, "built-in promo page should be rendered");
+
+  const makeDefault = findButton(promoNode, "设为默认");
+  assert.ok(makeDefault, "enabled local pages should expose the default-page action");
+  await makeDefault.listeners.click();
+
+  const request = requests.find((item) =>
+    item.url === "/api/display/default" && item.options.method === "POST"
+  );
+  assert.ok(request, "selecting a local default should call the default-page API");
+  assert.equal(JSON.parse(request.options.body).page_id, "promo");
+  assert.equal(state.defaultPageId, "promo");
+
+  const updatedPromo = findPageNode(elements.get("pageTree"), "企业宣传片");
+  assert.ok(labelsIn(updatedPromo).includes("默认主页"));
+  const website = findPageNode(elements.get("pageTree"), "康晋电气官网");
+  assert.ok(!labelsIn(website).includes("默认主页"));
+});
+
+test("page manager creates, edits, disables, and deletes an external page", async () => {
+  const { elements, requests, state } = await createHarness(pageFixtures.slice(0, 2));
+
+  elements.get("addPage").listeners.click();
+  assert.equal(elements.get("pageDialog").open, true);
+  elements.get("pageId").value = "energy_storage";
+  elements.get("pageTitle").value = "储能系列";
+  elements.get("pageUrl").value = "https://www.zhcomking.com/products/energy-storage/";
+  elements.get("pageDescription").value = "储能产品展示";
+  elements.get("pageParent").value = "company_website";
+  elements.get("pageEnabled").checked = true;
+  await elements.get("pageForm").listeners.submit({ preventDefault() {} });
+
+  let page = state.pages.find((item) => item.page_id === "energy_storage");
+  assert.ok(page, "new page should be added to the page directory");
+  assert.equal(page.parent_id, "company_website");
+  assert.equal(page.page_type, "external");
+  assert.equal(elements.get("pageDialog").open, false);
+
+  let pageNode = findPageNode(elements.get("pageTree"), "储能系列");
+  assert.ok(pageNode, "new page should appear below its parent");
+  findButton(pageNode, "编辑").listeners.click();
+  elements.get("pageTitle").value = "储能产品中心";
+  elements.get("pageDescription").value = "已更新的储能产品说明";
+  await elements.get("pageForm").listeners.submit({ preventDefault() {} });
+
+  page = state.pages.find((item) => item.page_id === "energy_storage");
+  assert.equal(page.title, "储能产品中心");
+  assert.equal(page.description, "已更新的储能产品说明");
+
+  pageNode = findPageNode(elements.get("pageTree"), "储能产品中心");
+  await findButton(pageNode, "停用").listeners.click();
+  page = state.pages.find((item) => item.page_id === "energy_storage");
+  assert.equal(page.enabled, false);
+
+  pageNode = findPageNode(elements.get("pageTree"), "储能产品中心");
+  await findButton(pageNode, "删除").listeners.click();
+  assert.ok(!state.pages.some((item) => item.page_id === "energy_storage"));
+
+  const methods = requests
+    .filter((item) => item.url.includes("energy_storage") || item.url === "/api/display/pages")
+    .map((item) => item.options.method || "GET");
+  assert.ok(methods.includes("POST"));
+  assert.ok(methods.includes("PUT"));
+  assert.ok(requests.some((item) =>
+    item.url === "/api/display/pages/energy_storage" && item.options.method === "DELETE"
+  ));
+});
+
+test("URL validation displays the server-normalized HTTPS destination", async () => {
+  const { elements, requests } = await createHarness(pageFixtures);
+  elements.get("pageUrl").value = "https://WWW.ZHCOMKING.COM/products/";
+  await elements.get("validatePageUrl").listeners.click();
+
+  const request = requests.find((item) =>
+    item.url === "/api/display/pages/validate-url" && item.options.method === "POST"
+  );
+  assert.ok(request);
+  assert.equal(JSON.parse(request.options.body).url, "https://WWW.ZHCOMKING.COM/products/");
+  assert.equal(
+    elements.get("pageUrl").value,
+    "https://www.zhcomking.com/products/",
+  );
+  assert.match(elements.get("urlFeedback").textContent, /不代表目标网站允许 iframe 嵌入/);
 });
