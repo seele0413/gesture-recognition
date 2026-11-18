@@ -338,6 +338,13 @@ class ApiTests(unittest.TestCase):
         response = self.client.post("/api/display/default", json={"page_id": "company_website"})
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(self.client.get("/api/display/pages").json()["default_page_id"], "company_website")
+
+        local_default = self.client.post("/api/display/default", json={"page_id": "promo"})
+        self.assertEqual(local_default.status_code, 200, local_default.text)
+        self.assertEqual(self.client.get("/api/display/pages").json()["default_page_id"], "promo")
+
+        response = self.client.post("/api/display/default", json={"page_id": "company_website"})
+        self.assertEqual(response.status_code, 200, response.text)
         invalid = self.client.post("/api/display/default", json={"page_id": "missing"})
         self.assertEqual(invalid.status_code, 400)
         disabled_default = self.client.put(
