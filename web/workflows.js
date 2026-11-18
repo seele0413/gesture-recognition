@@ -1281,6 +1281,7 @@ function selectOrLink(nodeId) {
       selectedEdgeKey = null;
       linkHistoryBefore = graphSnapshot();
       updateConnectionOptions(nodeId);
+      renderInspector();
       setMessage("已选择连线起点；请选择出口类型，再选择目标节点");
     } else if (linkSourceId !== nodeId) {
       const result = WorkflowGraph.connectNodes(workflow, linkSourceId, nodeId, ui.edgeWhen.value || undefined);
@@ -1498,7 +1499,7 @@ function moveNode(nodeId, clientX, clientY, grabOffset = null) {
     x: (card?.offsetWidth || 236) / 2,
     y: (card?.offsetHeight || 106) / 2,
   };
-  node.position = window.PointerGeometry?.nodePositionFromPointer
+  const proposedPosition = window.PointerGeometry?.nodePositionFromPointer
     ? PointerGeometry.nodePositionFromPointer(
       worldPoint,
       offset,
@@ -1506,9 +1507,17 @@ function moveNode(nodeId, clientX, clientY, grabOffset = null) {
       { width: card?.offsetWidth || 236, height: card?.offsetHeight || 106 },
     )
     : {
-      x: Math.max(0, Math.min(5000, Math.round(worldPoint.x - offset.x))),
-      y: Math.max(0, Math.min(5000, Math.round(worldPoint.y - offset.y))),
+      x: Math.round(worldPoint.x - offset.x),
+      y: Math.round(worldPoint.y - offset.y),
     };
+  node.position = {
+    x: Math.max(0, Math.min(5000, Math.round(proposedPosition.x))),
+    y: Math.max(0, Math.min(5000, Math.round(proposedPosition.y))),
+  };
+  if (node.position.x + (card?.offsetWidth || 236) >= ui.canvasWorld.clientWidth - 40
+    || node.position.y + (card?.offsetHeight || 106) >= ui.canvasWorld.clientHeight - 40) {
+    updateCanvasBounds();
+  }
   if (card) {
     card.style.left = node.position.x + "px";
     card.style.top = node.position.y + "px";
@@ -1610,6 +1619,9 @@ async function deleteWorkflow() {
   await reloadWorkflowList();
   if (workflows.length) await loadWorkflow(workflows[0].id);
   else {
+    graphHistory.clear();
+    selectedEdgeKey = null;
+    refreshHistoryButtons();
     refreshHeader();
     renderCanvas();
     renderInspector();
