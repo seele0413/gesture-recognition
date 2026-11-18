@@ -679,8 +679,10 @@ class ControlStore:
                 ).fetchone():
                     raise ValueError("该页面仍有启用的子页面，请先停用或调整子页面")
         with self._lock, self._connection() as connection:
+            # Keep the host relationship valid for disabled descendants too.
+            # A disabled child may be re-enabled later without changing its parent.
             children = connection.execute(
-                "SELECT url FROM display_pages WHERE parent_id = ? AND enabled = 1", (page_id,)
+                "SELECT url FROM display_pages WHERE parent_id = ?", (page_id,)
             ).fetchall()
             if children:
                 from urllib.parse import urlsplit

@@ -240,6 +240,65 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.client.delete("/api/display/pages/cycle_child").status_code, 200)
         self.assertEqual(self.client.delete("/api/display/pages/cycle_root").status_code, 200)
 
+    def test_display_page_manager_ui_shows_hierarchy_and_accurate_access_states(self):
+        page = self.client.get("/display-pages")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn('href="/display-pages"', self.client.get("/settings").text)
+        self.assertIn('id="pageUrl"', page.text)
+        self.assertIn('id="pageParent"', page.text)
+        self.assertIn('id="pageEnabled"', page.text)
+        self.assertIn("网页目录与访问状态", page.text)
+        self.assertIn("嵌入兼容性待现场验证", page.text)
+        script = self.client.get("/static/display-pages.js").text
+        self.assertIn("工作流可调用", script)
+        self.assertIn("工作流不可调用", script)
+        self.assertIn("(page.enabled || page.page_id === selectedId)", script)
+        self.assertIn("option.disabled = !page.enabled", script)
+        self.assertIn("仅保留当前父级关系", script)
+
+    def test_display_page_manager_preserves_disabled_parent_and_child_host_invariant(self):
+        parent = self.client.post("/api/display/pages", json={
+            "page_id": "disabled_parent", "title": "可停用父页面",
+            "url": "https://www.zhcomking.com/catalog/",
+        })
+        self.assertEqual(parent.status_code, 201, parent.text)
+        child = self.client.post("/api/display/pages", json={
+            "page_id": "disabled_child", "title": "可停用子页面",
+            "url": "https://www.zhcomking.com/catalog/product/",
+            "parent_id": "disabled_parent",
+        })
+        self.assertEqual(child.status_code, 201, child.text)
+
+        self.assertEqual(
+            self.client.put("/api/display/pages/disabled_child", json={"enabled": False}).status_code,
+            200,
+        )
+        self.assertEqual(
+            self.client.put("/api/display/pages/disabled_parent", json={"enabled": False}).status_code,
+            200,
+        )
+
+        edited = self.client.put("/api/display/pages/disabled_child", json={
+            "title": "编辑后仍保留父级",
+            "url": "https://www.zhcomking.com/catalog/product-v2/",
+        })
+        self.assertEqual(edited.status_code, 200, edited.text)
+        self.assertEqual(edited.json()["page"]["parent_id"], "disabled_parent")
+        self.assertFalse(edited.json()["page"]["enabled"])
+
+        invalid_reparent = self.client.put("/api/display/pages/disabled_child", json={
+            "parent_id": "disabled_parent",
+            "enabled": True,
+        })
+        self.assertEqual(invalid_reparent.status_code, 400)
+        self.assertIn("父页面必须处于启用状态", invalid_reparent.text)
+
+        invalid_parent_host_change = self.client.put("/api/display/pages/disabled_parent", json={
+            "url": "https://example.org/catalog/",
+        })
+        self.assertEqual(invalid_parent_host_change.status_code, 400)
+        self.assertIn("子页面", invalid_parent_host_change.text)
+
     def test_display_page_url_validation_rejects_unsafe_destinations(self):
         invalid_urls = [
             "http://example.com/", "https://user:password@example.com/",

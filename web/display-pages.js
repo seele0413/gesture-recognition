@@ -80,13 +80,16 @@ function fillParentOptions(selectedId = "", excludedIds = new Set()) {
   rootOption.textContent = "作为独立主页";
   elements.parent.append(rootOption);
   const candidates = pages
-    .filter((page) => page.page_type === "external" && page.enabled && page.page_id !== editingPageId
-      && !excludedIds.has(page.page_id))
+    .filter((page) => page.page_type === "external" && page.page_id !== editingPageId
+      && !excludedIds.has(page.page_id)
+      && (page.enabled || page.page_id === selectedId))
     .sort((a, b) => a.title.localeCompare(b.title, "zh-CN"));
   for (const page of candidates) {
     const option = document.createElement("option");
     option.value = page.page_id;
-    option.textContent = page.title + " · " + page.page_id;
+    option.disabled = !page.enabled;
+    option.textContent = page.title + " · " + page.page_id
+      + (page.enabled ? "" : "（已停用，仅保留当前父级关系）");
     elements.parent.append(option);
   }
   elements.parent.value = selectedId || "";
@@ -118,8 +121,9 @@ function renderPageNode(page, childrenByParent, visited = new Set()) {
     titleRow.append(badge);
   };
   if (page.page_id === defaultPageId) tag("默认主页", "default");
-  if (!page.enabled) tag("已停用", "disabled");
+  tag(page.enabled ? "工作流可调用" : "工作流不可调用", page.enabled ? "available" : "disabled");
   tag(page.page_type === "local" ? "内置页面" : "外部网页");
+  if (page.page_type === "external") tag("嵌入兼容性待现场验证", "pending");
 
   const meta = document.createElement("div");
   meta.className = "page-node-meta";

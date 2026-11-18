@@ -213,8 +213,21 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
             if parent_id == page_id:
                 raise ValueError("页面不能将自己设置为父页面")
             parent = store.get_display_page(parent_id)
-            if not parent or parent["page_type"] != "external" or not parent["enabled"]:
-                raise ValueError("父页面必须是已启用的外部网页")
+            if not parent or parent["page_type"] != "external":
+                raise ValueError("父页面必须是已登记的外部网页")
+            if not parent["enabled"]:
+                current_page = store.get_display_page(current_page_id) if current_page_id else None
+                current_enabled = bool(
+                    values.get("enabled", current_page["enabled"] if current_page else True)
+                )
+                can_preserve_disabled_parent = (
+                    current_page is not None
+                    and not current_page["enabled"]
+                    and not current_enabled
+                    and current_page["parent_id"] == parent_id
+                )
+                if not can_preserve_disabled_parent:
+                    raise ValueError("新建或启用子页面时，父页面必须处于启用状态")
             ancestor = parent
             visited: set[str] = set()
             while ancestor:

@@ -75,6 +75,25 @@ class ControlStoreTests(unittest.TestCase):
         self.assertTrue(self.store.delete_display_page("product_center"))
         self.assertIsNone(self.store.get_display_page("product_center"))
 
+    def test_parent_host_change_is_rejected_when_only_disabled_children_remain(self):
+        self.store.create_display_page({
+            "page_id": "disabled_parent", "title": "停用父页面",
+            "url": "https://www.zhcomking.com/catalog/", "page_type": "external",
+            "parent_id": None, "enabled": True,
+        })
+        self.store.create_display_page({
+            "page_id": "disabled_child", "title": "停用子页面",
+            "url": "https://www.zhcomking.com/catalog/product/", "page_type": "external",
+            "parent_id": "disabled_parent", "enabled": True,
+        })
+        self.store.update_display_page("disabled_child", {"enabled": False})
+        self.store.update_display_page("disabled_parent", {"enabled": False})
+
+        with self.assertRaisesRegex(ValueError, "子页面"):
+            self.store.update_display_page("disabled_parent", {
+                "url": "https://example.org/catalog/",
+            })
+
     def test_display_page_default_cannot_be_deleted(self):
         self.store.set_default_display_page_id("company_website")
         with self.assertRaisesRegex(ValueError, "默认展示页面"):
