@@ -39,7 +39,7 @@ flowchart LR
 
 ## Display Shell 与展示主页注册
 
-首页 `/` 是常驻 Display Shell，不再直接承载某一个具体展示页面。Shell 通过 iframe 加载 `app/display_pages.py` 中登记的页面；`GET /api/display/pages` 返回默认页面 ID、页面 ID、标题、说明和页面类型。当前默认页为 `promo`，本地模板页为 `factory` 与 `product`，外部只读展示页为 `company_website`（固定地址 `https://www.zhcomking.com/`）。
+首页 `/` 是常驻 Display Shell，不再直接承载某一个具体展示页面。展示页面登记数据保存在 SQLite 的 `display_pages` 表；首次初始化时从 `app/display_pages.py` 播种内置页面。当前默认页为 `promo`，本地模板页为 `factory` 与 `product`，外部只读展示页为 `company_website`（初始地址 `https://www.zhcomking.com/`）。外部网页可通过 `/api/display/pages` 管理 API 动态登记，页面 ID 动态进入 `web.navigate_page` 的动作 Schema。当前 A1 阶段已完成后端登记和 URL 安全校验；网页管理 UI 与 Display Shell 动态加载将在后续阶段接入。
 
 工作流动作 `web.navigate_page` 只接受登记表中的 `page_id`，不接受工作流传入的 URL。对本地页面，Shell 仍校验 `/static/pages/` 路径，并等待页面发送与当前 `shell_generation` 匹配的 `display:ready` 消息。对外部页面，Shell 只允许代码中固定登记的 HTTPS 地址，设置 `no-referrer` 并等待 iframe 的导航 `load` 事件；由于浏览器同源策略，load 事件不能证明第三方页面内容已成功渲染，现场仍须目视验收。外部页面是只读展示：Shell 不向它转发手势/事件，不向它发送内部动作，切换回本地页后原有通信恢复。外部站点若通过 `X-Frame-Options` 或 CSP `frame-ancestors` 禁止嵌入，浏览器会阻止显示；本项目不会绕过该安全策略，需要网站管理员授权嵌入来源，或改用新窗口展示（新窗口不属于当前 Shell 内嵌方案）。
 
@@ -104,7 +104,7 @@ flowchart LR
 | action | 参数 |
 | --- | --- |
 | `web.navigate_route` | `route`: home / settings / workflows；离开展示 Shell 的管理路由，只能作为最后一个动作 |
-| `web.navigate_page` | `page_id`: promo / factory / product / company_website；切换已登记展示主页，执行通道保持连接；外部官网仅整页展示 |
+| `web.navigate_page` | `page_id`: 当前已启用的动态登记页面 ID；切换已登记展示主页，执行通道保持连接；外部网页仅整页展示 |
 | `web.set_scene` | `scene`: welcome / company_intro / product_intro / factory_intro / presentation_mode |
 | `web.show_panel`, `web.hide_panel` | `panel`: welcome / company / product / factory / presentation |
 | `web.set_text` | `field`: headline / subhead / notice；`text` 最长 160 字符，使用 textContent 写入 |
@@ -132,7 +132,10 @@ PPT 动作：`ppt.open_deck`、`ppt.start_slideshow`、`ppt.next_slide`、`ppt.p
 | GET | `/api/workflow-runs`、`/api/workflow-runs/{run_id}` | 运行与步骤日志 |
 | POST | `/api/workflow-runs/{run_id}/cancel` | 取消活动运行 |
 | GET | `/api/actions` | 动作及参数 Schema |
-| GET | `/api/display/pages` | 已登记展示主页及本地路径 |
+| GET | `/api/display/pages?include_disabled=true` | 已登记展示页面；默认只返回启用页面 |
+| POST / PUT / DELETE | `/api/display/pages`、`/api/display/pages/{page_id}` | 新增 / 修改 / 删除外部 HTTPS 页面 |
+| POST | `/api/display/pages/validate-url` | 校验 HTTPS URL 格式与公共域名限制，不发起外部网络请求 |
+| POST | `/api/display/default` | 设置已启用的默认展示页面 |
 | GET | `/api/media-assets`、`/api/presentations` | 白名单资源与可用状态 |
 | GET | `/api/workflow-status` | 大屏客户端、主控和运行状态 |
 | WebSocket | `/ws/display` | 唯一大屏命令执行与确认 |

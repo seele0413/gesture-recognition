@@ -455,6 +455,21 @@ class DisplayCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(channel._pending, {})
         await channel.disconnect(socket)
 
+    async def test_navigate_page_schema_reads_page_ids_dynamically(self):
+        channel = DisplayCommandChannel()
+        registry = ActionRegistry()
+        page_ids = ["promo", "company_website"]
+        register_web_actions(
+            registry, BrowserCommandAdapter(channel),
+            page_ids_provider=lambda: tuple(page_ids),
+        )
+        self.assertEqual(registry.schema_map()["web.navigate_page"]["properties"]["page_id"]["enum"], page_ids)
+        page_ids.append("energy_storage")
+        self.assertEqual(
+            registry.schema_map()["web.navigate_page"]["properties"]["page_id"]["enum"],
+            page_ids,
+        )
+
     async def test_registered_navigate_page_action_sends_page_id_and_waits_for_ack(self):
         channel = DisplayCommandChannel()
         socket = _FakeSocket()

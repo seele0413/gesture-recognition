@@ -138,6 +138,80 @@ class ApiTests(unittest.TestCase):
         self.assertIn("page_id: pageId", registered_script)
         self.assertIn('type: "display:ready"', registered_script)
 
+    def test_external_display_page_crud_updates_live_action_schema(self):
+        created = self.client.post("/api/display/pages", json={
+            "page_id": "energy_storage", "title": "储能系列产品",
+            "description": "康晋官网储能产品列表",
+            "url": "https://www.zhcomking.com/products/storage.html",
+            "parent_id": "company_website",
+        })
+        self.assertEqual(created.status_code, 201, created.text)
+        self.assertEqual(created.json()["page"]["parent_id"], "company_website")
+        navigate = next(item for item in self.client.get("/api/actions").json()["actions"]
+                        if item["name"] == "web.navigate_page")
+        self.assertIn("energy_storage", navigate["schema"]["properties"]["page_id"]["enum"])
+
+        workflow = new_workflow("跳转储能子页面")
+        workflow["nodes"][0].update({
+            "action": "web.navigate_page", "params": {"page_id": "energy_storage"},
+        })
+        self.assertEqual(self.client.post("/api/workflows", json=workflow).status_code, 201)
+
+        updated = self.client.put("/api/display/pages/energy_storage", json={
+            "title": "储能产品目录",
+            "url": "https://www.zhcomking.com/products/storage/index.html",
+        })
+        self.assertEqual(updated.status_code, 200, updated.text)
+        self.assertEqual(updated.json()["page"]["title"], "储能产品目录")
+        self.assertIn("energy_storage", [
+            item["page_id"] for item in self.client.get("/api/display/pages").json()["pages"]
+        ])
+        blocked = self.client.delete("/api/display/pages/energy_storage")
+        self.assertEqual(blocked.status_code, 409)
+        self.assertIn("工作流引用", blocked.text)
+
+    def test_display_page_url_validation_rejects_unsafe_destinations(self):
+        invalid_urls = [
+            "http://example.com/", "https://user:password@example.com/",
+            "https://127.0.0.1/", "https://router.local/", "https://example.com:8443/",
+        ]
+        for url in invalid_urls:
+            response = self.client.post("/api/display/pages/validate-url", json={"url": url})
+            self.assertEqual(response.status_code, 400, url)
+        valid = self.client.post("/api/display/pages/validate-url", json={
+            "url": "https://WWW.ZHCOMKING.COM:443/products/"
+        })
+        self.assertEqual(valid.status_code, 200, valid.text)
+        self.assertEqual(valid.json()["url"], "https://www.zhcomking.com/products/")
+
+    def test_external_child_page_must_share_parent_host(self):
+        response = self.client.post("/api/display/pages", json={
+            "page_id": "wrong_host_child", "title": "错误域名子页面",
+            "url": "https://example.org/products/", "parent_id": "company_website",
+        })
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("同一个域名", response.text)
+
+    def test_disabled_display_page_is_removed_from_navigation_schema(self):
+        created = self.client.post("/api/display/pages", json={
+            "page_id": "temporary_page", "title": "临时页面",
+            "url": "https://www.zhcomking.com/temporary/",
+            "parent_id": "company_website",
+        })
+        self.assertEqual(created.status_code, 201, created.text)
+        disabled = self.client.put("/api/display/pages/temporary_page", json={"enabled": False})
+        self.assertEqual(disabled.status_code, 200, disabled.text)
+        action = next(item for item in self.client.get("/api/actions").json()["actions"]
+                      if item["name"] == "web.navigate_page")
+        self.assertNotIn("temporary_page", action["schema"]["properties"]["page_id"]["enum"])
+
+    def test_default_display_page_can_be_changed_only_to_enabled_page(self):
+        response = self.client.post("/api/display/default", json={"page_id": "company_website"})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.client.get("/api/display/pages").json()["default_page_id"], "company_website")
+        invalid = self.client.post("/api/display/default", json={"page_id": "missing"})
+        self.assertEqual(invalid.status_code, 400)
+
     def test_workflow_creation_does_not_require_camera_stream(self):
         self.assertEqual(self.client.get("/api/status").json()["state"], "stopped")
         workflow = new_workflow("离线编排工作流")
