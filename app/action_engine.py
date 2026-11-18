@@ -95,6 +95,7 @@ class WorkflowEngine:
         self._controller_authority_waiters: set[asyncio.Future] = set()
         self._active_task_started = False
         self._display_connected = False
+        self._display_ready = False
         self._cancel_reason = ""
         self._sequences: dict[str, list[tuple[str, int]]] = {}
         self._event_waiters: set[tuple[asyncio.Future, Callable[[dict[str, Any]], bool]]] = set()
@@ -111,7 +112,11 @@ class WorkflowEngine:
     def set_display_connected(self, connected: bool) -> None:
         self._display_connected = bool(connected)
         if not self._display_connected:
+            self._display_ready = False
             self.cancel_active("展示执行客户端断开，已取消后续动作")
+
+    def set_display_ready(self, ready: bool) -> None:
+        self._display_ready = bool(ready) if self._display_connected else False
 
     async def on_event(self, event: dict[str, Any]) -> dict[str, Any] | None:
         """EventHub listener. Returns a modified gesture event when a workflow claims it."""
@@ -202,10 +207,12 @@ class WorkflowEngine:
     def _start(self, definition: dict[str, Any], trigger_event: dict[str, Any]) -> str | None:
         if self._closed:
             return None
-        if trigger_event.get("type") in {"gesture", "controller"} and not self._display_connected:
+        if trigger_event.get("type") in {"gesture", "controller"} and not (
+            self._display_connected and self._display_ready
+        ):
             self._emit({
                 "type": "workflow", "workflow_id": definition["id"], "status": "failed",
-                "error": "大屏展示页未连接，已暂停工作流触发",
+                "error": "大屏展示页尚未就绪，已暂停工作流触发",
             })
             return None
         if self._active_task and not self._active_task.done():
