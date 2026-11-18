@@ -10,7 +10,6 @@ const ROUTE_PATHS = Object.freeze({
   workflows: "/workflows",
 });
 const DISPLAY_ORIGIN = window.location.origin;
-const ALLOWED_EXTERNAL_PAGE_URLS = new Set(["https://www.zhcomking.com/"]);
 const COMMAND_TIMEOUT_FALLBACK_MS = 10000;
 const commandResults = new Map();
 const pendingCommands = new Map();
@@ -33,6 +32,41 @@ function setShellStatus(state, message) {
 
 function pageLabel(pageId) {
   return pages.get(pageId)?.title || pageId;
+}
+
+function isPublicExternalHost(hostname) {
+  const host = String(hostname || "").toLowerCase().replace(/\.$/, "");
+  if (!host || !host.includes(".") || host === "localhost"
+      || /^(?:\d{1,3}\.){3}\d{1,3}$/.test(host) || host.includes(":")) return false;
+  if ([".localhost", ".local", ".internal", ".test", ".invalid", ".example", ".home", ".lan"]
+      .some((suffix) => host.endsWith(suffix))) return false;
+  return host.split(".").every((label) =>
+    /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label)
+  );
+}
+
+function safeExternalPageUrl(page) {
+  if (!page || typeof page.url !== "string") return null;
+  let url;
+  try {
+    url = new URL(page.url);
+  } catch (_error) {
+    return null;
+  }
+  if (url.protocol !== "https:" || url.username || url.password
+      || (url.port && url.port !== "443") || !isPublicExternalHost(url.hostname)) return null;
+  if (page.parent_id) {
+    const parent = pages.get(page.parent_id);
+    if (!parent || parent.page_type !== "external") return null;
+    let parentUrl;
+    try {
+      parentUrl = new URL(parent.url);
+    } catch (_error) {
+      return null;
+    }
+    if (url.hostname.toLowerCase() !== parentUrl.hostname.toLowerCase()) return null;
+  }
+  return url;
 }
 
 function postToFrame(message) {
@@ -81,17 +115,9 @@ function navigatePage(pageId, timeoutMs = COMMAND_TIMEOUT_FALLBACK_MS) {
     }
     destination = resolvedPath;
   } else if (pageType === "external") {
-    let resolvedUrl;
-    try {
-      resolvedUrl = new URL(page.url);
-    } catch (_error) {
-      throw new Error("外部展示网页地址无效");
-    }
-    if (resolvedUrl.protocol !== "https:"
-        || resolvedUrl.username
-        || resolvedUrl.password
-        || !ALLOWED_EXTERNAL_PAGE_URLS.has(resolvedUrl.href)) {
-      throw new Error("外部展示网页不在 HTTPS 白名单中");
+    const resolvedUrl = safeExternalPageUrl(page);
+    if (!resolvedUrl) {
+      throw new Error("外部展示网页未通过 HTTPS、公开域名或父页面域名校验");
     }
     destination = resolvedUrl;
   } else {
@@ -208,9 +234,23 @@ async function executeDisplayCommand(command) {
       window.setTimeout(() => window.location.assign(path), 250);
       return { route: command.params.route, scheduled: true };
     }
+    case "web.navigate_parent": {
+      const currentPage = pages.get(currentPageId);
+      const parentId = currentPage?.parent_id || defaultPageId;
+      if (!parentId) throw new Error("当前页面没有可返回的父页面");
+      if (parentId === currentPageId) {
+        return { page_id: currentPageId, title: pageLabel(currentPageId), changed: false };
+      }
+      return await navigatePage(parentId, timeoutMs);
+    }
     case "web.return_home":
       if (!defaultPageId) throw new Error("默认展示主页尚未初始化");
-      if (currentPageId !== defaultPageId) await navigatePage(defaultPageId, timeoutMs);
+      if (currentPageId !== defaultPageId) {
+        return await navigatePage(defaultPageId, timeoutMs);
+      }
+      if (pages.get(currentPageId)?.page_type === "external") {
+        return { page_id: defaultPageId, title: pageLabel(defaultPageId), changed: false };
+      }
       return await sendPageCommand(command, timeoutMs);
     default:
       return await sendPageCommand(command, timeoutMs);
@@ -342,15 +382,35 @@ async function initializeDisplayShell() {
     if (!response.ok) throw new Error("无法读取展示主页登记表");
     const payload = await response.json();
     if (!Array.isArray(payload.pages)) throw new Error("展示主页登记表格式无效");
+    const externalPages = [];
     for (const page of payload.pages) {
-      if (!page || typeof page.page_id !== "string" || typeof page.title !== "string") continue;
+      if (!page || typeof page.page_id !== "string" || typeof page.title !== "string"
+          || page.enabled === false || !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(page.page_id)) continue;
       const pageType = page.page_type || "local";
       if (pageType === "local" && typeof page.path === "string" && page.path.startsWith("/static/pages/")) {
         pages.set(page.page_id, page);
-      } else if (pageType === "external" && typeof page.url === "string"
-          && ALLOWED_EXTERNAL_PAGE_URLS.has(page.url)) {
-        pages.set(page.page_id, page);
+      } else if (pageType === "external") {
+        externalPages.push(page);
       }
+    }
+
+    // Register external roots first, then children once their registered parent is present.
+    // The server only returns enabled database records; the browser independently verifies
+    // HTTPS/public-host rules and same-host parent relationships before allowing navigation.
+    let pending = externalPages;
+    while (pending.length) {
+      let progressed = false;
+      const nextPending = [];
+      for (const page of pending) {
+        if (page.parent_id && !pages.has(page.parent_id)) {
+          nextPending.push(page);
+          continue;
+        }
+        if (safeExternalPageUrl(page)) pages.set(page.page_id, page);
+        progressed = true;
+      }
+      if (!progressed) break;
+      pending = nextPending;
     }
     defaultPageId = payload.default_page_id;
     if (typeof defaultPageId !== "string" || !pages.has(defaultPageId)) {
