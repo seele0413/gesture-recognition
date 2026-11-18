@@ -150,6 +150,13 @@ class ApiTests(unittest.TestCase):
         navigate = next(item for item in self.client.get("/api/actions").json()["actions"]
                         if item["name"] == "web.navigate_page")
         self.assertIn("energy_storage", navigate["schema"]["properties"]["page_id"]["enum"])
+        self.assertEqual(
+            navigate["schema"]["properties"]["page_id"]["enum_labels"]["energy_storage"],
+            "康晋电气官方网站 / 储能系列产品",
+        )
+        self.assertIn("web.navigate_parent", {
+            item["name"] for item in self.client.get("/api/actions").json()["actions"]
+        })
 
         workflow = new_workflow("跳转储能子页面")
         workflow["nodes"][0].update({

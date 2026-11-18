@@ -53,7 +53,7 @@ const GESTURE_LABELS = {
   Pointing_Up: "食指向上", Victory: "V 字手势", ILoveYou: "我爱你手势",
 };
 const ACTION_LABELS = {
-  "web.navigate_route": "打开管理页面", "web.navigate_page": "切换展示主页", "web.set_scene": "切换展厅场景", "web.show_panel": "显示面板",
+  "web.navigate_route": "打开管理页面", "web.navigate_page": "切换展示主页", "web.navigate_parent": "返回父页面", "web.set_scene": "切换展厅场景", "web.show_panel": "显示面板",
   "web.hide_panel": "隐藏面板", "web.set_text": "设置展示文本", "web.return_home": "返回首页",
   "video.load": "加载视频", "video.play": "播放视频", "video.pause": "暂停视频",
   "video.seek": "跳转进度", "video.set_volume": "设置音量", "video.mute": "静音",
@@ -1203,7 +1203,10 @@ function renderActionProperties(node) {
       control = make("select");
       if (rule.enum.length === 0) control.append(make("option", "", "未登记可用资源"));
       for (const choice of rule.enum) {
-        const option = make("option", "", String(choice)); option.value = String(choice); control.append(option);
+        const label = rule.enum_labels?.[choice];
+        const option = make("option", "", label ? label + "（" + choice + "）" : String(choice));
+        option.value = String(choice);
+        control.append(option);
       }
       control.value = node.params[name] ?? "";
     } else if (rule.type === "boolean") {

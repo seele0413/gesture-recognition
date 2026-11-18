@@ -455,20 +455,25 @@ class DisplayCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(channel._pending, {})
         await channel.disconnect(socket)
 
-    async def test_navigate_page_schema_reads_page_ids_dynamically(self):
+    async def test_navigate_page_schema_reads_dynamic_ids_and_hierarchical_labels(self):
         channel = DisplayCommandChannel()
         registry = ActionRegistry()
         page_ids = ["promo", "company_website"]
+        labels = {"promo": "企业宣传片", "company_website": "康晋电气官网"}
         register_web_actions(
             registry, BrowserCommandAdapter(channel),
             page_ids_provider=lambda: tuple(page_ids),
+            page_labels_provider=lambda: dict(labels),
         )
-        self.assertEqual(registry.schema_map()["web.navigate_page"]["properties"]["page_id"]["enum"], page_ids)
+        schema = registry.schema_map()["web.navigate_page"]["properties"]["page_id"]
+        self.assertEqual(schema["enum"], page_ids)
+        self.assertEqual(schema["enum_labels"]["company_website"], "康晋电气官网")
         page_ids.append("energy_storage")
-        self.assertEqual(
-            registry.schema_map()["web.navigate_page"]["properties"]["page_id"]["enum"],
-            page_ids,
-        )
+        labels["energy_storage"] = "康晋电气官网 / 产品中心 / 储能系列"
+        refreshed = registry.schema_map()["web.navigate_page"]["properties"]["page_id"]
+        self.assertEqual(refreshed["enum"], page_ids)
+        self.assertEqual(refreshed["enum_labels"]["energy_storage"], labels["energy_storage"])
+        self.assertIn("web.navigate_parent", registry.schema_map())
 
     async def test_registered_navigate_page_action_sends_page_id_and_waits_for_ack(self):
         channel = DisplayCommandChannel()
