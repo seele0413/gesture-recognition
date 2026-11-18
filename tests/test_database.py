@@ -23,7 +23,7 @@ class ControlStoreTests(unittest.TestCase):
         self.assertEqual([page["page_id"] for page in pages],
                          ["promo", "factory", "product", "company_website"])
         self.assertEqual(self.store.get_default_display_page_id(), "promo")
-        reopened = ControlStore(legacy_path)
+        reopened = ControlStore(self.path)
         self.assertEqual(reopened.get_display_page("company_website")["url"],
                          "https://www.zhcomking.com/")
 
@@ -53,7 +53,7 @@ class ControlStoreTests(unittest.TestCase):
         self.assertEqual(migrated.get_mappings(), legacy_mappings)
         self.assertEqual(migrated.get_gesture_confidence_threshold(), 0.65)
 
-        reopened = ControlStore(self.path)
+        reopened = ControlStore(legacy_path)
         self.assertEqual(
             [page["page_id"] for page in reopened.get_display_pages()],
             ["promo", "factory", "product", "company_website"],
