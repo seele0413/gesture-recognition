@@ -73,11 +73,21 @@
 .validation-message[data-state="ok"] { display: block; }
 .canvas-viewport { position: relative; flex: 1 1 auto; min-height: 0; overflow: auto; background-color: #f2f4f1; background-image: radial-gradient(#cad1ca 0.8px, transparent 0.8px); background-size: 18px 18px; }
 .canvas-world { position: relative; width: 1900px; height: 1100px; transform-origin: top left; }
-.edge-layer { position: absolute; z-index: 0; inset: 0; width: 1900px; height: 1100px; overflow: visible; pointer-events: none; }
-.edge-layer path { fill: none; stroke: #88968b; stroke-width: 2; marker-end: url(#edgeArrow); }
-.edge-layer path.edge-error { stroke: #b76858; }
-.edge-layer text { fill: #647168; font-size: 11px; }
+.edge-layer { position: absolute; z-index: 0; inset: 0; width: 1900px; height: 1100px; overflow: visible; pointer-events: auto; }
+.edge-group { pointer-events: none; }
+.edge-group .edge-path { fill: none; stroke: #88968b; stroke-width: 2; marker-end: url(#edgeArrow); pointer-events: none; }
+.edge-group .edge-path.edge-error { stroke: #b76858; }
+.edge-group .edge-hit-area { fill: none; stroke: transparent; stroke-width: 16; pointer-events: stroke; cursor: pointer; marker-end: none; }
+.edge-group[data-selected="true"] .edge-path { stroke: #3f8051; stroke-width: 3; }
+.edge-group[data-candidate="true"] .edge-path { stroke: #b98432; stroke-width: 3; }
+.edge-label { fill: #647168; font-size: 11px; pointer-events: none; }
 .edge-layer marker path { fill: #78867b; stroke: none; }
+.edge-insert-button { opacity: 0; pointer-events: all; cursor: pointer; transition: opacity .12s ease; }
+.edge-group:hover .edge-insert-button, .edge-group[data-selected="true"] .edge-insert-button, .edge-insert-button:focus { opacity: 1; }
+.edge-insert-button circle { fill: #fff; stroke: #4c7657; stroke-width: 1.5; }
+.edge-insert-button text { fill: #3f6f4b; font-size: 15px; font-weight: 700; pointer-events: none; }
+.edge-insert-button:focus { outline: none; }
+.edge-insert-button:focus circle { stroke: #b98432; stroke-width: 3; }
 .trigger-badge { position: absolute; top: 96px; left: 20px; z-index: 1; display: grid; align-content: center; width: 112px; height: 68px; padding: 8px; border: 1px solid #b6c8ba; border-radius: 4px; color: #46654f; background: #eef5ef; text-align: center; font-size: 11px; }
 .canvas-node { position: absolute; z-index: 2; width: 236px; min-height: 106px; border: 1px solid #cad2ca; border-radius: 4px; background: #fff; box-shadow: 0 2px 7px rgba(31, 41, 32, .06); cursor: grab; user-select: none; }
 .canvas-node:active { cursor: grabbing; }
@@ -332,3 +342,8 @@
 @media (max-width: 1100px) {
   .pointer-mode-hint { flex-basis: 100%; max-width: none; }
 }
+
+
+/* Workflow graph editing affordances. */
+#undoWorkflow:disabled, #redoWorkflow:disabled { opacity: .42; cursor: not-allowed; }
+.edge-group[data-candidate="true"] .edge-hit-area { stroke: rgba(185, 132, 50, .12); }
