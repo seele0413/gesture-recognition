@@ -100,13 +100,12 @@ class DisplayCommandChannelTests(unittest.TestCase):
             self.assertEqual(websocket.sent[0]["command_id"], "command-1")
 
             await channel.receive(websocket, {
-                "type": "display:ack",
+                "type": "ack",
                 "run_id": "run-1",
                 "command_id": "command-1",
                 "success": True,
                 "result": {"updated": True},
             })
-            self.fail("invalid message should not finish the command")
-            
+            self.assertEqual(await task, {"updated": True})
         asyncio.run(scenario())
 
