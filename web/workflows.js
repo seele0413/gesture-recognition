@@ -763,6 +763,7 @@ function refreshHeader() {
   ui.workflowDescription.value = workflow?.description || "";
   ui.toggleWorkflow.textContent = workflow?.enabled ? "禁用" : "启用";
   ui.workflowSelect.value = workflow?.id || "";
+  refreshHistoryButtons();
 }
 
 function updateHeaderData() {
@@ -798,6 +799,7 @@ async function loadWorkflow(workflowId) {
   selectedEdgeKey = null;
   linkSourceId = null;
   linkHistoryBefore = null;
+  propertyHistoryBefore = null;
   graphHistory.clear();
   refreshHistoryButtons();
   nodeStatuses.clear();
@@ -911,6 +913,7 @@ function applyGraphResult(result, before, message) {
   selectedEdgeKey = null;
   linkSourceId = null;
   linkHistoryBefore = null;
+  ui.linkMode.setAttribute("aria-pressed", "false");
   pushGraphHistory(before);
   renderCanvas();
   renderInspector();
@@ -940,10 +943,6 @@ function selectEdge(key) {
   const record = edgeRecords.get(key);
   const label = record.edge.when || "常规";
   setMessage("已选中 " + label + " 执行路径；现在点击左侧节点即可插入到这条连线上");
-}
-
-function findNode(nodeId) {
-  return workflow?.nodes.find((node) => node.id === nodeId) || null;
 }
 
 function findNode(nodeId) {
@@ -1001,11 +1000,26 @@ function gestureSelect(value) {
   return select;
 }
 
+function updateCanvasBounds() {
+  const nodes = workflow?.nodes || [];
+  const maxX = Math.max(170, ...nodes.map((node) => (node.position?.x ?? 170) + 236));
+  const maxY = Math.max(180, ...nodes.map((node) => (node.position?.y ?? 180) + 150));
+  const width = Math.max(1900, Math.ceil(maxX + 180));
+  const height = Math.max(1100, Math.ceil(maxY + 180));
+  ui.canvasWorld.style.width = width + "px";
+  ui.canvasWorld.style.height = height + "px";
+  ui.edgeLayer.setAttribute("width", String(width));
+  ui.edgeLayer.setAttribute("height", String(height));
+  ui.edgeLayer.style.width = width + "px";
+  ui.edgeLayer.style.height = height + "px";
+}
+
 function renderCanvas() {
   nodeCardsById.clear();
   nodeModelsById.clear();
   if (!workflow) {
     ui.canvasNodes.replaceChildren();
+    updateCanvasBounds();
     drawEdges();
     return;
   }
@@ -1043,6 +1057,7 @@ function renderCanvas() {
     nodeCardsById.set(node.id, card);
     ui.canvasNodes.append(card);
   }
+  updateCanvasBounds();
   drawEdges();
 }
 

@@ -130,9 +130,7 @@
     return id;
   }
 
-  function shiftDownstream(nodes, edges, startId, amount) {
-    if (!amount || amount <= 0) return;
-    const byId = new Map(nodes.map((node) => [node.id, node]));
+  function collectDownstreamIds(edges, startId) {
     const outgoing = new Map();
     for (const edge of edges) {
       if (!outgoing.has(edge.source)) outgoing.set(edge.source, []);
@@ -144,12 +142,19 @@
       const id = queue.shift();
       if (visited.has(id)) continue;
       visited.add(id);
-      const node = byId.get(id);
-      if (node) {
-        if (!node.position) node.position = { x: 170, y: 180 };
-        node.position = { x: node.position.x + amount, y: node.position.y };
-      }
       for (const target of outgoing.get(id) || []) queue.push(target);
+    }
+    return visited;
+  }
+
+  function shiftDownstream(nodes, edges, startId, amount) {
+    if (!amount || amount <= 0) return;
+    const byId = new Map(nodes.map((node) => [node.id, node]));
+    for (const id of collectDownstreamIds(edges, startId)) {
+      const node = byId.get(id);
+      if (!node) continue;
+      if (!node.position) node.position = { x: 170, y: 180 };
+      node.position = { x: node.position.x + amount, y: node.position.y };
     }
   }
 
@@ -180,8 +185,14 @@
 
     const targetPosition = target.position || { x: 470, y: 180 };
     const nodeX = sourceNode ? (sourceNode.position?.x ?? 170) + 300 : 170;
-    const nodeY = Number.isFinite(options.position?.y) ? Math.max(20, Math.round(options.position.y)) : targetPosition.y;
+    const nodeY = Number.isFinite(options.position?.y) ? Math.min(5000, Math.max(20, Math.round(options.position.y))) : targetPosition.y;
     const shift = Math.max(0, nodeX + 300 - targetPosition.x);
+    const downstreamIds = collectDownstreamIds(edges, edge.target);
+    const downstreamMaxX = Math.max(0, ...nodes.filter((item) => downstreamIds.has(item.id)).map((item) => item.position?.x ?? 170));
+    const requiredRight = node.type === "condition" ? nodeX + 300 : nodeX;
+    if (requiredRight > 5000 || downstreamMaxX + shift > 5000) {
+      return { ok: false, error: "画布右侧空间不足，请先使用自动排列整理节点后再插入" };
+    }
     shiftDownstream(nodes, edges, edge.target, shift);
 
     const nodeCopy = clone(node);
@@ -237,8 +248,9 @@
     const edges = clone(workflow.edges || []);
     const sourceCopy = nodes.find((item) => item.id === sourceId);
     const position = sourceCopy.position || { x: 170, y: 180 };
+    if (position.x + 300 > 5000) return { ok: false, error: "画布右侧空间不足，请先自动排列节点" };
     const endNode = clone(node);
-    endNode.position = { x: position.x + 300, y: position.y + (normalizeWhen(when) === "error" ? 150 : 0) };
+    endNode.position = { x: position.x + 300, y: Math.min(5000, position.y + (normalizeWhen(when) === "error" ? 150 : 0)) };
     nodes.push(endNode);
     edges.push(copyEdge({ source: sourceId, target: endNode.id, when }));
     return { ok: true, nodes, edges, selectedNodeId: endNode.id, createdNodeIds: [endNode.id] };
@@ -363,11 +375,13 @@
       nodeCopy.on_error = "branch";
       if (!errorEdge) {
         const existingIds = new Set(index.nodes.keys());
+        const errorX = (node.position?.x ?? 170) + 300;
+        if (errorX > 5000) return { ok: false, error: "画布右侧空间不足，请先自动排列节点" };
         const endNode = {
           id: makeId("end-error", options, existingIds),
           type: "end",
           params: {},
-          position: { x: (node.position?.x ?? 170) + 300, y: (node.position?.y ?? 180) + 150 },
+          position: { x: errorX, y: Math.min(5000, (node.position?.y ?? 180) + 150) },
         };
         nodes.push(endNode);
         edges.push({ source: nodeId, target: endNode.id, when: "error" });
@@ -416,6 +430,10 @@
     }
 
     for (const node of workflow.nodes) {
+      if (node.position && (
+        !Number.isFinite(node.position.x) || !Number.isFinite(node.position.y)
+        || node.position.x < 0 || node.position.y < 0 || node.position.x > 5000 || node.position.y > 5000
+      )) errors.push("节点位置必须在 0～5000 范围内");
       const outgoing = index.outgoing.get(node.id) || [];
       const labels = outgoing.map((edge) => normalizeWhen(edge.when));
       if (node.type === "end") {

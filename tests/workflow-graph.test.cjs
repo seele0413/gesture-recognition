@@ -70,7 +70,7 @@ test("inserting into true, false and error branches preserves the original branc
   for (const label of cases) {
     const source = label === "error" ? action("source", "branch") : { id: "source", type: "condition", params: { field: "confidence", operator: "gte", value: 0.5 }, position: { x: 170, y: 180 } };
     const target = end("target", 470, 180);
-    const other = label === "true" ? end("other", 470, 350) : null;
+    let other = label === "true" ? end("other", 470, 350) : null;
     const nodes = [source, target];
     const edges = [{ source: "source", target: "target", when: label }];
     if (label === "true") { nodes.push(other); edges.push({ source: "source", target: "other", when: "false" }); }
