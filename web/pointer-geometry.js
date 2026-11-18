@@ -107,6 +107,34 @@
     return mapped;
   }
 
+  function median(values) {
+    const sorted = values.slice().sort((a, b) => a - b);
+    const middle = Math.floor(sorted.length / 2);
+    return sorted.length % 2
+      ? sorted[middle]
+      : (sorted[middle - 1] + sorted[middle]) / 2;
+  }
+
+  function stableMedianPoint(samples, minSamples = 5, maxDeviation = 0.035) {
+    if (!Array.isArray(samples) || !Number.isInteger(minSamples) || minSamples < 3
+      || !Number.isFinite(maxDeviation) || maxDeviation <= 0 || maxDeviation >= 1) {
+      throw new TypeError("无效的校准采样参数");
+    }
+    if (samples.length < minSamples) return null;
+    if (!samples.every(finitePoint)) throw new TypeError("校准采样包含无效坐标");
+
+    const x = median(samples.map((point) => Number(point.x)));
+    const y = median(samples.map((point) => Number(point.y)));
+    const deviations = samples
+      .map((point) => Math.hypot(Number(point.x) - x, Number(point.y) - y))
+      .sort((a, b) => a - b);
+    // The 75th percentile tolerates one isolated tracking outlier while rejecting
+    // sustained movement during a calibration hold.
+    const spread = deviations[Math.ceil((deviations.length - 1) * 0.75)];
+    if (spread > maxDeviation) return null;
+    return { x, y, spread };
+  }
+
   function normalizedToClient(point, rect, mirrorX = false, homography = null) {
     if (!finitePoint(point) || !rect || !Number.isFinite(rect.left) || !Number.isFinite(rect.top)
       || !Number.isFinite(rect.width) || !Number.isFinite(rect.height) || rect.width <= 0 || rect.height <= 0) {
@@ -157,5 +185,6 @@
     nodePositionFromPointer,
     normalizedToClient,
     solveHomography,
+    stableMedianPoint,
   };
 });
