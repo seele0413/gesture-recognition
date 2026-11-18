@@ -44,9 +44,9 @@ class ControlStoreTests(unittest.TestCase):
         self.assertIsNone(self.store.get_display_page("product_center"))
 
     def test_display_page_default_cannot_be_deleted(self):
+        self.store.set_default_display_page_id("company_website")
         with self.assertRaisesRegex(ValueError, "默认展示页面"):
             self.store.delete_display_page("company_website")
-        self.store.set_default_display_page_id("company_website")
         with self.assertRaisesRegex(ValueError, "默认展示页面"):
             self.store.delete_display_page("company_website")
 

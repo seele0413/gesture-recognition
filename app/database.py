@@ -215,15 +215,23 @@ class ControlStore:
                 "INSERT OR IGNORE INTO media_assets (asset_id, title, filename, enabled) VALUES (?, ?, ?, 1)",
                 ("company-promo", "企业宣传片", "company-promo.mp4"),
             )
-            now = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
-            for sort_order, page in enumerate(DISPLAY_PAGES):
+            seeded_row = connection.execute(
+                "SELECT value FROM settings WHERE key = ?", ("display_pages_seeded",)
+            ).fetchone()
+            if not seeded_row:
+                now = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+                for sort_order, page in enumerate(DISPLAY_PAGES):
+                    connection.execute(
+                        """INSERT OR IGNORE INTO display_pages
+                           (page_id, title, description, path, page_type, url, parent_id,
+                            sort_order, enabled, created_at, updated_at)
+                           VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 1, ?, ?)""",
+                        (page.page_id, page.title, page.description, page.path, page.page_type,
+                         page.url, sort_order, now, now),
+                    )
                 connection.execute(
-                    """INSERT OR IGNORE INTO display_pages
-                       (page_id, title, description, path, page_type, url, parent_id,
-                        sort_order, enabled, created_at, updated_at)
-                       VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 1, ?, ?)""",
-                    (page.page_id, page.title, page.description, page.path, page.page_type,
-                     page.url, sort_order, now, now),
+                    "INSERT INTO settings (key, value) VALUES (?, ?)",
+                    ("display_pages_seeded", "1"),
                 )
             connection.execute(
                 "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
@@ -639,6 +647,13 @@ class ControlStore:
         }
         if not values["enabled"] and self.is_display_page_referenced(page_id):
             raise ValueError("该页面仍被工作流引用，请先修改或删除相关工作流")
+        if not values["enabled"]:
+            with self._lock, self._connection() as connection:
+                if connection.execute(
+                    "SELECT 1 FROM display_pages WHERE parent_id = ? AND enabled = 1 LIMIT 1",
+                    (page_id,),
+                ).fetchone():
+                    raise ValueError("该页面仍有启用的子页面，请先停用或调整子页面")
         with self._lock, self._connection() as connection:
             children = connection.execute(
                 "SELECT url FROM display_pages WHERE parent_id = ? AND enabled = 1", (page_id,)
