@@ -306,7 +306,7 @@ async function exportPointerDiagnostics() {
 function loadPointerCalibration() {
   try {
     const saved = JSON.parse(localStorage.getItem(POINTER_CALIBRATION_KEY) || "null");
-    if (saved?.version !== 2 || saved?.mirrorX !== pointerMirrorX || !Array.isArray(saved?.matrix)
+    if (saved?.mirrorX !== pointerMirrorX || !Array.isArray(saved?.matrix)
       || saved.matrix.length !== 8 || !saved.matrix.every(Number.isFinite)) return null;
     return saved;
   } catch (_error) {
@@ -410,11 +410,9 @@ function renderPointerCalibrationOverlay() {
   const target = POINTER_CALIBRATION_TARGETS[session.index];
   pointerCalibrationTarget.style.left = target.x * 100 + "%";
   pointerCalibrationTarget.style.top = target.y * 100 + "%";
-  pointerCalibrationHint.textContent = session.capturing
-    ? "正在采集稳定坐标 " + session.samples.length + "/5 · 保持手部不动，松开捏合确认"
-    : session.awaitingRelease
-      ? "已采集 " + session.points.length + "/4 · 松开捏合后继续"
-      : "请将光标对准" + target.label + "角圆点，捏合并保持约 0.2 秒后松开 · " + (session.index + 1) + "/4";
+  pointerCalibrationHint.textContent = session.awaitingRelease
+    ? "已采集 " + session.points.length + "/4 · 松开捏合后继续"
+    : "请将光标对准" + target.label + "角圆点并捏合确认 · " + (session.index + 1) + "/4";
   pointerCalibrationOverlay.hidden = false;
 }
 
@@ -429,9 +427,6 @@ function startPointerCalibration() {
   }
   pointerCalibrationSession = {
     points: [],
-    samples: [],
-    maxSpread: 0,
-    capturing: false,
     index: 0,
     awaitingRelease: lastPointerPressed,
   };
@@ -457,25 +452,20 @@ function cancelPointerCalibration(showMessage = true) {
   if (showMessage) setMessage("已取消四角校准");
 }
 
-function capturePointerCalibrationPoint(session) {
+function capturePointerCalibrationPoint(event) {
+  const session = pointerCalibrationSession;
   if (!session) return;
-  const sample = PointerGeometry.stableMedianPoint(session.samples, 5, 0.035);
-  if (!sample) {
-    session.samples = [];
-    session.capturing = false;
-    session.awaitingRelease = false;
-    setMessage("本次校准采样不足或手部移动较大，请对准目标点、保持稳定后重新捏合", "error");
-    renderPointerCalibrationOverlay();
+  const x = Number(event.x);
+  const y = Number(event.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 1 || y < 0 || y > 1) {
+    cancelPointerCalibration(false);
+    setMessage("校准坐标无效，请重新开始", "error");
     return;
   }
-
-  session.points.push({ x: sample.x, y: sample.y });
-  session.maxSpread = Math.max(session.maxSpread, sample.spread);
-  session.samples = [];
-  session.capturing = false;
+  session.points.push({ x: pointerMirrorX ? 1 - x : x, y });
   session.index += 1;
   if (session.index < POINTER_CALIBRATION_TARGETS.length) {
-    session.awaitingRelease = false;
+    session.awaitingRelease = true;
     renderPointerCalibrationOverlay();
     return;
   }
@@ -484,23 +474,15 @@ function capturePointerCalibrationPoint(session) {
       session.points,
       POINTER_CALIBRATION_TARGETS.map(({ x: targetX, y: targetY }) => ({ x: targetX, y: targetY })),
     );
-    pointerCalibration = {
-      version: 2,
-      matrix,
-      mirrorX: pointerMirrorX,
-      sampleCount: 5,
-      maxSpread: session.maxSpread,
-      savedAt: new Date().toISOString(),
-    };
+    pointerCalibration = { matrix, mirrorX: pointerMirrorX, savedAt: new Date().toISOString() };
     try { localStorage.setItem(POINTER_CALIBRATION_KEY, JSON.stringify(pointerCalibration)); } catch (_error) {}
     pointerCalibrationSession = null;
     pointerCalibrationOverlay.hidden = true;
     updatePointerCalibrationButton();
-    setMessage("四角校准完成：每个角均使用稳定采样中位数，已保存；现在可以测试节点拖拽", "ok");
+    setMessage("四角校准完成，已保存；现在可以准确抓取节点", "ok");
   } catch (error) {
     pointerCalibrationSession = null;
     pointerCalibrationOverlay.hidden = true;
-    updatePointerCalibrationButton();
     updatePointerCalibrationButton();
     setMessage(error.message || "四角校准失败，请重新采集", "error");
   }
@@ -627,36 +609,18 @@ function processHandPointerEvent(event) {
     if (session.awaitingRelease) {
       if (!event.pressed) {
         session.awaitingRelease = false;
-        session.capturing = false;
-        session.samples = [];
         pointerPressed = false;
         renderPointerCalibrationOverlay();
       }
       return;
     }
-    if (event.pressed) {
-      if (!pointerPressed) {
-        pointerPressed = true;
-        session.capturing = true;
-        session.samples = [];
-      }
-      if (session.capturing) {
-        const x = Number(event.x);
-        const y = Number(event.y);
-        if (Number.isFinite(x) && Number.isFinite(y) && x >= 0 && x <= 1 && y >= 0 && y <= 1) {
-          session.samples.push({ x: pointerMirrorX ? 1 - x : x, y });
-          if (session.samples.length > 12) session.samples.shift();
-          renderPointerCalibrationOverlay();
-        }
-      }
-    } else {
-      if (pointerPressed && session.capturing) {
-        pointerPressed = false;
-        capturePointerCalibrationPoint(session);
-      } else {
-        pointerPressed = false;
-      }
+    if (event.pressed && !pointerPressed) {
+      pointerPressed = true;
+      session.awaitingRelease = true;
+      capturePointerCalibrationPoint(event);
       renderPointerCalibrationOverlay();
+    } else if (!event.pressed) {
+      pointerPressed = false;
     }
     return;
   }
