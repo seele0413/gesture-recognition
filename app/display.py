@@ -8,17 +8,51 @@ from fastapi import WebSocket
 
 
 class DisplayCommandChannel:
-    """A single active browser executor with command-id matched acknowledgements."""
+    """A single active browser executor with page-readiness matched acknowledgements."""
 
     def __init__(self) -> None:
         self._active: WebSocket | None = None
         self._lock = asyncio.Lock()
         self._pending: dict[str, tuple[str, asyncio.Future]] = {}
+        self._ready_waiters: set[asyncio.Future] = set()
+        self._ready_page_id: str | None = None
+        self._ready_generation: int | None = None
         self.on_state_change: Callable[[bool], None] | None = None
 
     @property
     def connected(self) -> bool:
         return self._active is not None
+
+    @property
+    def ready(self) -> bool:
+        return self._active is not None and self._ready_page_id is not None
+
+    @property
+    def ready_page_id(self) -> str | None:
+        return self._ready_page_id if self.ready else None
+
+    @property
+    def ready_generation(self) -> int | None:
+        return self._ready_generation if self.ready else None
+
+    def _set_ready(self, ready: bool, page_id: str | None = None, generation: int | None = None) -> None:
+        previous = self.ready
+        if ready:
+            self._ready_page_id = page_id
+            self._ready_generation = generation
+        else:
+            self._ready_page_id = None
+            self._ready_generation = None
+
+        current = self.ready
+        if current and not previous:
+            for future in tuple(self._ready_waiters):
+                if not future.done():
+                    future.set_result(None)
+            self._ready_waiters.clear()
+
+        if current != previous and self.on_state_change:
+            self.on_state_change(current)
 
     async def connect(self, websocket: WebSocket) -> bool:
         async with self._lock:
@@ -27,8 +61,7 @@ class DisplayCommandChannel:
                 return False
             await websocket.accept()
             self._active = websocket
-        if self.on_state_change:
-            self.on_state_change(True)
+            self._set_ready(False)
         return True
 
     async def disconnect(self, websocket: WebSocket) -> None:
@@ -36,17 +69,45 @@ class DisplayCommandChannel:
             if self._active is not websocket:
                 return
             self._active = None
+            self._set_ready(False)
             pending = [future for _run_id, future in self._pending.values()]
             self._pending.clear()
+            ready_waiters = tuple(self._ready_waiters)
+            self._ready_waiters.clear()
+
         for future in pending:
             if not future.done():
                 future.set_exception(ConnectionError("展示执行客户端已断开"))
-        if self.on_state_change:
-            self.on_state_change(False)
+        for future in ready_waiters:
+            if not future.done():
+                future.set_exception(ConnectionError("展示页面尚未就绪，执行客户端已断开"))
 
     async def receive(self, websocket: WebSocket, message: Any) -> None:
-        if websocket is not self._active or not isinstance(message, dict) or message.get("type") != "ack":
+        if websocket is not self._active or not isinstance(message, dict):
             return
+
+        message_type = message.get("type")
+        if message_type == "display:loading":
+            self._set_ready(False)
+            return
+
+        if message_type == "display:ready":
+            page_id = message.get("page_id")
+            generation = message.get("generation")
+            if (
+                not isinstance(page_id, str)
+                or not page_id
+                or isinstance(generation, bool)
+                or not isinstance(generation, int)
+                or generation < 0
+            ):
+                return
+            self._set_ready(True, page_id, generation)
+            return
+
+        if message_type != "ack":
+            return
+
         command_id = message.get("command_id")
         run_id = message.get("run_id")
         pending = self._pending.get(command_id) if isinstance(command_id, str) else None
@@ -65,7 +126,20 @@ class DisplayCommandChannel:
             result = message.get("result", {})
             future.set_result(result if isinstance(result, dict) else {"value": result})
 
+    async def _wait_until_ready(self, timeout_ms: int) -> None:
+        if self.ready:
+            return
+        future = asyncio.get_running_loop().create_future()
+        self._ready_waiters.add(future)
+        try:
+            await asyncio.wait_for(future, max(100, min(30000, timeout_ms)) / 1000)
+        except asyncio.TimeoutError as error:
+            raise TimeoutError("展示页面尚未完成加载") from error
+        finally:
+            self._ready_waiters.discard(future)
+
     async def execute(self, command: dict[str, Any], timeout_ms: int) -> dict[str, Any]:
+        await self._wait_until_ready(timeout_ms)
         websocket = self._active
         command_id = command["command_id"]
         if not websocket:
