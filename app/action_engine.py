@@ -25,6 +25,12 @@ class ActionSpec:
     schema: dict[str, Any]
     idempotent: bool
     handler: ActionHandler
+    properties_provider: Callable[[], dict[str, dict]] | None = None
+
+    def current_schema(self) -> dict[str, Any]:
+        if self.properties_provider is None:
+            return self.schema
+        return {**self.schema, "properties": self.properties_provider()}
 
 
 class ActionRegistry:
@@ -34,6 +40,7 @@ class ActionRegistry:
     def register(
         self, name: str, *, properties: dict[str, dict], required: list[str],
         handler: ActionHandler, idempotent: bool,
+        properties_provider: Callable[[], dict[str, dict]] | None = None,
     ) -> None:
         if name in self._actions:
             raise ValueError(f"动作已注册：{name}")
@@ -45,14 +52,15 @@ class ActionRegistry:
             },
             idempotent=bool(idempotent),
             handler=handler,
+            properties_provider=properties_provider,
         )
 
     def schema_map(self) -> dict[str, dict[str, Any]]:
-        return {name: spec.schema for name, spec in self._actions.items()}
+        return {name: spec.current_schema() for name, spec in self._actions.items()}
 
     def describe(self) -> list[dict[str, Any]]:
         return [
-            {"name": spec.name, "schema": spec.schema, "idempotent": spec.idempotent}
+            {"name": spec.name, "schema": spec.current_schema(), "idempotent": spec.idempotent}
             for spec in sorted(self._actions.values(), key=lambda item: item.name)
         ]
 
