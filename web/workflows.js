@@ -87,7 +87,12 @@ let pointerDownPoint = null;
 let pointerGrabOffset = null;
 let pointerMoved = false;
 let mouseDragOffset = null;
-const pointerEventBuffer = new PointerEventBuffer();
+// PointerEventBuffer is exposed by its UMD wrapper as a namespace object.
+ // Keep the editor usable even if the optional hand-pointer helper failed to load.
+const PointerEventBufferClass = window.PointerEventBuffer?.PointerEventBuffer;
+const pointerEventBuffer = typeof PointerEventBufferClass === "function"
+  ? new PointerEventBufferClass()
+  : null;
 let pointerAnimationFrame = null;
 let pointerDiagnosticsTimer = null;
 let pointerCalibrationSession = null;
@@ -312,7 +317,8 @@ function loadPointerCalibration() {
 function updatePointerCalibrationButton() {
   if (!ui.pointerCalibrate) return;
   const calibrating = Boolean(pointerCalibrationSession);
-  ui.pointerCalibrate.disabled = !pointerModeEnabled && !calibrating;
+  const pointerAvailable = Boolean(pointerEventBuffer && window.PointerGeometry);
+  ui.pointerCalibrate.disabled = !pointerAvailable || (!pointerModeEnabled && !calibrating);
   ui.pointerCalibrate.textContent = calibrating
     ? "取消校准"
     : pointerCalibration
@@ -360,6 +366,10 @@ async function refreshPointerMode() {
 async function togglePointerMode() {
   ui.pointerMode.disabled = true;
   try {
+    if (!pointerEventBuffer || !window.PointerGeometry) {
+      setMessage("手势指针组件未加载；鼠标和键盘编辑仍然可用，请刷新页面或检查静态资源", "error");
+      return;
+    }
     if (!pointerModeEnabled) {
       const streamStatus = await api("/api/status");
       if (streamStatus.state !== "running") {
@@ -507,7 +517,7 @@ function releaseHandPointer() {
     window.cancelAnimationFrame(pointerAnimationFrame);
     pointerAnimationFrame = null;
   }
-  pointerEventBuffer.clear();
+  pointerEventBuffer?.clear();
   pointerMetrics.lastRafScheduledAt = null;
   if (pointerDragNodeId) pointerMetrics.dragCancels += 1;
   pointerPressed = lastPointerPressed;
@@ -644,7 +654,7 @@ function processHandPointer(event) {
 }
 
 function handleHandPointer(event) {
-  if (!event || typeof event !== "object") return;
+  if (!pointerEventBuffer || !event || typeof event !== "object") return;
   lastPointerPressed = Boolean(event.pressed);
   recordPointerReceived(event);
   pointerEventBuffer.push(event);
@@ -1512,22 +1522,62 @@ function deleteNode() {
 }
 
 async function initialize() {
-  try {
-    const [actionResponse, workflowResponse] = await Promise.all([api("/api/actions"), api("/api/workflows")]);
-    actionDefinitions = actionResponse.actions;
-    workflows = workflowResponse.workflows;
+  const errors = [];
+  const pointerAvailable = Boolean(pointerEventBuffer && window.PointerGeometry);
+  ui.pointerMode.disabled = !pointerAvailable;
+  if (!pointerAvailable) {
+    ui.pointerMode.title = "手势指针组件未加载；鼠标和键盘编辑仍然可用";
+    ui.pointerCalibrate.disabled = true;
+  }
+
+  // Load the action catalogue and saved workflows independently. A failure in
+  // one optional panel must not leave the whole editor in its static loading state.
+  const [actionResult, workflowResult] = await Promise.allSettled([
+    api("/api/actions"),
+    api("/api/workflows"),
+  ]);
+
+  if (actionResult.status === "fulfilled" && Array.isArray(actionResult.value.actions)) {
+    actionDefinitions = actionResult.value.actions;
     renderActionLibrary();
+  } else {
+    actionDefinitions = [];
+    renderActionLibrary();
+    ui.actionLibrary.append(make("p", "muted", "动作加载失败；请检查服务连接后刷新"));
+    errors.push("动作列表加载失败：" + (actionResult.reason?.message || "响应格式无效"));
+  }
+
+  if (workflowResult.status === "fulfilled" && Array.isArray(workflowResult.value.workflows)) {
+    workflows = workflowResult.value.workflows;
     renderWorkflowOptions();
-    if (workflows.length) await loadWorkflow(workflows[0].id);
-    else {
+    if (workflows.length) {
+      try {
+        await loadWorkflow(workflows[0].id);
+      } catch (error) {
+        errors.push("工作流载入失败：" + error.message);
+        setEditingEnabled(Boolean(workflow));
+        renderCanvas();
+      }
+    } else {
       setEditingEnabled(false);
       renderCanvas();
     }
-    await refreshRuns();
-    await refreshDisplayStatus();
-  } catch (error) {
-    setMessage(error.message, "error");
+  } else {
+    workflows = [];
+    renderWorkflowOptions();
+    setEditingEnabled(false);
+    renderCanvas();
+    errors.push("工作流列表加载失败：" + (workflowResult.reason?.message || "响应格式无效"));
   }
+
+  const [runsResult, displayResult] = await Promise.allSettled([
+    refreshRuns(),
+    refreshDisplayStatus(),
+  ]);
+  if (runsResult.status === "rejected") errors.push("运行记录加载失败：" + runsResult.reason.message);
+  if (displayResult.status === "rejected") errors.push("展示页面状态读取失败：" + displayResult.reason.message);
+  if (!pointerAvailable) errors.push("手势指针模块未加载；鼠标和键盘编辑不受影响");
+  if (errors.length) setMessage(errors.join("；"), "error");
 }
 
 ui.newWorkflow.addEventListener("click", () => createWorkflow().catch((error) => setMessage(error.message, "error")));
