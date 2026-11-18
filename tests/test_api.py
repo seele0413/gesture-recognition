@@ -141,6 +141,54 @@ class ApiTests(unittest.TestCase):
         self.assertIn("page_id: pageId", registered_script)
         self.assertIn('type: "display:ready"', registered_script)
 
+    def test_display_channel_requires_page_ready_before_workflow_control(self):
+        initial = self.client.get("/api/workflow-status")
+        self.assertEqual(initial.status_code, 200)
+        self.assertFalse(initial.json()["display_connected"])
+        self.assertFalse(initial.json()["display_ready"])
+        self.assertIsNone(initial.json()["display_page_id"])
+        self.assertIsNone(initial.json()["display_generation"])
+
+        with self.client.websocket_connect(
+            "/ws/display",
+            headers={"origin": "http://127.0.0.1"},
+        ) as websocket:
+            connected = self.client.get("/api/workflow-status").json()
+            self.assertTrue(connected["display_connected"])
+            self.assertFalse(connected["display_ready"])
+
+            websocket.send_json({
+                "type": "display:ready",
+                "page_id": "promo",
+                "generation": 7,
+            })
+            ready = self.client.get("/api/workflow-status").json()
+            self.assertTrue(ready["display_connected"])
+            self.assertTrue(ready["display_ready"])
+            self.assertEqual(ready["display_page_id"], "promo")
+            self.assertEqual(ready["display_generation"], 7)
+
+            websocket.send_json({
+                "type": "display:loading",
+                "page_id": "factory",
+                "generation": 8,
+            })
+            loading = self.client.get("/api/workflow-status").json()
+            self.assertTrue(loading["display_connected"])
+            self.assertFalse(loading["display_ready"])
+            self.assertIsNone(loading["display_page_id"])
+
+    def test_display_shell_reports_page_readiness_to_backend(self):
+        shell = self.client.get("/static/display-shell.js").text
+        self.assertIn('function sendDisplayState(type, payload = {})', shell)
+        self.assertIn('sendDisplayState("display:loading"', shell)
+        self.assertIn('sendDisplayState("display:ready"', shell)
+        self.assertIn('setShellStatus("connecting", "展示控制中心已连接 · 等待展示页面就绪")', shell)
+        workflow_status = self.client.get("/api/workflow-status").json()
+        self.assertIn("display_ready", workflow_status)
+        self.assertIn("display_page_id", workflow_status)
+        self.assertIn("display_generation", workflow_status)
+
     def test_external_display_page_crud_updates_live_action_schema(self):
         created = self.client.post("/api/display/pages", json={
             "page_id": "energy_storage", "title": "储能系列产品",
