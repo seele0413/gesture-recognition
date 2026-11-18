@@ -140,6 +140,7 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
     register_ppt_actions(action_registry, store, presentation_adapter)
     workflow_engine = WorkflowEngine(store, action_registry, hub.publish_from_thread)
     display_channel.on_state_change = workflow_engine.set_display_connected
+    display_channel.on_ready_change = workflow_engine.set_display_ready
     hub.add_listener(workflow_engine.on_event)
 
     @asynccontextmanager
