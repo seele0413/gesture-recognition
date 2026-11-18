@@ -65,9 +65,7 @@ async function createHarness(initialPages) {
     throw new Error("Unexpected test request: " + url + " " + (options.method || "GET"));
   };
   vm.runInNewContext(source, { document, fetch, window: { confirm: () => true } });
-  await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
   return { elements, pages, requests };
 }
 
