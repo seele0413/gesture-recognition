@@ -30,6 +30,12 @@ function setShellStatus(state, message) {
   elements.label.textContent = message;
 }
 
+function sendDisplayState(type, payload = {}) {
+  if (displaySocket?.readyState !== WebSocket.OPEN) return false;
+  displaySocket.send(JSON.stringify({ type, ...payload }));
+  return true;
+}
+
 function pageLabel(pageId) {
   return pages.get(pageId)?.title || pageId;
 }
@@ -129,6 +135,7 @@ function navigatePage(pageId, timeoutMs = COMMAND_TIMEOUT_FALLBACK_MS) {
   const generation = ++pageGeneration;
   currentPageId = null;
   setShellStatus("switching", "正在切换展示页面 · " + page.title);
+  sendDisplayState("display:loading", { page_id: pageId, generation });
 
   return new Promise((resolve, reject) => {
     const timer = window.setTimeout(() => {
@@ -146,7 +153,8 @@ function navigatePage(pageId, timeoutMs = COMMAND_TIMEOUT_FALLBACK_MS) {
       resolve: () => {
         currentPageId = pageId;
         pageReadyWaiter = null;
-        const connectedState = displaySocket?.readyState === WebSocket.OPEN ? "connected" : "connecting";
+        const readyNotified = sendDisplayState("display:ready", { page_id: pageId, generation });
+        const connectedState = readyNotified ? "connected" : "connecting";
         setShellStatus(connectedState, pageType === "external"
           ? "外部网页导航已完成 · " + page.title
           : "展示控制中心 · " + page.title);
@@ -329,9 +337,24 @@ function connectDisplayCommands() {
   const socket = new WebSocket(protocol + "//" + window.location.host + "/ws/display");
   displaySocket = socket;
   socket.addEventListener("open", () => {
-    if (displaySocket === socket) {
-      setShellStatus("connected", "展示控制中心已连接 · " + pageLabel(currentPageId || defaultPageId || "展示页"));
+    if (displaySocket !== socket) return;
+    if (pageReadyWaiter) {
+      sendDisplayState("display:loading", {
+        page_id: pageReadyWaiter.pageId,
+        generation: pageReadyWaiter.generation,
+      });
+      setShellStatus("connecting", "展示控制中心已连接 · 等待展示页面就绪");
+      return;
     }
+    if (currentPageId) {
+      sendDisplayState("display:ready", {
+        page_id: currentPageId,
+        generation: pageGeneration,
+      });
+      setShellStatus("connected", "展示控制中心已连接 · " + pageLabel(currentPageId));
+      return;
+    }
+    setShellStatus("connecting", "展示控制中心已连接 · 等待展示页面就绪");
   });
   socket.addEventListener("message", (message) => {
     try {
