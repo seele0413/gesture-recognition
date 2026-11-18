@@ -12,7 +12,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  unittest:
+  python-tests:
+    name: Python unit tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -24,22 +25,30 @@ jobs:
           python-version: "3.11"
           cache: pip
           cache-dependency-path: requirements-dev.txt
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
       - name: Install dependencies
         run: python -m pip install --upgrade pip && python -m pip install -r requirements-dev.txt
       - name: Run Python unit tests
         run: python -m unittest discover -s tests -v
-      - name: Check browser JavaScript and run pointer geometry tests
+
+  javascript-tests:
+    name: Browser JavaScript tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Check browser JavaScript and run tests
         run: |
           node --check web/pointer-geometry.js
           node --check web/pointer-event-buffer.js
+          node --check web/workflow-graph.js
           node --check web/display-shell.js
           node --check web/display-page.js
           node --check web/player.js
-          node --check web/workflow-graph.js
           node --check web/workflows.js
           node --check web/display-pages.js
           node --test tests/pointer-geometry.test.cjs tests/pointer-event-buffer.test.cjs tests/workflow-browser-bootstrap.test.cjs tests/workflow-graph.test.cjs tests/display-pages-ui.test.cjs
