@@ -142,9 +142,11 @@ function renderPageNode(page, childrenByParent, visited = new Set()) {
   actions.className = "page-node-actions";
   if (page.page_type === "external") {
     actions.append(makeButton("编辑", () => openEditor(page)));
-    if (page.enabled && page.page_id !== defaultPageId) {
-      actions.append(makeButton("设为默认", () => setDefault(page.page_id), "page-action-primary"));
-    }
+  }
+  if (page.enabled && page.page_id !== defaultPageId) {
+    actions.append(makeButton("设为默认", () => setDefault(page.page_id), "page-action-primary"));
+  }
+  if (page.page_type === "external") {
     actions.append(makeButton(page.enabled ? "停用" : "启用", () => toggleEnabled(page), ""));
     actions.append(makeButton("删除", () => deletePage(page), "page-action-danger"));
   }
