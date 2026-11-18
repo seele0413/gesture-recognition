@@ -134,7 +134,7 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
     display_channel = DisplayCommandChannel()
     browser_adapter = BrowserCommandAdapter(display_channel)
     action_registry = ActionRegistry()
-    register_web_actions(action_registry, browser_adapter, store.get_display_page_ids)
+    register_web_actions(action_registry, browser_adapter, store.get_display_page_ids, store.get_display_page_labels)
     register_video_actions(action_registry, store, browser_adapter)
     presentation_adapter = PresentationAdapter(store)
     register_ppt_actions(action_registry, store, presentation_adapter)

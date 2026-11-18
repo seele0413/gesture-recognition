@@ -585,6 +585,24 @@ class ControlStore:
             ).fetchall()
         return tuple(row["page_id"] for row in rows)
 
+    def get_display_page_labels(self) -> dict[str, str]:
+        pages = {page["page_id"]: page for page in self.get_display_pages()}
+        labels: dict[str, str] = {}
+        for page_id, page in pages.items():
+            names: list[str] = []
+            visited: set[str] = set()
+            current = page
+            while current:
+                current_id = current["page_id"]
+                if current_id in visited:
+                    break
+                visited.add(current_id)
+                names.append(current["title"])
+                parent_id = current["parent_id"]
+                current = pages.get(parent_id) if parent_id else None
+            labels[page_id] = " / ".join(reversed(names))
+        return labels
+
     def get_default_display_page_id(self) -> str:
         with self._lock, self._connection() as connection:
             row = connection.execute(
