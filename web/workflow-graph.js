@@ -213,7 +213,7 @@
         id: makeId("end-false", options, existingIds),
         type: "end",
         params: {},
-        position: { x: nodeX + 300, y: nodeY + 180 },
+        position: { x: nodeX + 300, y: Math.min(5000, nodeY + 180) },
       };
       nodes.push(falseEnd);
       edges.push({ source: nodeCopy.id, target: edge.target, when: "true" });

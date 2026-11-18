@@ -511,13 +511,19 @@ function pointerClientPoint(event, useCalibration = true) {
 
 function clientToWorld(clientX, clientY) {
   const rect = ui.canvasViewport.getBoundingClientRect();
-  return PointerGeometry.clientToWorld(
-    { x: clientX, y: clientY },
-    rect,
-    ui.canvasViewport.scrollLeft,
-    ui.canvasViewport.scrollTop,
-    zoom,
-  );
+  if (window.PointerGeometry?.clientToWorld) {
+    return PointerGeometry.clientToWorld(
+      { x: clientX, y: clientY },
+      rect,
+      ui.canvasViewport.scrollLeft,
+      ui.canvasViewport.scrollTop,
+      zoom,
+    );
+  }
+  return {
+    x: (clientX - rect.left + ui.canvasViewport.scrollLeft) / zoom,
+    y: (clientY - rect.top + ui.canvasViewport.scrollTop) / zoom,
+  };
 }
 
 function releaseHandPointer() {
@@ -1492,12 +1498,17 @@ function moveNode(nodeId, clientX, clientY, grabOffset = null) {
     x: (card?.offsetWidth || 236) / 2,
     y: (card?.offsetHeight || 106) / 2,
   };
-  node.position = PointerGeometry.nodePositionFromPointer(
-    worldPoint,
-    offset,
-    { width: ui.canvasWorld.clientWidth, height: ui.canvasWorld.clientHeight },
-    { width: card?.offsetWidth || 236, height: card?.offsetHeight || 106 },
-  );
+  node.position = window.PointerGeometry?.nodePositionFromPointer
+    ? PointerGeometry.nodePositionFromPointer(
+      worldPoint,
+      offset,
+      { width: ui.canvasWorld.clientWidth, height: ui.canvasWorld.clientHeight },
+      { width: card?.offsetWidth || 236, height: card?.offsetHeight || 106 },
+    )
+    : {
+      x: Math.max(0, Math.min(5000, Math.round(worldPoint.x - offset.x))),
+      y: Math.max(0, Math.min(5000, Math.round(worldPoint.y - offset.y))),
+    };
   if (card) {
     card.style.left = node.position.x + "px";
     card.style.top = node.position.y + "px";
