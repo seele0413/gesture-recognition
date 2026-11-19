@@ -566,8 +566,11 @@ class ApiTests(unittest.TestCase):
         workflow_page = self.client.get("/workflows").text
         self.assertIn('id="pointerMode"', workflow_page)
         self.assertIn('id="pointerMirror"', workflow_page)
-        self.assertIn("/static/pointer-event-buffer.js?v=20261118-workflow-fix-1", workflow_page)
-        self.assertIn("/static/workflows.js?v=20261118-workflow-fix-1", workflow_page)
+        self.assertIn("/static/pointer-event-buffer.js?v=20261118-graph-editor-1", workflow_page)
+        self.assertIn("/static/workflow-graph.js?v=20261118-graph-editor-1", workflow_page)
+        self.assertIn("/static/workflows.js?v=20261118-graph-editor-1", workflow_page)
+        self.assertIn('id="undoWorkflow"', workflow_page)
+        self.assertIn('id="redoWorkflow"', workflow_page)
         self.assertIn("/api/workflows", self.client.get("/static/workflows.js").text)
         self.assertEqual(
             self.client.get("/api/media-assets").json()["media_assets"][0]["id"],

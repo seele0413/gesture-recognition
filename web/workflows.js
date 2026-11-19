@@ -9,6 +9,8 @@ const ui = {
   deleteWorkflow: document.getElementById("deleteWorkflow"),
   validateWorkflow: document.getElementById("validateWorkflow"),
   dryRunWorkflow: document.getElementById("dryRunWorkflow"),
+  undoWorkflow: document.getElementById("undoWorkflow"),
+  redoWorkflow: document.getElementById("redoWorkflow"),
   toggleWorkflow: document.getElementById("toggleWorkflow"),
   actionLibrary: document.getElementById("actionLibrary"),
   triggerType: document.getElementById("triggerType"),
@@ -68,6 +70,12 @@ let workflows = [];
 let workflow = null;
 let actionDefinitions = [];
 let selectedNodeId = null;
+let selectedEdgeKey = null;
+let linkHistoryBefore = null;
+let mouseHistoryBefore = null;
+let pointerHistoryBefore = null;
+let propertyHistoryBefore = null;
+const graphHistory = window.WorkflowGraph.createHistory(80);
 let linkSourceId = null;
 let zoom = 1;
 let activeRunId = null;
@@ -503,13 +511,19 @@ function pointerClientPoint(event, useCalibration = true) {
 
 function clientToWorld(clientX, clientY) {
   const rect = ui.canvasViewport.getBoundingClientRect();
-  return PointerGeometry.clientToWorld(
-    { x: clientX, y: clientY },
-    rect,
-    ui.canvasViewport.scrollLeft,
-    ui.canvasViewport.scrollTop,
-    zoom,
-  );
+  if (window.PointerGeometry?.clientToWorld) {
+    return PointerGeometry.clientToWorld(
+      { x: clientX, y: clientY },
+      rect,
+      ui.canvasViewport.scrollLeft,
+      ui.canvasViewport.scrollTop,
+      zoom,
+    );
+  }
+  return {
+    x: (clientX - rect.left + ui.canvasViewport.scrollLeft) / zoom,
+    y: (clientY - rect.top + ui.canvasViewport.scrollTop) / zoom,
+  };
 }
 
 function releaseHandPointer() {
@@ -520,6 +534,8 @@ function releaseHandPointer() {
   pointerEventBuffer?.clear();
   pointerMetrics.lastRafScheduledAt = null;
   if (pointerDragNodeId) pointerMetrics.dragCancels += 1;
+  if (pointerDragNodeId && pointerMoved && pointerHistoryBefore) pushGraphHistory(pointerHistoryBefore);
+  pointerHistoryBefore = null;
   pointerPressed = lastPointerPressed;
   pointerDownTarget = null;
   pointerDragNodeId = null;
@@ -544,7 +560,9 @@ function beginHandPointerPress(clientX, clientY) {
     }
     const node = findNode(nodeId);
     if (!node) return;
+    pointerHistoryBefore = graphSnapshot();
     selectedNodeId = nodeId;
+    selectedEdgeKey = null;
     updateNodeSelectionState();
     renderInspector();
     const worldPoint = clientToWorld(clientX, clientY);
@@ -571,7 +589,9 @@ function moveHandPointerPress(clientX, clientY) {
 
 function endHandPointerPress() {
   if (pointerDragNodeId) pointerMetrics.dragReleases += 1;
-  if (!pointerMoved && !pointerDragNodeId && pointerDownTarget instanceof HTMLElement) {
+  if (pointerDragNodeId && pointerMoved && pointerHistoryBefore) pushGraphHistory(pointerHistoryBefore);
+  pointerHistoryBefore = null;
+  if (!pointerMoved && !pointerDragNodeId && pointerDownTarget instanceof Element) {
     const target = pointerDownTarget.closest("button, a, [role='button'], input, select, textarea") || pointerDownTarget;
     if (!target.matches(":disabled")) {
       if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) {
@@ -672,6 +692,57 @@ function handleHandPointer(event) {
   });
 }
 
+function graphSnapshot() {
+  return workflow ? WorkflowGraph.snapshot(workflow) : null;
+}
+
+function pushGraphHistory(before) {
+  if (!before) return;
+  graphHistory.pushSnapshot(before);
+  refreshHistoryButtons();
+}
+
+function refreshHistoryButtons() {
+  if (!ui.undoWorkflow || !ui.redoWorkflow) return;
+  ui.undoWorkflow.disabled = !workflow || !graphHistory.canUndo;
+  ui.redoWorkflow.disabled = !workflow || !graphHistory.canRedo;
+}
+
+function restoreGraphHistory(state, message) {
+  if (!workflow || !state) return;
+  WorkflowGraph.restore(workflow, state);
+  selectedNodeId = null;
+  selectedEdgeKey = null;
+  linkSourceId = null;
+  linkHistoryBefore = null;
+  renderTrigger();
+  renderCanvas();
+  renderInspector();
+  refreshHistoryButtons();
+  setMessage(message);
+}
+
+function undoGraphEdit() {
+  if (!workflow) return;
+  const state = graphHistory.undo(workflow);
+  if (state) restoreGraphHistory(state, "已撤销上一步编辑");
+}
+
+function redoGraphEdit() {
+  if (!workflow) return;
+  const state = graphHistory.redo(workflow);
+  if (state) restoreGraphHistory(state, "已恢复下一步编辑");
+}
+
+function commitGraphMutation(mutator, message) {
+  if (!workflow) return false;
+  const before = graphSnapshot();
+  mutator();
+  pushGraphHistory(before);
+  if (message) setMessage(message);
+  return true;
+}
+
 function currentNode() {
   return workflow?.nodes.find((node) => node.id === selectedNodeId) || null;
 }
@@ -698,6 +769,7 @@ function refreshHeader() {
   ui.workflowDescription.value = workflow?.description || "";
   ui.toggleWorkflow.textContent = workflow?.enabled ? "禁用" : "启用";
   ui.workflowSelect.value = workflow?.id || "";
+  refreshHistoryButtons();
 }
 
 function updateHeaderData() {
@@ -730,7 +802,12 @@ async function loadWorkflow(workflowId) {
   const response = await api("/api/workflows/" + encodeURIComponent(workflowId));
   workflow = response.workflow;
   selectedNodeId = null;
+  selectedEdgeKey = null;
   linkSourceId = null;
+  linkHistoryBefore = null;
+  propertyHistoryBefore = null;
+  graphHistory.clear();
+  refreshHistoryButtons();
   nodeStatuses.clear();
   activeRunId = null;
   await loadVersions();
@@ -785,117 +862,93 @@ function defaultNode(type, action = "") {
   return { id, type: "end", params: {} };
 }
 
-function addNode(node) {
+function addNode(node, options = {}) {
   if (!workflow) return;
-  if (node.type === "condition") {
-    addConditionNode(node);
-    return;
-  }
-  const requestedPosition = node.position;
-  const edge = findInsertEdge();
-  if (!edge) {
-    if (node.type === "end") {
-      const sourceNode = findNode(selectedNodeId);
-      if (sourceNode && sourceNode.type !== "end") {
-        const when = sourceNode.type === "condition" ? (ui.edgeWhen.value || undefined) : undefined;
-        if (workflow.edges.some((item) => item.source === sourceNode.id && item.when === when)) {
-          setMessage("所选路径已经有后继节点", "error");
-          return;
-        }
-        node.position = requestedPosition || { x: sourceNode.position.x + 300, y: sourceNode.position.y };
-        workflow.nodes.push(node);
-        const newEdge = { source: sourceNode.id, target: node.id };
-        if (when) newEdge.when = when;
-        workflow.edges.push(newEdge);
-        selectedNodeId = node.id;
-        renderCanvas();
-        renderInspector();
-        return;
-      }
-    }
-    setMessage("请选择一条普通执行路径再插入节点", "error");
-    return;
-  }
-  const source = edge.source;
-  const target = edge.target;
-  workflow.edges = workflow.edges.filter((item) => item !== edge);
-  const previousTarget = findNode(target);
-  if (node.type === "end") {
-    if (previousTarget?.type === "end" && workflow.edges.every((item) => item.target !== target && item.source !== target)) {
-      workflow.nodes = workflow.nodes.filter((item) => item.id !== target);
-    }
-    node.position = requestedPosition || { x: findNode(source)?.position?.x + 300 || 470, y: previousTarget?.position?.y || 180 };
-    workflow.nodes.push(node);
-    if (source) {
-      const ending = { source, target: node.id };
-      if (edge.when) ending.when = edge.when;
-      workflow.edges.push(ending);
-    }
-    selectedNodeId = node.id;
-    renderCanvas();
-    renderInspector();
-    return;
-  }
-  node.position = requestedPosition || { x: source ? (findNode(source)?.position?.x || 100) + 300 : 170, y: findNode(target)?.position?.y || 180 };
-  workflow.nodes.push(node);
-  if (source) {
-    const upstream = { source, target: node.id };
-    if (edge.when) upstream.when = edge.when;
-    workflow.edges.push(upstream);
-  }
-  workflow.edges.push({ source: node.id, target });
-  selectedNodeId = node.id;
-  clearMessage();
-  renderCanvas();
-  renderInspector();
-}
+  const before = graphSnapshot();
 
-function addConditionNode(node) {
-  const end = workflow.nodes.find((item) => item.type === "end" && workflow.edges.some((edge) => edge.target === item.id));
-  let incoming = end && workflow.edges.find((edge) => edge.target === end.id && edge.when === undefined);
-  if (!end) {
-    const loneEnd = workflow.nodes.find((item) => item.type === "end");
-    if (loneEnd && workflow.edges.length === 0) {
-      workflow.nodes = workflow.nodes.filter((item) => item.id !== loneEnd.id);
-      node.position = { x: 170, y: 240 };
-      workflow.nodes.push(node);
-      addConditionEnds(node);
+  if (node.type === "end") {
+    const result = WorkflowGraph.addEndNode(
+      workflow, node, selectedNodeId, ui.edgeWhen.value || undefined,
+    );
+    if (!result.ok) {
+      setMessage(result.error, "error");
       return;
     }
-  }
-  if (!incoming) {
-    setMessage("条件分支只能插入到一个普通执行路径的结束位置", "error");
+    applyGraphResult(result, before, "结束节点已添加");
     return;
   }
-  const oldEndId = end.id;
-  const previousId = incoming.source;
-  node.position = { x: (findNode(previousId)?.position?.x || 100) + 300, y: findNode(oldEndId)?.position?.y || 180 };
-  workflow.edges = workflow.edges.filter((edge) => edge !== incoming && edge.target !== oldEndId);
-  workflow.nodes = workflow.nodes.filter((item) => item.id !== oldEndId);
-  workflow.nodes.push(node);
-  workflow.edges.push({ source: previousId, target: node.id });
-  addConditionEnds(node);
+
+  const resolution = WorkflowGraph.resolveInsertEdge(workflow, {
+    selectedNodeId,
+    selectedEdgeKey: options.edgeKey || selectedEdgeKey,
+  });
+  if (!resolution.ok) {
+    highlightInsertEdges(resolution.candidates || []);
+    const messages = {
+      "multiple-terminal-paths": "当前有多个结束分支，请点击目标连线上的 +，再选择要添加的节点",
+      "selected-node-has-branches": "所选节点有多个出口，请点击要插入的分支连线上的 +",
+      "selected-node-has-no-output": "所选节点没有可插入的后继路径，请先连接该节点",
+      "selected-edge-missing": "所选连线已变化，请重新选择",
+      "end-has-multiple-incoming": "该结束节点有多个入口，请选择具体连线",
+    };
+    setMessage(messages[resolution.reason] || "无法确定插入位置，请先选择一个节点或连线", "error");
+    return;
+  }
+
+  const result = WorkflowGraph.insertNodeAtEdge(workflow, node, resolution.edge, {
+    position: options.position,
+  });
+  if (!result.ok) {
+    setMessage(result.error, "error");
+    return;
+  }
+  const message = node.type === "condition"
+    ? "条件节点已插入：true 继续原流程，false 默认结束；可继续在任一分支连线上添加节点"
+    : "节点已插入，原有执行路径已自动接续";
+  applyGraphResult(result, before, message);
 }
 
-function addConditionEnds(node) {
-  const yes = { id: "end-yes-" + crypto.randomUUID().slice(0, 6), type: "end", params: {}, position: { x: node.position.x + 320, y: node.position.y - 70 } };
-  const no = { id: "end-no-" + crypto.randomUUID().slice(0, 6), type: "end", params: {}, position: { x: node.position.x + 320, y: node.position.y + 100 } };
-  workflow.nodes.push(yes, no);
-  workflow.edges.push({ source: node.id, target: yes.id, when: "true" }, { source: node.id, target: no.id, when: "false" });
-  selectedNodeId = node.id;
-  clearMessage();
+function applyGraphResult(result, before, message) {
+  if (!result || !result.ok) {
+    setMessage(result?.error || "图操作失败", "error");
+    return false;
+  }
+  workflow.nodes = result.nodes;
+  workflow.edges = result.edges;
+  selectedNodeId = result.selectedNodeId || null;
+  selectedEdgeKey = null;
+  linkSourceId = null;
+  linkHistoryBefore = null;
+  ui.linkMode.setAttribute("aria-pressed", "false");
+  pushGraphHistory(before);
   renderCanvas();
   renderInspector();
+  clearInsertEdgeHighlights();
+  if (message) setMessage(message);
+  return true;
 }
 
-function findInsertEdge() {
-  const selected = findNode(selectedNodeId);
-  const requestedWhen = ui.edgeWhen.value || undefined;
-  if (selected && selected.type !== "end") {
-    const edge = workflow.edges.find((item) => item.source === selected.id && item.when === requestedWhen);
-    if (edge) return edge;
+function highlightInsertEdges(edges) {
+  const keys = new Set(edges.map((edge) => WorkflowGraph.edgeKey(edge)));
+  for (const [key, record] of edgeRecords) {
+    record.group.dataset.candidate = String(keys.has(key));
   }
-  return workflow.edges.find((edge) => edge.when === requestedWhen && findNode(edge.target)?.type === "end") || null;
+}
+
+function clearInsertEdgeHighlights() {
+  for (const record of edgeRecords.values()) delete record.group.dataset.candidate;
+}
+
+function selectEdge(key) {
+  if (!workflow || !edgeRecords.has(key)) return;
+  selectedEdgeKey = key;
+  selectedNodeId = null;
+  linkSourceId = null;
+  updateNodeSelectionState();
+  renderInspector();
+  const record = edgeRecords.get(key);
+  const label = record.edge.when || "常规";
+  setMessage("已选中 " + label + " 执行路径；现在点击左侧节点即可插入到这条连线上");
 }
 
 function findNode(nodeId) {
@@ -915,7 +968,7 @@ function renderTrigger() {
   ui.triggerFields.className = "trigger-fields";
   if (trigger.type === "gesture_trigger") {
     const select = gestureSelect(trigger.gesture);
-    select.addEventListener("change", () => { trigger.gesture = select.value; renderCanvas(); });
+    select.addEventListener("change", () => { const before = graphSnapshot(); trigger.gesture = select.value; pushGraphHistory(before); renderCanvas(); });
     ui.triggerFields.append(select);
   } else if (trigger.type === "gesture_sequence_trigger") {
     const input = make("input");
@@ -923,7 +976,7 @@ function renderTrigger() {
     input.value = trigger.gestures.join(",");
     input.placeholder = "Open_Palm,Victory";
     input.setAttribute("aria-label", "手势序列，以逗号分隔");
-    input.addEventListener("change", () => { trigger.gestures = input.value.split(",").map((value) => value.trim()).filter(Boolean); renderCanvas(); });
+    input.addEventListener("change", () => { const before = graphSnapshot(); trigger.gestures = input.value.split(",").map((value) => value.trim()).filter(Boolean); pushGraphHistory(before); renderCanvas(); });
     const windowInput = make("input");
     windowInput.type = "number";
     windowInput.min = "1000";
@@ -931,7 +984,7 @@ function renderTrigger() {
     windowInput.step = "500";
     windowInput.value = String(trigger.sequence_window_ms || 5000);
     windowInput.setAttribute("aria-label", "序列时间窗口毫秒");
-    windowInput.addEventListener("change", () => { trigger.sequence_window_ms = Number(windowInput.value); });
+    windowInput.addEventListener("change", () => { const before = graphSnapshot(); trigger.sequence_window_ms = Number(windowInput.value); pushGraphHistory(before); });
     ui.triggerFields.append(input, windowInput);
   }
   ui.triggerBadge.textContent = trigger.type === "gesture_trigger"
@@ -953,11 +1006,26 @@ function gestureSelect(value) {
   return select;
 }
 
+function updateCanvasBounds() {
+  const nodes = workflow?.nodes || [];
+  const maxX = Math.max(170, ...nodes.map((node) => (node.position?.x ?? 170) + 236));
+  const maxY = Math.max(180, ...nodes.map((node) => (node.position?.y ?? 180) + 150));
+  const width = Math.max(1900, Math.ceil(maxX + 180));
+  const height = Math.max(1100, Math.ceil(maxY + 180));
+  ui.canvasWorld.style.width = width + "px";
+  ui.canvasWorld.style.height = height + "px";
+  ui.edgeLayer.setAttribute("width", String(width));
+  ui.edgeLayer.setAttribute("height", String(height));
+  ui.edgeLayer.style.width = width + "px";
+  ui.edgeLayer.style.height = height + "px";
+}
+
 function renderCanvas() {
   nodeCardsById.clear();
   nodeModelsById.clear();
   if (!workflow) {
     ui.canvasNodes.replaceChildren();
+    updateCanvasBounds();
     drawEdges();
     return;
   }
@@ -982,6 +1050,7 @@ function renderCanvas() {
     card.append(body);
     card.addEventListener("click", () => selectOrLink(node.id));
     card.addEventListener("dragstart", (event) => {
+      mouseHistoryBefore = graphSnapshot();
       const worldPoint = clientToWorld(event.clientX, event.clientY);
       mouseDragOffset = {
         x: worldPoint.x - node.position.x,
@@ -990,10 +1059,11 @@ function renderCanvas() {
       event.dataTransfer.setData("text/plain", "node:" + node.id);
       event.dataTransfer.effectAllowed = "move";
     });
-    card.addEventListener("dragend", () => { mouseDragOffset = null; });
+    card.addEventListener("dragend", () => { mouseDragOffset = null; mouseHistoryBefore = null; });
     nodeCardsById.set(node.id, card);
     ui.canvasNodes.append(card);
   }
+  updateCanvasBounds();
   drawEdges();
 }
 
@@ -1027,47 +1097,149 @@ function updateEdgeRecord(record) {
   const x2 = target.position.x;
   const y2 = target.position.y + 53;
   const bend = Math.max(38, (x2 - x1) / 2);
-  record.path.setAttribute("d", `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`);
+  const pathData = "M " + x1 + " " + y1 + " C " + (x1 + bend) + " " + y1 + ", " + (x2 - bend) + " " + y2 + ", " + x2 + " " + y2;
+  record.path.setAttribute("d", pathData);
+  record.hitPath.setAttribute("d", pathData);
   if (record.labelElement) {
     record.labelElement.setAttribute("x", String((x1 + x2) / 2));
     record.labelElement.setAttribute("y", String((y1 + y2) / 2 - 7));
   }
+  const t = 0.5;
+  const mt = 1 - t;
+  const c1x = x1 + bend;
+  const c2x = x2 - bend;
+  const midX = mt * mt * mt * x1 + 3 * mt * mt * t * c1x + 3 * mt * t * t * c2x + t * t * t * x2;
+  const midY = mt * mt * mt * y1 + 3 * mt * mt * t * y1 + 3 * mt * t * t * y2 + t * t * t * y2;
+  record.insertButton.setAttribute("transform", "translate(" + midX + " " + midY + ")");
+  record.group.dataset.selected = String(record.key === selectedEdgeKey);
 }
 
-function addEdgeRecord(svg, key, sourceId, targetId, styleKey, label) {
+function addEdgeRecord(svg, key, edge, styleKey, label) {
   const namespace = "http://www.w3.org/2000/svg";
+  const group = document.createElementNS(namespace, "g");
+  group.classList.add("edge-group");
+  group.dataset.edgeKey = key;
+  group.dataset.selected = String(key === selectedEdgeKey);
+  group.setAttribute("role", "button");
+  group.setAttribute("tabindex", "0");
+  group.setAttribute("aria-label", "选择" + (label || "常规") + "执行连线");
+
+  const hitPath = document.createElementNS(namespace, "path");
+  hitPath.classList.add("edge-hit-area");
   const path = document.createElementNS(namespace, "path");
-  path.dataset.edge = key;
-  path.dataset.source = sourceId;
-  path.dataset.target = targetId;
+  path.classList.add("edge-path");
   if (styleKey === "error") path.classList.add("edge-error");
-  svg.append(path);
+  group.append(hitPath, path);
+
   let labelElement = null;
   if (label) {
     labelElement = document.createElementNS(namespace, "text");
-    labelElement.dataset.edgeLabel = key;
+    labelElement.classList.add("edge-label");
     labelElement.textContent = label;
-    svg.append(labelElement);
+    group.append(labelElement);
   }
-  const record = { key, sourceId, targetId, path, labelElement };
+
+  const insertButton = document.createElementNS(namespace, "g");
+  insertButton.classList.add("edge-insert-button");
+  insertButton.dataset.edgeKey = key;
+  insertButton.setAttribute("role", "button");
+  insertButton.setAttribute("tabindex", "0");
+  insertButton.setAttribute("aria-label", "选择此连线作为节点插入位置");
+  const circle = document.createElementNS(namespace, "circle");
+  circle.setAttribute("r", "10");
+  const plus = document.createElementNS(namespace, "text");
+  plus.setAttribute("x", "0");
+  plus.setAttribute("y", "4");
+  plus.setAttribute("text-anchor", "middle");
+  plus.textContent = "+";
+  insertButton.append(circle, plus);
+  group.append(insertButton);
+
+  const choose = (event) => {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    selectEdge(key);
+  };
+  hitPath.addEventListener("click", choose);
+  group.addEventListener("click", (event) => {
+    if (event.target === group) choose(event);
+  });
+  insertButton.addEventListener("click", choose);
+  for (const element of [group, insertButton]) {
+    element.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") choose(event);
+    });
+  }
+
+  svg.append(group);
+  const record = {
+    key, edge: { source: edge.source, target: edge.target, when: edge.when, virtual: edge.virtual === true },
+    sourceId: edge.source, targetId: edge.target, group, hitPath, path, labelElement, insertButton,
+  };
   edgeRecords.set(key, record);
-  indexEdgeForNode(sourceId, key);
-  indexEdgeForNode(targetId, key);
+  indexEdgeForNode(edge.source, key);
+  indexEdgeForNode(edge.target, key);
   updateEdgeRecord(record);
 }
 
 function drawEdges() {
   const svg = ui.edgeLayer;
-  svg.querySelectorAll("path[data-edge], text[data-edge-label]").forEach((element) => element.remove());
+  svg.querySelectorAll(".edge-group").forEach((element) => element.remove());
   edgeRecords.clear();
   edgeKeysByNode.clear();
   if (!workflow) return;
   const root = workflow.nodes.find((node) => !workflow.edges.some((edge) => edge.target === node.id));
-  if (root) addEdgeRecord(svg, "trigger:" + root.id, "trigger", root.id, "trigger", "");
-  workflow.edges.forEach((edge, index) => {
-    const key = "edge:" + index + ":" + edge.source + ":" + edge.target + ":" + (edge.when || "normal");
-    addEdgeRecord(svg, key, edge.source, edge.target, edge.when === "error" ? "error" : edge.source, edge.when || "");
+  if (root) {
+    const virtual = { source: "trigger", target: root.id, virtual: true };
+    addEdgeRecord(svg, WorkflowGraph.edgeKey(virtual), virtual, "trigger", "");
+  }
+  workflow.edges.forEach((edge) => {
+    const key = WorkflowGraph.edgeKey(edge);
+    addEdgeRecord(svg, key, edge, edge.when === "error" ? "error" : edge.source, edge.when || "");
   });
+}
+
+function distanceToSegment(point, start, end) {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const lengthSquared = dx * dx + dy * dy;
+  if (!lengthSquared) return Math.hypot(point.x - start.x, point.y - start.y);
+  const t = Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared));
+  return Math.hypot(point.x - (start.x + t * dx), point.y - (start.y + t * dy));
+}
+
+function findNearestEdgeKey(clientX, clientY) {
+  const point = clientToWorld(clientX, clientY);
+  let nearestKey = null;
+  let nearestDistance = 24 / zoom;
+  for (const record of edgeRecords.values()) {
+    const source = record.sourceId === "trigger" ? null : findNode(record.sourceId);
+    const target = findNode(record.targetId);
+    if (!target) continue;
+    const x1 = source ? source.position.x + 236 : 132;
+    const y1 = source ? source.position.y + 53 : 130;
+    const x2 = target.position.x;
+    const y2 = target.position.y + 53;
+    const bend = Math.max(38, (x2 - x1) / 2);
+    const c1 = { x: x1 + bend, y: y1 };
+    const c2 = { x: x2 - bend, y: y2 };
+    let previous = { x: x1, y: y1 };
+    for (let step = 1; step <= 24; step += 1) {
+      const t = step / 24;
+      const mt = 1 - t;
+      const current = {
+        x: mt * mt * mt * x1 + 3 * mt * mt * t * c1.x + 3 * mt * t * t * c2.x + t * t * t * x2,
+        y: mt * mt * mt * y1 + 3 * mt * mt * t * c1.y + 3 * mt * t * t * c2.y + t * t * t * y2,
+      };
+      const distance = distanceToSegment(point, previous, current);
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearestKey = record.key;
+      }
+      previous = current;
+    }
+  }
+  return nearestKey;
 }
 
 function drawEdgesForNode(nodeId) {
@@ -1082,6 +1254,23 @@ function updateNodeSelectionState() {
     card.dataset.selected = String(card.dataset.nodeId === selectedNodeId);
     card.dataset.linkSource = String(card.dataset.nodeId === linkSourceId);
   }
+  for (const record of edgeRecords.values()) {
+    record.group.dataset.selected = String(record.key === selectedEdgeKey);
+  }
+}
+
+function updateConnectionOptions(sourceId) {
+  const source = findNode(sourceId);
+  let options = [["", "常规"]];
+  if (source?.type === "condition") options = [["true", "true"], ["false", "false"]];
+  else if (source?.type === "action" && source.on_error === "branch") options = [["", "常规"], ["error", "error"]];
+  ui.edgeWhen.replaceChildren();
+  for (const [value, label] of options) {
+    const option = make("option", "", label);
+    option.value = value;
+    ui.edgeWhen.append(option);
+  }
+  if (!options.some(([value]) => value === ui.edgeWhen.value)) ui.edgeWhen.value = options[0][0];
 }
 
 function selectOrLink(nodeId) {
@@ -1089,24 +1278,29 @@ function selectOrLink(nodeId) {
     if (!linkSourceId) {
       linkSourceId = nodeId;
       selectedNodeId = nodeId;
-      setMessage("已选起点，请再选择目标节点");
+      selectedEdgeKey = null;
+      linkHistoryBefore = graphSnapshot();
+      updateConnectionOptions(nodeId);
+      renderInspector();
+      setMessage("已选择连线起点；请选择出口类型，再选择目标节点");
     } else if (linkSourceId !== nodeId) {
-      const when = ui.edgeWhen.value || undefined;
-      workflow.edges = workflow.edges.filter((edge) => !(edge.source === linkSourceId && edge.when === when));
-      const edge = { source: linkSourceId, target: nodeId };
-      if (when) edge.when = when;
-      workflow.edges.push(edge);
-      selectedNodeId = nodeId;
-      linkSourceId = null;
+      const result = WorkflowGraph.connectNodes(workflow, linkSourceId, nodeId, ui.edgeWhen.value || undefined);
+      if (!result.ok) {
+        setMessage(result.error, "error");
+        return;
+      }
+      const before = linkHistoryBefore || graphSnapshot();
+      applyGraphResult(result, before, "连线已创建，请校验工作流");
       ui.linkMode.setAttribute("aria-pressed", "false");
-      setMessage("连线已更新，请校验工作流");
     }
-    renderCanvas();
-    renderInspector();
+    updateNodeSelectionState();
     return;
   }
   selectedNodeId = nodeId;
-  renderCanvas();
+  selectedEdgeKey = null;
+  linkSourceId = null;
+  clearInsertEdgeHighlights();
+  updateNodeSelectionState();
   renderInspector();
 }
 
@@ -1126,21 +1320,38 @@ function inputControl(value, type = "text", attributes = {}) {
 }
 
 function bindNodeValue(control, update) {
-  const handler = () => {
+  const begin = () => {
+    if (!propertyHistoryBefore) propertyHistoryBefore = graphSnapshot();
+  };
+  const apply = () => {
+    if (!workflow) return;
+    begin();
     update(control.type === "checkbox" ? control.checked : control.type === "number" ? Number(control.value) : control.value);
     renderCanvas();
   };
-  control.addEventListener("input", handler);
-  control.addEventListener("change", handler);
+  const commit = () => {
+    if (!propertyHistoryBefore) return;
+    pushGraphHistory(propertyHistoryBefore);
+    propertyHistoryBefore = null;
+  };
+  control.addEventListener("focus", begin);
+  control.addEventListener("input", apply);
+  control.addEventListener("change", () => { apply(); commit(); });
+  control.addEventListener("blur", commit);
 }
 
 function renderInspector() {
   ui.inspectorContent.replaceChildren();
   const node = currentNode();
-  ui.duplicateNode.disabled = !node || node.type === "condition" || node.type === "end";
-  ui.deleteNode.disabled = !node;
+  ui.duplicateNode.disabled = !node || !WorkflowGraph.canDuplicateNode(workflow, node.id).ok;
+  ui.deleteNode.disabled = !node || !WorkflowGraph.canDeleteNode(workflow, node.id).ok;
   if (!node) {
-    ui.inspectorContent.append(make("p", "muted", "选择画布节点"));
+    if (selectedEdgeKey) {
+      const selectedEdge = edgeRecords.get(selectedEdgeKey)?.edge;
+      ui.inspectorContent.append(make("p", "muted", "已选择 " + (selectedEdge?.when || "常规") + " 执行连线。点击左侧节点可插入；按 Delete 可断开连线。"));
+    } else {
+      ui.inspectorContent.append(make("p", "muted", "选择画布节点或执行连线"));
+    }
     return;
   }
   const idInput = inputControl(node.id, "text", { maxlength: 64, readonly: true });
@@ -1165,7 +1376,16 @@ function renderInspector() {
     }
     errorPath.value = node.on_error || "stop";
     field(ui.inspectorContent, "失败处理", errorPath);
-    bindNodeValue(errorPath, (value) => { node.on_error = value; renderInspector(); });
+    errorPath.addEventListener("change", () => {
+      const before = graphSnapshot();
+      const result = WorkflowGraph.setActionErrorPolicy(workflow, node.id, errorPath.value);
+      if (!result.ok) {
+        setMessage(result.error, "error");
+        renderInspector();
+        return;
+      }
+      applyGraphResult(result, before, errorPath.value === "branch" ? "已创建错误分支和默认结束节点" : "失败策略已更新");
+    });
     const retries = inputControl(node.retries || 0, "number", { min: 0, max: 2, step: 1 });
     field(ui.inspectorContent, "幂等重试次数", retries);
     bindNodeValue(retries, (value) => { node.retries = value; });
@@ -1182,6 +1402,7 @@ function renderActionProperties(node) {
   select.value = node.action;
   field(ui.inspectorContent, "动作", select);
   select.addEventListener("change", () => {
+    const before = graphSnapshot();
     node.action = select.value;
     node.params = {};
     const schema = actionDefinitions.find((item) => item.name === node.action)?.schema;
@@ -1189,6 +1410,7 @@ function renderActionProperties(node) {
       const rule = schema.properties[name];
       node.params[name] = rule.enum?.[0] ?? rule.minimum ?? (rule.type === "boolean" ? false : "");
     }
+    pushGraphHistory(before);
     renderInspector();
     renderCanvas();
   });
@@ -1277,12 +1499,25 @@ function moveNode(nodeId, clientX, clientY, grabOffset = null) {
     x: (card?.offsetWidth || 236) / 2,
     y: (card?.offsetHeight || 106) / 2,
   };
-  node.position = PointerGeometry.nodePositionFromPointer(
-    worldPoint,
-    offset,
-    { width: ui.canvasWorld.clientWidth, height: ui.canvasWorld.clientHeight },
-    { width: card?.offsetWidth || 236, height: card?.offsetHeight || 106 },
-  );
+  const proposedPosition = window.PointerGeometry?.nodePositionFromPointer
+    ? PointerGeometry.nodePositionFromPointer(
+      worldPoint,
+      offset,
+      { width: ui.canvasWorld.clientWidth, height: ui.canvasWorld.clientHeight },
+      { width: card?.offsetWidth || 236, height: card?.offsetHeight || 106 },
+    )
+    : {
+      x: Math.round(worldPoint.x - offset.x),
+      y: Math.round(worldPoint.y - offset.y),
+    };
+  node.position = {
+    x: Math.max(0, Math.min(5000, Math.round(proposedPosition.x))),
+    y: Math.max(0, Math.min(5000, Math.round(proposedPosition.y))),
+  };
+  if (node.position.x + (card?.offsetWidth || 236) >= ui.canvasWorld.clientWidth - 40
+    || node.position.y + (card?.offsetHeight || 106) >= ui.canvasWorld.clientHeight - 40) {
+    updateCanvasBounds();
+  }
   if (card) {
     card.style.left = node.position.x + "px";
     card.style.top = node.position.y + "px";
@@ -1293,6 +1528,7 @@ function moveNode(nodeId, clientX, clientY, grabOffset = null) {
 
 function autoArrange() {
   if (!workflow) return;
+  const before = graphSnapshot();
   const nodes = new Map(workflow.nodes.map((node) => [node.id, node]));
   const incoming = new Map(workflow.nodes.map((node) => [node.id, 0]));
   const depth = new Map();
@@ -1314,6 +1550,7 @@ function autoArrange() {
     node.position = { x: 170 + column * 320, y: 90 + row * 175 };
     rows.set(column, row + 1);
   }
+  pushGraphHistory(before);
   renderCanvas();
 }
 
@@ -1382,6 +1619,9 @@ async function deleteWorkflow() {
   await reloadWorkflowList();
   if (workflows.length) await loadWorkflow(workflows[0].id);
   else {
+    graphHistory.clear();
+    selectedEdgeKey = null;
+    refreshHistoryButtons();
     refreshHeader();
     renderCanvas();
     renderInspector();
@@ -1495,33 +1735,37 @@ function connectWorkflowEvents() {
 
 function duplicateNode() {
   const node = currentNode();
-  if (!node || ["condition", "end"].includes(node.type)) return;
-  const edge = workflow.edges.find((item) => item.target === node.id && item.when === undefined);
-  const next = workflow.edges.find((item) => item.source === node.id && item.when === undefined);
-  if (!edge || !next) {
-    setMessage("此节点没有可复制的普通执行路径", "error");
+  if (!node) return;
+  const before = graphSnapshot();
+  const result = WorkflowGraph.duplicateNode(workflow, node.id);
+  if (!result.ok) {
+    setMessage(result.error, "error");
     return;
   }
-  const clone = structuredClone(node);
-  clone.id = node.type + "-" + crypto.randomUUID().slice(0, 8);
-  clone.position = { x: node.position.x + 28, y: node.position.y + 130 };
-  workflow.nodes.push(clone);
-  workflow.edges = workflow.edges.filter((item) => item !== edge);
-  workflow.edges.push({ source: edge.source, target: clone.id }, { source: clone.id, target: node.id });
-  selectedNodeId = clone.id;
-  renderCanvas();
-  renderInspector();
+  applyGraphResult(result, before, "节点已复制并插入原节点之后");
 }
 
 function deleteNode() {
-  if (!currentNode()) return;
-  const deleted = selectedNodeId;
-  workflow.nodes = workflow.nodes.filter((node) => node.id !== deleted);
-  workflow.edges = workflow.edges.filter((edge) => edge.source !== deleted && edge.target !== deleted);
-  selectedNodeId = null;
-  renderCanvas();
-  renderInspector();
-  setMessage("节点已移除；请连接剩余节点并校验", "error");
+  const node = currentNode();
+  if (!node) return;
+  const before = graphSnapshot();
+  const result = WorkflowGraph.removeNode(workflow, node.id);
+  if (!result.ok) {
+    setMessage(result.error, "error");
+    return;
+  }
+  applyGraphResult(result, before, "节点已删除，前后路径已自动接续");
+}
+
+function deleteSelectedEdge() {
+  if (!selectedEdgeKey) return;
+  const before = graphSnapshot();
+  const result = WorkflowGraph.removeEdge(workflow, selectedEdgeKey);
+  if (!result.ok) {
+    setMessage(result.error, "error");
+    return;
+  }
+  applyGraphResult(result, before, "连线已断开；请重新连接对应出口后再保存");
 }
 
 async function initialize() {
@@ -1589,16 +1833,20 @@ ui.deleteWorkflow.addEventListener("click", () => deleteWorkflow().catch((error)
 ui.saveWorkflow.addEventListener("click", () => saveWorkflow().catch((error) => setMessage(error.message, "error")));
 ui.validateWorkflow.addEventListener("click", () => validateCurrent().catch((error) => setMessage(error.message, "error")));
 ui.dryRunWorkflow.addEventListener("click", () => dryRun().catch((error) => setMessage(error.message, "error")));
+ui.undoWorkflow.addEventListener("click", undoGraphEdit);
+ui.redoWorkflow.addEventListener("click", redoGraphEdit);
 ui.toggleWorkflow.addEventListener("click", () => toggleWorkflow().catch((error) => setMessage(error.message, "error")));
 ui.workflowSelect.addEventListener("change", () => loadWorkflow(ui.workflowSelect.value).catch((error) => setMessage(error.message, "error")));
 ui.workflowName.addEventListener("input", updateHeaderData);
 ui.workflowDescription.addEventListener("input", updateHeaderData);
 ui.triggerType.addEventListener("change", () => {
   if (!workflow) return;
+  const before = graphSnapshot();
   const type = ui.triggerType.value;
   workflow.trigger = type === "gesture_trigger" ? { type, gesture: "Open_Palm" }
     : type === "gesture_sequence_trigger" ? { type, gestures: ["Open_Palm", "Victory"], sequence_window_ms: 5000 }
       : { type };
+  pushGraphHistory(before);
   renderTrigger();
   renderCanvas();
 });
@@ -1611,6 +1859,9 @@ ui.workflowVersion.addEventListener("change", async () => {
   workflow = structuredClone(item.definition);
   workflow.enabled = enabled;
   selectedNodeId = null;
+  selectedEdgeKey = null;
+  graphHistory.clear();
+  refreshHistoryButtons();
   refreshHeader();
   renderTrigger();
   renderCanvas();
@@ -1630,8 +1881,9 @@ ui.linkMode.addEventListener("click", () => {
   const active = ui.linkMode.getAttribute("aria-pressed") !== "true";
   ui.linkMode.setAttribute("aria-pressed", String(active));
   linkSourceId = null;
-  if (active) setMessage("选择起点，再选择目标节点");
-  else clearMessage();
+  linkHistoryBefore = null;
+  if (active) setMessage("选择起点，再选择目标节点；条件节点可选择 true/false，错误分支动作可选择 error");
+  else { clearMessage(); updateConnectionOptions(null); }
   renderCanvas();
 });
 ui.autoArrange.addEventListener("click", autoArrange);
@@ -1646,7 +1898,34 @@ ui.pointerDiagnostics.addEventListener("click", () => setPointerDiagnosticsOpen(
 ui.pointerDiagnosticsClose.addEventListener("click", () => setPointerDiagnosticsOpen(false));
 ui.pointerDiagnosticsReset.addEventListener("click", resetPointerDiagnostics);
 ui.pointerDiagnosticsExport.addEventListener("click", () => exportPointerDiagnostics().catch((error) => setMessage(error.message, "error")));
+document.addEventListener("keydown", (event) => {
+  const target = event.target;
+  const editing = target instanceof Element && target.closest("input, textarea, select, [contenteditable='true']");
+  if (editing) return;
+  const modifier = event.ctrlKey || event.metaKey;
+  if (modifier && event.key.toLowerCase() === "z") {
+    event.preventDefault();
+    if (event.shiftKey) redoGraphEdit();
+    else undoGraphEdit();
+    return;
+  }
+  if (modifier && event.key.toLowerCase() === "y") {
+    event.preventDefault();
+    redoGraphEdit();
+    return;
+  }
+  if (event.key === "Delete" || event.key === "Backspace") {
+    if (selectedEdgeKey) {
+      event.preventDefault();
+      deleteSelectedEdge();
+    } else if (selectedNodeId && !ui.deleteNode.disabled) {
+      event.preventDefault();
+      deleteNode();
+    }
+  }
+});
 setPointerMirrorUi(pointerMirrorX);
+refreshHistoryButtons();
 window.addEventListener("pagehide", () => {
   if (pointerModeEnabled) {
     fetch("/api/pointer/mode", {
@@ -1673,10 +1952,14 @@ ui.canvasViewport.addEventListener("drop", (event) => {
   if (payload.startsWith("node:")) {
     moveNode(payload.slice(5), event.clientX, event.clientY, mouseDragOffset);
     mouseDragOffset = null;
+    if (mouseHistoryBefore) pushGraphHistory(mouseHistoryBefore);
+    mouseHistoryBefore = null;
   } else if (payload.startsWith("node-type:")) {
-    const node = defaultNode(payload.slice(10)); node.position = position; addNode(node);
+    const node = defaultNode(payload.slice(10));
+    addNode(node, { edgeKey: findNearestEdgeKey(event.clientX, event.clientY), position });
   } else if (payload.startsWith("action:")) {
-    const node = defaultNode("action", payload.slice(7)); node.position = position; addNode(node);
+    const node = defaultNode("action", payload.slice(7));
+    addNode(node, { edgeKey: findNearestEdgeKey(event.clientX, event.clientY), position });
   }
 });
 window.addEventListener("resize", renderPointerCalibrationOverlay);

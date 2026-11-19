@@ -31,3 +31,14 @@ test("workflow editor keeps camera-pointer module failure separate from mouse ed
   assert.match(source, /if \(!pointerEventBuffer \|\| !window\.PointerGeometry\)/);
   assert.match(source, /鼠标和键盘编辑仍然可用/);
 });
+
+
+test("workflow editor loads the graph engine before the UI and exposes history controls", () => {
+  const html = fs.readFileSync(path.join(root, "web/workflows.html"), "utf8");
+  const graphScript = html.indexOf("workflow-graph.js");
+  const editorScript = html.indexOf("workflows.js");
+  assert.ok(graphScript >= 0 && editorScript > graphScript);
+  assert.match(html, /id="undoWorkflow"/);
+  assert.match(html, /id="redoWorkflow"/);
+  assert.match(html, /role="group" aria-label="工作流执行连线"/);
+});
