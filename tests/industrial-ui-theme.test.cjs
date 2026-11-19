@@ -53,6 +53,9 @@ test("Comking glass theme exposes Chinese typography, brand blue, and restrained
   assert.match(glassTheme, /\.pointer-calibration-overlay/);
   assert.match(glassTheme, /\.pointer-diagnostics-panel/);
   assert.ok(industrialTheme.includes("--ui-accent: #159b89"), "compatibility theme should remain available");
+  assert.ok(glassTheme.includes("--ck-glass: rgba(255, 255, 255, .30)"), "glass base should be more transparent");
+  assert.ok(glassTheme.includes("saturate(205%) blur(34px)"), "major glass surfaces should use stronger refraction");
+  assert.ok(glassTheme.includes("radial-gradient(ellipse at 9% 8%"), "ambient background lighting should reveal transparency");
 });
 
 test("workflow interaction and pointer state hooks remain present", () => {
