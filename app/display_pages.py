@@ -168,7 +168,7 @@ def normalize_external_url(value: object) -> str:
     if not isinstance(value, str) or not value or len(value) > 2048:
         raise ValueError("网页地址必须是 1～2048 个字符的 HTTPS URL")
     raw = value.strip()
-    if not raw or any(ord(char) < 32 or char == "\\\\" for char in raw):
+    if not raw or any(ord(char) < 32 or char == "\\" for char in raw):
         raise ValueError("网页地址包含无效字符")
     try:
         parsed = urlsplit(raw)

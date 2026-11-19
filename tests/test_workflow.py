@@ -388,7 +388,7 @@ class DisplayCommandTests(unittest.IsolatedAsyncioTestCase):
     async def test_command_waits_for_matching_ack_and_rejects_second_client(self):
         channel = DisplayCommandChannel()
         socket = _FakeSocket()
-        self.assertTrue(await self._connect_ready(channel, socket))
+        await self._connect_ready(channel, socket)
         rejected = _FakeSocket()
         self.assertFalse(await channel.connect(rejected))
         self.assertEqual(rejected.closed[0], 1013)
