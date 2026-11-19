@@ -9,13 +9,17 @@
 - 可访问的 RTSP 摄像头地址
 - 首次安装需要联网安装依赖并下载 MediaPipe 模型；RTSP 解码使用 PyAV/FFmpeg 库并在进程内运行
 
-在 PowerShell 中进入项目目录后运行：
+**推荐安装方式：** 在项目根目录双击 `setup.bat`。安装窗口会在成功或失败后保持打开，便于查看错误，不要直接关闭窗口。
+
+也可以在 PowerShell 中进入项目目录后运行：
 
 ~~~powershell
 Set-ExecutionPolicy -Scope Process Bypass
 .\setup.ps1
 .\run.ps1
 ~~~
+
+直接运行 `setup.ps1` 时，脚本会在成功或失败后等待按 Enter；如果你希望由其他脚本调用且不等待，可使用 `.\setup.ps1 -NoPause`。
 
 Python Launcher 找不到兼容解释器时，可指定已安装的解释器：
 

@@ -1,5 +1,6 @@
 param(
-    [string]$PythonPath = ""
+    [string]$PythonPath = "",
+    [switch]$NoPause
 )
 
 $ErrorActionPreference = "Stop"
@@ -21,6 +22,10 @@ trap {
     Write-Host ($Failure | Format-List * -Force | Out-String)
     Write-Host "Setup log: $LogPath" -ForegroundColor Yellow
     try { Stop-Transcript | Out-Null } catch {}
+    if (-not $NoPause) {
+        Write-Host ""
+        Read-Host "安装失败信息已保留。按 Enter 键关闭此窗口"
+    }
     break
 }
 
@@ -220,3 +225,7 @@ Write-Host "SETUP COMPLETE. Dependencies and model files were verified." -Foregr
 Write-Host "Run .\run.ps1 to start the website."
 Write-Host "Setup log: $LogPath"
 try { Stop-Transcript | Out-Null } catch {}
+if (-not $NoPause) {
+    Write-Host ""
+    Read-Host "安装已完成。按 Enter 键关闭此窗口"
+}
