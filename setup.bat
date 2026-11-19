@@ -19,7 +19,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0setup.ps1" -NoPause
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0setup.ps1" -NoPause -ExitOnFailure
 set "SETUP_EXIT_CODE=%ERRORLEVEL%"
 
 echo.

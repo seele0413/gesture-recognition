@@ -1,6 +1,7 @@
 param(
     [string]$PythonPath = "",
-    [switch]$NoPause
+    [switch]$NoPause,
+    [switch]$ExitOnFailure
 )
 
 $ErrorActionPreference = "Stop"
@@ -22,6 +23,9 @@ trap {
     Write-Host ($Failure | Format-List * -Force | Out-String)
     Write-Host "Setup log: $LogPath" -ForegroundColor Yellow
     try { Stop-Transcript | Out-Null } catch {}
+    if ($ExitOnFailure) {
+        exit 1
+    }
     if (-not $NoPause) {
         Write-Host ""
         Read-Host "安装失败信息已保留。按 Enter 键关闭此窗口"
