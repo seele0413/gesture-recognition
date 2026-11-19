@@ -1049,9 +1049,15 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .industrial-ui *,
-  .industrial-ui *::before,
-  .industrial-ui *::after {
+  .settings-page *,
+  .settings-page *::before,
+  .settings-page *::after,
+  .display-pages-page *,
+  .display-pages-page *::before,
+  .display-pages-page *::after,
+  .workflow-page *,
+  .workflow-page *::before,
+  .workflow-page *::after {
     transition-duration: .01ms !important;
     animation-duration: .01ms !important;
   }
