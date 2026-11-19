@@ -1407,6 +1407,7 @@ async function deleteWorkflow() {
   await reloadWorkflowList();
   if (workflows.length) await loadWorkflow(workflows[0].id);
   else {
+    closeInspector();
     refreshHeader();
     renderCanvas();
     renderInspector();
