@@ -94,3 +94,43 @@ test("settings and page manager keep their existing application scripts", () => 
   assert.match(read("web/settings.html"), /\/static\/app\.js/);
   assert.match(read("web/display-pages.html"), /\/static\/display-pages\.js/);
 });
+
+test("workflow header separates system navigation from workflow actions and explains versions", () => {
+  const html = read("web/workflows.html");
+  const js = read("web/workflows.js");
+  const navStart = html.indexOf('<nav class="workflow-primary-nav"');
+  const navEnd = html.indexOf("</nav>", navStart);
+  const actionsStart = html.indexOf('<div class="workflow-actions"');
+
+  assert.match(html, /<title>康晋电气 · 手势控制系统<\/title>/);
+  assert.match(html, /<link rel="icon" href="https:\/\/img\.kompass\.com\//);
+  assert.ok(navStart >= 0 && navEnd > navStart && navEnd < actionsStart, "system navigation should be in its own top header row");
+  assert.match(html, /<small>手势控制系统<\/small>/);
+  assert.match(html, /<span>版本 <small>历史记录<\/small><\/span>/);
+  assert.match(html, /id="workflowVersion" aria-label="工作流保存版本"/);
+  assert.match(js, /"v" \+ item\.version \+ \(isCurrent \? "（当前）" : "（历史）"\)/);
+  assert.match(js, /历史版本 v" \+ item\.version/);
+});
+
+test("right-clicking a workflow node opens a closable floating parameter inspector", () => {
+  const html = read("web/workflows.html");
+  const js = read("web/workflows.js");
+  const glass = read("web/comking-glass.css");
+
+  assert.match(html, /id="workflowInspector" class="workflow-inspector" hidden/);
+  assert.match(html, /id="inspectorClose"/);
+  assert.match(js, /card\.addEventListener\("contextmenu"/);
+  assert.match(js, /function openInspector\(nodeId\)/);
+  assert.match(js, /function closeInspector\(\)/);
+  assert.match(js, /ui\.inspectorClose\.addEventListener\("click", closeInspector\)/);
+  assert.ok(glass.includes(".workflow-inspector[hidden]"), "inspector should stay hidden until requested");
+  assert.ok(glass.includes("position: absolute;"), "inspector should float above the canvas rather than reserve a column");
+});
+
+test("display page default action uses the same neutral button style as edit and disable", () => {
+  const js = read("web/display-pages.js");
+  assert.match(js, /actions\.append\(makeButton\("编辑", \(\) => openEditor\(page\)\)\)/);
+  assert.match(js, /actions\.append\(makeButton\("设为默认", \(\) => setDefault\(page\.page_id\)\)\)/);
+  assert.match(js, /actions\.append\(makeButton\(page\.enabled \? "停用" : "启用", \(\) => toggleEnabled\(page\), ""\)\)/);
+  assert.doesNotMatch(js, /makeButton\("设为默认"[^;]*page-action-primary/);
+});
