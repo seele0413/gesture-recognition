@@ -102,10 +102,10 @@ test("workflow header separates system navigation from workflow actions and expl
   const navEnd = html.indexOf("</nav>", navStart);
   const actionsStart = html.indexOf('<div class="workflow-actions"');
 
-  assert.match(html, /<title>康晋电气 · 手势控制系统<\/title>/);
+  assert.match(html, /<title>康晋电气手势控制平台 · 工作流<\/title>/);
   assert.match(html, /<link rel="icon" href="https:\/\/img\.kompass\.com\//);
   assert.ok(navStart >= 0 && navEnd > navStart && navEnd < actionsStart, "system navigation should be in its own top header row");
-  assert.match(html, /<small>手势控制系统<\/small>/);
+  assert.match(html, /<small>手势控制平台<\/small>/);
   assert.match(html, /<span>版本 <small>历史记录<\/small><\/span>/);
   assert.match(html, /id="workflowVersion" aria-label="工作流保存版本"/);
   assert.match(js, /"v" \+ item\.version \+ \(isCurrent \? "（当前）" : "（历史）"\)/);
@@ -133,4 +133,63 @@ test("display page default action uses the same neutral button style as edit and
   assert.match(js, /actions\.append\(makeButton\("设为默认", \(\) => setDefault\(page\.page_id\)\)\)/);
   assert.match(js, /actions\.append\(makeButton\(page\.enabled \? "停用" : "启用", \(\) => toggleEnabled\(page\), ""\)\)/);
   assert.doesNotMatch(js, /makeButton\("设为默认"[^;]*page-action-primary/);
+});
+
+
+test("all pages use the unified Comking gesture control platform name", () => {
+  const workflows = read("web/workflows.html");
+  const settings = read("web/settings.html");
+  const pages = read("web/display-pages.html");
+  const shell = read("web/index.html");
+  const factory = read("web/pages/factory.html");
+  const product = read("web/pages/product.html");
+  const promo = read("web/pages/promo.html");
+
+  assert.match(workflows, /<title>康晋电气手势控制平台 · 工作流<\/title>/);
+  assert.match(settings, /<title>康晋电气手势控制平台 · 设置<\/title>/);
+  assert.match(pages, /<title>康晋电气手势控制平台 · 网页管理<\/title>/);
+  assert.match(shell, /<title>康晋电气手势控制平台<\/title>/);
+  assert.match(factory, /<title>康晋电气手势控制平台 · 智能制造<\/title>/);
+  assert.match(product, /<title>康晋电气手势控制平台 · 产品中心<\/title>/);
+  assert.match(promo, /<title>康晋电气手势控制平台 · 企业宣传片<\/title>/);
+  assert.match(settings, /<small>手势控制平台 · 设置<\/small>/);
+  assert.match(pages, /<small>手势控制平台 · 网页管理<\/small>/);
+  for (const html of [workflows, settings, pages, shell, factory, product, promo]) {
+    assert.doesNotMatch(html, /手势控制系统|展示控制系统/);
+  }
+});
+
+test("all frontend pages use native platform system typography", () => {
+  const base = read("web/styles.css");
+  const industrial = read("web/industrial-ui.css");
+  const glass = read("web/comking-glass.css");
+  for (const [name, css] of [["base", base], ["industrial", industrial], ["glass", glass]]) {
+    assert.ok(css.includes("system-ui, -apple-system, BlinkMacSystemFont"), name + " stylesheet should prefer native platform fonts");
+    assert.ok(css.includes('"PingFang SC"'), name + " stylesheet should include a Chinese system-font fallback");
+  }
+  assert.doesNotMatch(glass, /"SF Pro Display"/, "do not bundle or force a font restricted to Apple-platform mockups");
+});
+
+test("workflow library fills the empty brand-side strip and action toolbar aligns to the trailing edge", () => {
+  const html = read("web/workflows.html");
+  const glass = read("web/comking-glass.css");
+  assert.match(html, /<small>手势控制平台<\/small>/);
+  assert.match(glass, /\.workflow-library\s*\{[\s\S]*?top:\s*-96px;/);
+  assert.match(glass, /\.workflow-editor\s*\{[\s\S]*?grid-column:\s*2;/);
+  assert.match(glass, /\.workflow-meta\s*\{[\s\S]*?width:\s*calc\(100% - 260px\);/);
+  assert.match(glass, /\.workflow-actions\s*\{[\s\S]*?width:\s*max-content;[\s\S]*?margin-left:\s*auto;[\s\S]*?margin-right:\s*0;/);
+  assert.match(glass, /@media \(max-width: 980px\)[\s\S]*?\.workflow-library\s*\{[\s\S]*?position:\s*static;/);
+});
+
+test("glass polish makes management surfaces lighter but leaves the workflow canvas material alone", () => {
+  const glass = read("web/comking-glass.css");
+  const start = glass.indexOf("2026-11-19 polish: platform naming");
+  assert.ok(start >= 0, "latest polish section should exist");
+  const polish = glass.slice(start);
+  assert.match(polish, /\.workflow-library,[\s\S]*?background:[\s\S]*?rgba\(255,255,255,\.045\)/);
+  assert.match(polish, /\.settings-panel,[\s\S]*?background:[\s\S]*?rgba\(255,255,255,\.045\)/);
+  assert.doesNotMatch(polish, /\.canvas-viewport\s*\{/);
+  assert.doesNotMatch(polish, /\.canvas-node\s*\{/);
+  assert.doesNotMatch(polish, /\.canvas-node-header\s*\{/);
+  assert.doesNotMatch(polish, /\.editor-toolbar\s*\{/);
 });
