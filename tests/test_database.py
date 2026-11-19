@@ -44,7 +44,7 @@ class ControlStoreTests(unittest.TestCase):
         self.assertIsNotNone(migrated.get_display_page("company_storage"))
         self.assertEqual(
             migrated.get_display_page_labels()["company_storage"],
-            "康晋电气官方网站 / 产品中心 / 储能系列产品",
+            "自定义官网标题 / 产品中心 / 储能系列产品",
         )
 
         with sqlite3.connect(self.path) as connection:
@@ -138,11 +138,11 @@ class ControlStoreTests(unittest.TestCase):
     def test_display_page_referenced_by_workflow_cannot_be_deleted(self):
         workflow = new_workflow("引用网页的工作流")
         workflow["nodes"][0].update({
-            "action": "web.navigate_page", "params": {"page_id": "company_website"},
+            "action": "web.navigate_page", "params": {"page_id": "company_storage"},
         })
         self.store.save_workflow(workflow)
         with self.assertRaisesRegex(ValueError, "工作流引用"):
-            self.store.delete_display_page("company_website")
+            self.store.delete_display_page("company_storage")
 
     def test_mappings_are_persisted(self):
         self.assertEqual(self.store.get_mappings(), DEFAULT_MAPPINGS)

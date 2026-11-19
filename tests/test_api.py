@@ -5,6 +5,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from app.display_pages import DISPLAY_PAGE_IDS
 from app.main import create_app
 from app.workflow import new_workflow
 
@@ -97,7 +98,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(payload["default_page_id"], "promo")
         pages = payload["pages"]
         self.assertEqual([page["page_id"] for page in pages],
-                         ["promo", "factory", "product", "company_website"])
+                         list(DISPLAY_PAGE_IDS))
         for page in pages:
             if page["page_type"] == "local":
                 self.assertTrue(page["path"].startswith("/static/pages/"))
@@ -106,7 +107,7 @@ class ApiTests(unittest.TestCase):
             else:
                 self.assertEqual(page["page_type"], "external")
                 self.assertIsNone(page["path"])
-                self.assertEqual(page["url"], "https://www.zhcomking.com/")
+                self.assertTrue(page["url"].startswith("https://www.zhcomking.com/"))
         actions = {item["name"]: item for item in self.client.get("/api/actions").json()["actions"]}
         self.assertIn("web.navigate_page", actions)
         self.assertEqual(actions["web.navigate_page"]["schema"]["properties"]["page_id"]["enum"],

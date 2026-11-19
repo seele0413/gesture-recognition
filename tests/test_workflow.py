@@ -326,6 +326,7 @@ class WorkflowEngineTests(unittest.IsolatedAsyncioTestCase):
             )
             engine = WorkflowEngine(self.store, registry)
             engine.set_display_connected(True)
+            engine.set_display_ready(True)
             await engine.on_event({"type": "controller", "state": "locked", "track_id": "person-a"})
             workflow = self._workflow(action_count=1)
             workflow["nodes"] = [
