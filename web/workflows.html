@@ -4,39 +4,58 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#145da8">
-    <title>康晋电气 · 工作流编排</title>
-    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+    <title>康晋电气 · 手势控制系统</title>
+    <link rel="icon" href="https://img.kompass.com/sys-master-images/h29/h63/9109303525406/comking%E6%96%B0logo-jpg" type="image/jpeg">
     <link rel="stylesheet" href="/static/styles.css?v=20261118-workflow-fix-1">
     <link rel="stylesheet" href="/static/workflows.css?v=20261118-workflow-fix-1">
     <link rel="stylesheet" href="/static/industrial-ui.css?v=20261119-1">
-    <link rel="stylesheet" href="/static/comking-glass.css?v=20261119-glass-3">
+    <link rel="stylesheet" href="/static/comking-glass.css?v=20261119-glass-4">
     <script src="/static/pointer-geometry.js?v=20261118-workflow-fix-1" defer></script>
     <script src="/static/pointer-event-buffer.js?v=20261118-workflow-fix-1" defer></script>
-    <script src="/static/workflows.js?v=20261118-workflow-fix-1" defer></script>
+    <script src="/static/workflows.js?v=20261119-workflow-ux-1" defer></script>
   </head>
   <body class="workflow-page">
     <header class="workflow-header">
-      <a class="workflow-brand" href="/" aria-label="返回康晋电气展示主页">
-        <span class="comking-logo-shell"><img class="comking-logo" src="https://img.kompass.com/sys-master-images/h29/h63/9109303525406/comking%E6%96%B0logo-jpg" alt="COMKING" loading="eager"></span>
-        <span><strong>康晋电气</strong><small>展示控制系统 · 工作流</small></span>
-      </a>
-      <div class="workflow-meta">
-        <select id="workflowSelect" aria-label="选择工作流"></select>
-        <input id="workflowName" maxlength="80" aria-label="工作流名称" placeholder="工作流名称">
-        <input id="workflowDescription" maxlength="500" aria-label="工作流描述" placeholder="描述">
-        <select id="workflowVersion" aria-label="工作流版本"></select>
+      <div class="workflow-header-top">
+        <a class="workflow-brand" href="/" aria-label="返回康晋电气展示主页">
+          <span class="comking-logo-shell"><img class="comking-logo" src="https://img.kompass.com/sys-master-images/h29/h63/9109303525406/comking%E6%96%B0logo-jpg" alt="COMKING" loading="eager"></span>
+          <span><strong>康晋电气</strong><small>手势控制系统</small></span>
+        </a>
+        <nav class="workflow-primary-nav" aria-label="系统导航">
+          <a class="back-link" href="/workflows" aria-current="page">工作流</a>
+          <a class="back-link" href="/display-pages">网页管理</a>
+          <a class="back-link" href="/settings">设置</a>
+        </nav>
       </div>
-      <div class="workflow-actions">
-        <button id="newWorkflow" class="tool-button" type="button">新建</button>
-        <button id="copyWorkflow" class="tool-button" type="button" disabled>复制</button>
-        <button id="saveWorkflow" class="tool-button tool-primary" type="button" disabled>保存</button>
-        <button id="deleteWorkflow" class="tool-button tool-danger" type="button" disabled>删除</button>
-        <button id="validateWorkflow" class="tool-button" type="button" disabled>校验</button>
-        <button id="dryRunWorkflow" class="tool-button" type="button" disabled>模拟</button>
-        <button id="toggleWorkflow" class="tool-button" type="button" disabled>启用</button>
-        <a class="back-link" href="/workflows" aria-current="page">工作流</a>
-        <a class="back-link" href="/display-pages">网页管理</a>
-        <a class="back-link" href="/settings">设置</a>
+
+      <div class="workflow-header-controls">
+        <div class="workflow-meta" aria-label="工作流信息">
+          <label class="workflow-meta-item" for="workflowSelect">
+            <span>选择工作流</span>
+            <select id="workflowSelect" aria-label="选择工作流"></select>
+          </label>
+          <label class="workflow-meta-item" for="workflowName">
+            <span>名称</span>
+            <input id="workflowName" maxlength="80" aria-label="工作流名称" placeholder="输入工作流名称">
+          </label>
+          <label class="workflow-meta-item" for="workflowDescription">
+            <span>描述</span>
+            <input id="workflowDescription" maxlength="500" aria-label="工作流描述" placeholder="为这个工作流添加说明">
+          </label>
+          <label class="workflow-meta-item workflow-version-item" for="workflowVersion" title="这里显示当前工作流的保存版本。选择历史版本可回看旧配置，修改并保存后会生成一个新版本。">
+            <span>版本 <small>历史记录</small></span>
+            <select id="workflowVersion" aria-label="工作流保存版本" title="选择历史版本可回看旧配置，修改并保存后会生成一个新版本。"></select>
+          </label>
+        </div>
+        <div class="workflow-actions" aria-label="工作流操作">
+          <button id="newWorkflow" class="tool-button" type="button">新建</button>
+          <button id="copyWorkflow" class="tool-button" type="button" disabled>复制</button>
+          <button id="saveWorkflow" class="tool-button tool-primary" type="button" disabled>保存</button>
+          <button id="deleteWorkflow" class="tool-button tool-danger" type="button" disabled>删除</button>
+          <button id="validateWorkflow" class="tool-button" type="button" disabled>校验</button>
+          <button id="dryRunWorkflow" class="tool-button" type="button" disabled>模拟</button>
+          <button id="toggleWorkflow" class="tool-button" type="button" disabled>启用</button>
+        </div>
       </div>
     </header>
 
@@ -114,9 +133,15 @@
         </div>
       </section>
 
-      <aside class="workflow-inspector" aria-labelledby="inspectorHeading">
-        <div class="section-title"><h2 id="inspectorHeading">节点参数</h2></div>
-        <div id="inspectorContent" class="inspector-content"><p class="muted">选择画布节点</p></div>
+      <aside id="workflowInspector" class="workflow-inspector" hidden aria-labelledby="inspectorHeading">
+        <div class="section-title">
+          <div class="inspector-heading">
+            <h2 id="inspectorHeading">节点参数</h2>
+            <p class="inspector-subtitle">右键点击节点可打开或切换参数</p>
+          </div>
+          <button id="inspectorClose" class="icon-tool inspector-close" type="button" aria-label="关闭节点参数">×</button>
+        </div>
+        <div id="inspectorContent" class="inspector-content"><p class="muted">右键点击画布节点，打开参数设置</p></div>
         <div class="inspector-actions">
           <button id="duplicateNode" class="tool-button" type="button" disabled>复制节点</button>
           <button id="deleteNode" class="tool-button tool-danger" type="button" disabled>删除节点</button>
