@@ -1118,3 +1118,231 @@ body.workflow-page {
     animation-duration: .01ms !important;
   }
 }
+
+
+/* 第二轮玻璃质感：降低面板底色不透明度，增加环境色透射、折射高光与背景模糊。
+   仅调整视觉材质；节点尺寸、定位、命中区域和业务交互不变。 */
+:root {
+  --ck-glass: rgba(255, 255, 255, .30);
+  --ck-glass-strong: rgba(255, 255, 255, .46);
+  --ck-glass-soft: rgba(255, 255, 255, .18);
+  --ck-line: rgba(255, 255, 255, .62);
+  --ck-line-soft: rgba(100, 129, 160, .12);
+  --ck-shadow: 0 14px 42px rgba(31, 64, 99, .07);
+  --ck-shadow-raised: 0 24px 68px rgba(30, 61, 96, .13);
+}
+
+body.settings-page,
+body.display-pages-page,
+body.workflow-page {
+  background:
+    radial-gradient(ellipse at 9% 8%, rgba(115, 174, 226, .42), transparent 34%),
+    radial-gradient(ellipse at 91% 12%, rgba(105, 199, 190, .34), transparent 32%),
+    radial-gradient(ellipse at 55% 96%, rgba(145, 177, 222, .25), transparent 42%),
+    linear-gradient(145deg, #dce9f5 0%, #eaf2f7 46%, #deecee 100%);
+}
+
+/* 顶部导航：降低底色浓度，让背景色真正透过玻璃。 */
+.settings-header,
+.workflow-header {
+  border-bottom-color: rgba(255,255,255,.62);
+  background:
+    linear-gradient(120deg, rgba(255,255,255,.42), rgba(255,255,255,.14) 52%, rgba(221,239,252,.24)),
+    rgba(218,233,247,.12);
+  -webkit-backdrop-filter: saturate(205%) blur(34px);
+  backdrop-filter: saturate(205%) blur(34px);
+  box-shadow: 0 10px 34px rgba(35,67,101,.055), inset 0 1px 0 rgba(255,255,255,.72);
+}
+
+/* 左右侧栏和工具栏：玻璃层更薄，保留轻微冷色折射。 */
+.workflow-library,
+.workflow-inspector {
+  border-color: rgba(255,255,255,.66);
+  background:
+    linear-gradient(145deg, rgba(255,255,255,.38), rgba(255,255,255,.12) 56%, rgba(214,235,249,.20)),
+    rgba(219,235,247,.10);
+  -webkit-backdrop-filter: saturate(195%) blur(32px);
+  backdrop-filter: saturate(195%) blur(32px);
+  box-shadow: 0 8px 30px rgba(37,70,104,.045), inset 0 1px 0 rgba(255,255,255,.68);
+}
+.editor-toolbar {
+  border-color: rgba(255,255,255,.64);
+  background:
+    linear-gradient(115deg, rgba(255,255,255,.36), rgba(255,255,255,.10) 58%, rgba(211,233,249,.18)),
+    rgba(220,235,247,.10);
+  -webkit-backdrop-filter: saturate(195%) blur(30px);
+  backdrop-filter: saturate(195%) blur(30px);
+  box-shadow: 0 7px 24px rgba(39,70,102,.04), inset 0 1px 0 rgba(255,255,255,.7);
+}
+.workflow-runs {
+  border-color: rgba(255,255,255,.66);
+  background:
+    linear-gradient(110deg, rgba(255,255,255,.40), rgba(255,255,255,.13) 62%, rgba(218,238,249,.20)),
+    rgba(219,235,247,.10);
+  -webkit-backdrop-filter: saturate(195%) blur(32px);
+  backdrop-filter: saturate(195%) blur(32px);
+  box-shadow: 0 -8px 30px rgba(39,70,102,.045), inset 0 1px 0 rgba(255,255,255,.7);
+}
+
+/* 节点玻璃：比侧栏略实，避免流程名称和参数被背景干扰。 */
+.canvas-node {
+  border-color: rgba(255,255,255,.78);
+  background:
+    linear-gradient(145deg, rgba(255,255,255,.58), rgba(255,255,255,.26) 58%, rgba(219,237,250,.34)),
+    rgba(222,237,248,.12);
+  -webkit-backdrop-filter: saturate(190%) blur(24px);
+  backdrop-filter: saturate(190%) blur(24px);
+  box-shadow: 0 12px 32px rgba(34,65,98,.085), inset 0 1px 0 rgba(255,255,255,.82);
+}
+.canvas-node:hover {
+  box-shadow: 0 16px 38px rgba(34,65,98,.12), inset 0 1px 0 rgba(255,255,255,.9);
+}
+.canvas-node-header {
+  border-color: rgba(91,122,153,.08);
+  background:
+    linear-gradient(110deg, rgba(255,255,255,.46), rgba(255,255,255,.16)),
+    rgba(224,238,249,.12);
+}
+.canvas-node[data-selected="true"] {
+  border-color: rgba(20,93,168,.56);
+  background:
+    linear-gradient(145deg, rgba(238,248,255,.66), rgba(255,255,255,.28) 58%, rgba(207,231,250,.38)),
+    rgba(221,239,252,.14);
+  box-shadow: 0 0 0 3px rgba(54,133,198,.13), 0 16px 38px rgba(34,78,121,.13), inset 0 1px 0 rgba(255,255,255,.9);
+}
+
+/* 可交互小控件也有玻璃感，但输入文字区域维持足够对比度。 */
+.library-node,
+.run-entry,
+.connection-status,
+.connection-pill,
+.workflow-meta input,
+.workflow-meta select,
+.editor-toolbar select,
+.trigger-editor select,
+.edge-when-wrap select,
+.inspector-content input,
+.inspector-content select,
+.inspector-content textarea,
+.rtsp-input-row input,
+.mapping-row select,
+.page-form input:not([type="checkbox"]),
+.page-form select,
+.page-form textarea {
+  background-color: rgba(255,255,255,.38);
+  -webkit-backdrop-filter: saturate(180%) blur(18px);
+  backdrop-filter: saturate(180%) blur(18px);
+}
+.library-node {
+  border-color: rgba(255,255,255,.72);
+  background:
+    linear-gradient(135deg, rgba(255,255,255,.46), rgba(255,255,255,.16)),
+    rgba(220,235,247,.10);
+}
+.run-entry {
+  border-color: rgba(255,255,255,.68);
+  background:
+    linear-gradient(135deg, rgba(255,255,255,.40), rgba(255,255,255,.14)),
+    rgba(220,235,247,.10);
+}
+.workflow-meta input,
+.workflow-meta select,
+.editor-toolbar select,
+.trigger-editor select,
+.edge-when-wrap select,
+.inspector-content input,
+.inspector-content select,
+.inspector-content textarea,
+.rtsp-input-row input,
+.mapping-row select,
+.page-form input:not([type="checkbox"]),
+.page-form select,
+.page-form textarea {
+  border-color: rgba(255,255,255,.76);
+  background: rgba(255,255,255,.42);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.82), 0 3px 12px rgba(42,72,104,.025);
+}
+.workflow-actions .tool-button,
+.workflow-actions .icon-tool,
+.canvas-tools .tool-button,
+.canvas-tools .icon-tool,
+.pointer-diagnostics-actions .tool-button,
+.inspector-actions .tool-button,
+.button-secondary,
+.button-quiet,
+.page-action,
+.dialog-close {
+  border-color: rgba(255,255,255,.72);
+  background: rgba(255,255,255,.34);
+  -webkit-backdrop-filter: saturate(185%) blur(18px);
+  backdrop-filter: saturate(185%) blur(18px);
+}
+
+/* 设置与网页管理主卡片：不再是白底卡片，而是能看见背景的薄玻璃。 */
+.settings-panel,
+.display-pages-panel,
+.display-pages-note {
+  border-color: rgba(255,255,255,.68);
+  background:
+    linear-gradient(140deg, rgba(255,255,255,.40), rgba(255,255,255,.13) 58%, rgba(213,235,249,.22)),
+    rgba(218,235,248,.10);
+  -webkit-backdrop-filter: saturate(200%) blur(34px);
+  backdrop-filter: saturate(200%) blur(34px);
+  box-shadow: 0 16px 44px rgba(36,67,101,.065), inset 0 1px 0 rgba(255,255,255,.76);
+}
+.display-pages-note {
+  background:
+    linear-gradient(140deg, rgba(255,255,255,.28), rgba(255,255,255,.08)),
+    rgba(218,235,248,.08);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.62);
+}
+.page-node-card {
+  border-color: rgba(255,255,255,.72);
+  background:
+    linear-gradient(135deg, rgba(255,255,255,.44), rgba(255,255,255,.14) 60%, rgba(215,235,249,.22)),
+    rgba(220,235,247,.10);
+  -webkit-backdrop-filter: saturate(190%) blur(24px);
+  backdrop-filter: saturate(190%) blur(24px);
+  box-shadow: 0 10px 28px rgba(35,68,101,.065), inset 0 1px 0 rgba(255,255,255,.78);
+}
+.page-dialog,
+.pointer-diagnostics-panel,
+.pointer-calibration-hint {
+  border-color: rgba(255,255,255,.76);
+  background:
+    linear-gradient(140deg, rgba(255,255,255,.62), rgba(255,255,255,.32) 60%, rgba(216,236,250,.40)),
+    rgba(218,235,248,.16);
+  -webkit-backdrop-filter: saturate(205%) blur(38px);
+  backdrop-filter: saturate(205%) blur(38px);
+  box-shadow: 0 26px 72px rgba(30,61,96,.15), inset 0 1px 0 rgba(255,255,255,.88);
+}
+
+/* 小标签和状态色保持可辨认，不追求一味透明。 */
+.page-status,
+.page-tag,
+.confidence-value,
+.controller-state {
+  -webkit-backdrop-filter: saturate(180%) blur(16px);
+  backdrop-filter: saturate(180%) blur(16px);
+}
+.page-status { background-color: rgba(255,255,255,.36); }
+.controller-state { background-color: rgba(255,255,255,.34); }
+.controller-state[data-state="locked"] { background-color: rgba(213,245,231,.48); }
+.controller-state[data-state="suspect"] { background-color: rgba(255,243,215,.48); }
+.controller-state[data-state="reacquiring"] { background-color: rgba(220,236,255,.48); }
+.controller-state[data-state="lost"] { background-color: rgba(255,229,225,.5); }
+
+/* 无 backdrop-filter 的浏览器才回退到较实底色。 */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .settings-header,
+  .workflow-header,
+  .workflow-library,
+  .workflow-inspector,
+  .editor-toolbar,
+  .workflow-runs,
+  .settings-panel,
+  .display-pages-panel,
+  .display-pages-note,
+  .page-node-card,
+  .page-dialog { background: rgba(255,255,255,.88); }
+}
