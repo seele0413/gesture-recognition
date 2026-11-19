@@ -3,19 +3,20 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#111827">
+    <meta name="theme-color" content="#145da8">
     <title>康晋电气 · 展示网页管理</title>
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="/static/styles.css?v=20261118-display-pages-2">
     <link rel="stylesheet" href="/static/display-pages.css?v=20261118-display-pages-2">
     <link rel="stylesheet" href="/static/industrial-ui.css?v=20261119-1">
+    <link rel="stylesheet" href="/static/comking-glass.css?v=20261119-glass-1">
     <script src="/static/display-pages.js?v=20261118-display-pages-3" defer></script>
   </head>
   <body class="display-pages-page">
     <header class="settings-header">
       <a class="settings-brand" href="/" aria-label="返回大屏">
-        <span class="settings-brand-mark">康</span>
-        <span><strong>康晋电气</strong><small>展示网页管理</small></span>
+        <span class="comking-logo-shell"><img class="comking-logo" src="https://img.kompass.com/sys-master-images/h29/h63/9109303525406/comking%E6%96%B0logo-jpg" alt="COMKING" loading="eager"></span>
+        <span><strong>康晋电气</strong><small>展示控制系统 · 网页管理</small></span>
       </a>
       <div class="settings-header-tools">
         <span id="pageConnection" class="connection-status" data-state="stopped" role="status">
@@ -32,7 +33,6 @@
     <main class="display-pages-layout">
       <section class="display-pages-heading">
         <div>
-          <p class="eyebrow">DISPLAY DESTINATIONS</p>
           <h1>展示网页管理</h1>
           <p class="display-pages-description">直接登记网页网址，建立主页与子页面关系。登记后可在工作流的「切换展示主页」动作中选择。</p>
         </div>
@@ -46,7 +46,6 @@
       <section class="display-pages-panel" aria-labelledby="pageTreeHeading">
         <div class="display-pages-panel-heading">
           <div>
-            <p class="eyebrow">REGISTERED PAGES</p>
             <h2 id="pageTreeHeading">网页目录与访问状态</h2>
           </div>
           <span id="pageCount" class="page-count">0 个页面</span>
@@ -66,7 +65,6 @@
       <form id="pageForm" class="page-form">
         <div class="page-dialog-heading">
           <div>
-            <p class="eyebrow">PAGE REGISTRATION</p>
             <h2 id="pageDialogTitle">添加展示网页</h2>
           </div>
           <button id="closePageDialog" class="dialog-close" type="button" aria-label="关闭">×</button>
