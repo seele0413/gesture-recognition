@@ -111,7 +111,7 @@ class ApiTests(unittest.TestCase):
         actions = {item["name"]: item for item in self.client.get("/api/actions").json()["actions"]}
         self.assertIn("web.navigate_page", actions)
         self.assertEqual(actions["web.navigate_page"]["schema"]["properties"]["page_id"]["enum"],
-                         ["promo", "factory", "product", "company_website"])
+                         list(DISPLAY_PAGE_IDS))
 
     def test_display_shell_keeps_its_channels_and_cleans_up_superseded_navigation(self):
         shell = self.client.get("/static/display-shell.js").text
