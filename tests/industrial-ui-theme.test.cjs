@@ -56,6 +56,10 @@ test("Comking glass theme exposes Chinese typography, brand blue, and restrained
   assert.ok(glassTheme.includes("--ck-glass: rgba(255, 255, 255, .30)"), "glass base should be more transparent");
   assert.ok(glassTheme.includes("saturate(205%) blur(34px)"), "major glass surfaces should use stronger refraction");
   assert.ok(glassTheme.includes("radial-gradient(ellipse at 9% 8%"), "ambient background lighting should reveal transparency");
+  assert.ok(glassTheme.includes("linear-gradient(145deg, #e7edf2 0%, #eff3f6 48%, #e7edef 100%)"), "latest glass background should use neutral gray-white tones");
+  assert.ok(glassTheme.includes(".display-pages-page .page-node-actions .page-action.page-action-primary"), "default action needs a scoped high-contrast rule");
+  assert.ok(glassTheme.includes("background: linear-gradient(180deg, #286da5 0%, #174f80 100%)"), "default action needs a solid readable background");
+  assert.ok(glassTheme.includes("color: #fff;"), "default action should retain white text on its dark fill");
 });
 
 test("workflow interaction and pointer state hooks remain present", () => {
