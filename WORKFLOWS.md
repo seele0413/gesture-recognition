@@ -39,7 +39,7 @@ flowchart LR
 
 ## Display Shell 与展示主页注册
 
-首页 `/` 是常驻 Display Shell，不再直接承载某一个具体展示页面。展示页面登记数据保存在 SQLite 的 `display_pages` 表；首次初始化时从 `app/display_pages.py` 一次性播种内置页面。当前默认页为 `promo`，本地模板页为 `factory` 与 `product`，外部官网初始登记为 `company_website`（`https://www.zhcomking.com/`）。用户可在 `/display-pages` 直接登记任意公开 HTTPS 网站及其子页面，不需要提供源代码；子页面必须与父页面使用相同主机名。登记信息持久化在 SQLite，页面 ID 与层级名称动态进入 `web.navigate_page` 动作 Schema。
+首页 `/` 是常驻 Display Shell，不再直接承载某一个具体展示页面。展示页面登记数据保存在 SQLite 的 `display_pages` 表；首次初始化时从 `app/display_pages.py` 一次性播种内置页面。当前默认页为 `promo`，本地模板页为 `factory` 与 `product`。康晋电气官网以 `company_website` 登记，并预置关于我们、产品中心、新闻中心、加入我们、联系我们等同域名子页面；产品、公司介绍和新闻栏目也有对应的二级页面。登记信息持久化在 SQLite，页面 ID 与完整层级名称动态进入 `web.navigate_page` 动作 Schema。升级到网页登记种子版本 2 时会补齐缺失的预置页面，但不会覆盖已有页面的自定义标题、网址或父级关系。用户仍可在 `/display-pages` 登记任意公开 HTTPS 网站及其子页面，不需要提供源代码；子页面必须与父页面使用相同主机名。
 
 工作流动作 `web.navigate_page` 只接受登记表中的 `page_id`，不接受工作流传入的 URL。对本地页面，Shell 仍校验 `/static/pages/` 路径，并等待页面发送与当前 `shell_generation` 匹配的 `display:ready` 消息。对外部页面，Shell 根据服务端返回的已登记页面目录动态建立允许列表，并在浏览器端再次校验 HTTPS、公开域名和父子页面同主机名关系；加载时设置 `no-referrer` 并等待 iframe 的导航 `load` 事件。由于浏览器同源策略，load 事件不能证明第三方页面内容已成功渲染，现场仍须目视验收。外部页面是只读展示：Shell 不向它转发手势/事件，不向它发送内部动作，切换回本地页后原有通信恢复。外部站点若通过 `X-Frame-Options` 或 CSP `frame-ancestors` 禁止嵌入，浏览器会阻止显示；本项目不会绕过该安全策略，需要网站管理员授权嵌入来源，或改用新窗口展示（新窗口不属于当前 Shell 内嵌方案）。
 
@@ -49,6 +49,18 @@ flowchart LR
 2. 外部网页在 `/display-pages` 中填写页面 ID、名称、HTTPS URL 和可选父页面；不需要下载或上传网页源代码。
 3. 子页面只能挂在已启用的外部网页下，并必须使用父页面相同的主机名。页面管理支持编辑、启用/停用、删除和设置默认页面；默认页、仍有子页面或仍被工作流引用的页面不能删除。
 4. 工作流动作 `web.navigate_page` 选择任意已启用登记页面；`web.navigate_parent` 返回当前子页面的父页面，顶层网页则返回默认展示主页。
+
+### 康晋电气官网预置页面
+
+官网页面树以 `company_website` 为根节点。预置栏目包括：
+
+- 关于我们：公司简介、企业文化、发展历程、营销网络。
+- 产品中心：综合能源及智能运维解决方案、储能、充电桩、环网柜/户外真空开关、变压器、高低压成套、配电自动化、元件系列。
+- 新闻中心：公司新闻、行业资讯、康晋文苑。
+- 加入我们：校园招聘、社会招聘。
+- 联系我们。
+
+在工作流中添加 `web.navigate_page` 后，页面选择器会显示完整层级名称，例如“康晋电气官方网站 / 产品中心 / 储能系列产品”。切换到官网子页面后，可用 `web.navigate_parent` 返回父级栏目。外部页面仍只支持整页导航，不支持 DOM 点击、滚动或改写第三方网页内容。
 5. Shell 只加载服务端登记的 `page_id`，不接受工作流传入的任意 URL。外部页面不注入脚本、不转发手势事件，也不支持跨域 DOM 点击。
 
 地址检测只做 URL 结构校验，不会从服务器请求第三方网站；浏览器是否允许 iframe 嵌入仍须现场目视验收。Shell 独占 `/ws/display` 与 `/ws/events`，iframe 页面不能另建展示执行连接。

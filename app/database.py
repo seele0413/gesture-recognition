@@ -17,7 +17,7 @@ from app.control import (
     validate_mappings,
 )
 from app.settings import MEDIA_DIR
-from app.display_pages import DEFAULT_DISPLAY_PAGE_ID, DISPLAY_PAGES, validate_display_page_id
+from app.display_pages import DEFAULT_DISPLAY_PAGE_ID, DISPLAY_PAGE_SEED_VERSION, DISPLAY_PAGES, validate_display_page_id
 from app.pointer import DEFAULT_POINTER_SETTINGS, validate_pointer_settings
 
 
@@ -215,24 +215,33 @@ class ControlStore:
                 "INSERT OR IGNORE INTO media_assets (asset_id, title, filename, enabled) VALUES (?, ?, ?, 1)",
                 ("company-promo", "企业宣传片", "company-promo.mp4"),
             )
-            seeded_row = connection.execute(
-                "SELECT value FROM settings WHERE key = ?", ("display_pages_seeded",)
+            seed_version_row = connection.execute(
+                "SELECT value FROM settings WHERE key = ?", ("display_page_seed_version",)
             ).fetchone()
-            if not seeded_row:
+            try:
+                seed_version = int(seed_version_row["value"]) if seed_version_row else 0
+            except (TypeError, ValueError):
+                seed_version = 0
+            if seed_version < DISPLAY_PAGE_SEED_VERSION:
                 now = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
                 for sort_order, page in enumerate(DISPLAY_PAGES):
                     connection.execute(
                         """INSERT OR IGNORE INTO display_pages
                            (page_id, title, description, path, page_type, url, parent_id,
                             sort_order, enabled, created_at, updated_at)
-                           VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 1, ?, ?)""",
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)""",
                         (page.page_id, page.title, page.description, page.path, page.page_type,
-                         page.url, sort_order, now, now),
+                         page.url, page.parent_id, sort_order, now, now),
                     )
                 connection.execute(
-                    "INSERT INTO settings (key, value) VALUES (?, ?)",
-                    ("display_pages_seeded", "1"),
+                    "INSERT INTO settings (key, value) VALUES (?, ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    ("display_page_seed_version", str(DISPLAY_PAGE_SEED_VERSION)),
                 )
+            connection.execute(
+                "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
+                ("display_pages_seeded", "1"),
+            )
             connection.execute(
                 "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
                 ("display_default_page_id", json.dumps(DEFAULT_DISPLAY_PAGE_ID)),

@@ -12,6 +12,7 @@ from app.ppt_actions import PresentationAdapter
 from app.video_actions import register_video_actions
 from app.workflow import new_workflow
 from app.workflow_validator import validate_workflow
+from app.display_pages import DISPLAY_PAGE_IDS
 from app.web_actions import BrowserCommandAdapter, register_web_actions
 
 
@@ -81,6 +82,7 @@ class WorkflowEngineTests(unittest.IsolatedAsyncioTestCase):
         )
         self.engine = WorkflowEngine(self.store, self.actions)
         self.engine.set_display_connected(True)
+        self.engine.set_display_ready(True)
         await self.engine.on_event({"type": "controller", "state": "locked", "track_id": "person-a"})
 
     async def asyncTearDown(self):
@@ -375,10 +377,18 @@ class _FakeSocket:
 
 
 class DisplayCommandTests(unittest.IsolatedAsyncioTestCase):
+    async def _connect_ready(self, channel, socket):
+        self.assertTrue(await channel.connect(socket))
+        await channel.receive(socket, {
+            "type": "display:ready",
+            "page_id": "promo",
+            "generation": 1,
+        })
+
     async def test_command_waits_for_matching_ack_and_rejects_second_client(self):
         channel = DisplayCommandChannel()
         socket = _FakeSocket()
-        self.assertTrue(await channel.connect(socket))
+        self.assertTrue(await self._connect_ready(channel, socket))
         rejected = _FakeSocket()
         self.assertFalse(await channel.connect(rejected))
         self.assertEqual(rejected.closed[0], 1013)
@@ -397,7 +407,7 @@ class DisplayCommandTests(unittest.IsolatedAsyncioTestCase):
     async def test_disconnect_fails_pending_command(self):
         channel = DisplayCommandChannel()
         socket = _FakeSocket()
-        await channel.connect(socket)
+        await self._connect_ready(channel, socket)
         pending = asyncio.create_task(channel.execute({"run_id": "r", "command_id": "c"}, 1000))
         await asyncio.sleep(0)
         await channel.disconnect(socket)
@@ -407,7 +417,7 @@ class DisplayCommandTests(unittest.IsolatedAsyncioTestCase):
     async def test_ack_with_wrong_run_id_is_ignored(self):
         channel = DisplayCommandChannel()
         socket = _FakeSocket()
-        await channel.connect(socket)
+        await self._connect_ready(channel, socket)
         pending = asyncio.create_task(channel.execute(
             {"run_id": "run-a", "command_id": "command-a", "action": "web.navigate_page",
              "params": {"page_id": "factory"}}, 1000
@@ -429,7 +439,7 @@ class DisplayCommandTests(unittest.IsolatedAsyncioTestCase):
     async def test_negative_ack_fails_workflow_action_with_bounded_error(self):
         channel = DisplayCommandChannel()
         socket = _FakeSocket()
-        await channel.connect(socket)
+        await self._connect_ready(channel, socket)
         pending = asyncio.create_task(channel.execute(
             {"run_id": "run-a", "command_id": "command-b", "action": "web.navigate_page",
              "params": {"page_id": "missing"}}, 1000
@@ -446,7 +456,7 @@ class DisplayCommandTests(unittest.IsolatedAsyncioTestCase):
     async def test_timeout_removes_pending_command(self):
         channel = DisplayCommandChannel()
         socket = _FakeSocket()
-        await channel.connect(socket)
+        await self._connect_ready(channel, socket)
         with self.assertRaises(asyncio.TimeoutError):
             await channel.execute(
                 {"run_id": "run-a", "command_id": "command-timeout", "action": "web.navigate_page",
@@ -478,11 +488,11 @@ class DisplayCommandTests(unittest.IsolatedAsyncioTestCase):
     async def test_registered_navigate_page_action_sends_page_id_and_waits_for_ack(self):
         channel = DisplayCommandChannel()
         socket = _FakeSocket()
-        await channel.connect(socket)
+        await self._connect_ready(channel, socket)
         registry = ActionRegistry()
         register_web_actions(registry, BrowserCommandAdapter(channel))
         schema = registry.schema_map()["web.navigate_page"]
-        self.assertEqual(schema["properties"]["page_id"]["enum"], ["promo", "factory", "product", "company_website"])
+        self.assertEqual(schema["properties"]["page_id"]["enum"], list(DISPLAY_PAGE_IDS))
         pending = asyncio.create_task(registry.execute(
             "web.navigate_page", {"page_id": "factory"},
             {"run_id": "run-a", "command_id": "command-page", "timeout_ms": 1000},

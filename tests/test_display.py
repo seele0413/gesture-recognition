@@ -9,6 +9,7 @@ class FakeWebSocket:
         self.accepted = False
         self.closed = False
         self.sent = []
+        self.sent_event = asyncio.Event()
 
     async def accept(self):
         self.accepted = True
@@ -18,6 +19,7 @@ class FakeWebSocket:
 
     async def send_json(self, payload):
         self.sent.append(payload)
+        self.sent_event.set()
 
 
 class DisplayCommandChannelTests(unittest.TestCase):
@@ -94,7 +96,7 @@ class DisplayCommandChannelTests(unittest.TestCase):
                 "page_id": "factory",
                 "generation": 3,
             })
-            await asyncio.sleep(0)
+            await asyncio.wait_for(websocket.sent_event.wait(), timeout=0.1)
             self.assertEqual(len(websocket.sent), 1)
             self.assertEqual(websocket.sent[0]["type"], "command")
             self.assertEqual(websocket.sent[0]["command_id"], "command-1")

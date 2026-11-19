@@ -6,6 +6,7 @@ from pathlib import Path
 
 from app.control import DEFAULT_MAPPINGS, LEGACY_DEFAULT_MAPPINGS
 from app.database import ControlStore
+from app.display_pages import DISPLAY_PAGES
 from app.workflow import new_workflow
 
 
@@ -21,13 +22,37 @@ class ControlStoreTests(unittest.TestCase):
     def test_display_pages_are_seeded_and_persisted(self):
         pages = self.store.get_display_pages()
         self.assertEqual([page["page_id"] for page in pages],
-                         ["promo", "factory", "product", "company_website"])
+                         [page.page_id for page in DISPLAY_PAGES])
         self.assertEqual(self.store.get_default_display_page_id(), "promo")
         reopened = ControlStore(self.path)
         self.assertEqual(reopened.get_display_page("company_website")["url"],
                          "https://www.zhcomking.com/")
+        self.assertEqual(self.store.get_display_page_labels()["company_culture"],
+                         "康晋电气官方网站 / 关于我们 / 企业文化")
 
-    def test_legacy_database_migrates_four_display_pages_without_losing_settings(self):
+    def test_seed_version_backfills_official_website_children_once_without_overwriting_edits(self):
+        self.store.update_display_page("company_website", {"title": "自定义官网标题"})
+        with sqlite3.connect(self.path) as connection:
+            connection.execute("DELETE FROM display_pages WHERE page_id = ?", ("company_storage",))
+            connection.execute(
+                "UPDATE settings SET value = ? WHERE key = ?",
+                ("1", "display_page_seed_version"),
+            )
+
+        migrated = ControlStore(self.path)
+        self.assertEqual(migrated.get_display_page("company_website")["title"], "自定义官网标题")
+        self.assertIsNotNone(migrated.get_display_page("company_storage"))
+        self.assertEqual(
+            migrated.get_display_page_labels()["company_storage"],
+            "康晋电气官方网站 / 产品中心 / 储能系列产品",
+        )
+
+        with sqlite3.connect(self.path) as connection:
+            connection.execute("DELETE FROM display_pages WHERE page_id = ?", ("company_storage",))
+        reopened = ControlStore(self.path)
+        self.assertIsNone(reopened.get_display_page("company_storage"))
+
+    def test_legacy_database_migrates_display_page_tree_without_losing_settings(self):
         legacy_path = Path(self.temp_dir.name) / "legacy.sqlite3"
         legacy_mappings = dict(DEFAULT_MAPPINGS)
         legacy_mappings["ILoveYou"] = "play_pause"
@@ -48,7 +73,7 @@ class ControlStoreTests(unittest.TestCase):
         pages = migrated.get_display_pages()
         self.assertEqual(
             [page["page_id"] for page in pages],
-            ["promo", "factory", "product", "company_website"],
+            [page.page_id for page in DISPLAY_PAGES],
         )
         self.assertEqual(migrated.get_mappings(), legacy_mappings)
         self.assertEqual(migrated.get_gesture_confidence_threshold(), 0.65)
@@ -56,7 +81,7 @@ class ControlStoreTests(unittest.TestCase):
         reopened = ControlStore(legacy_path)
         self.assertEqual(
             [page["page_id"] for page in reopened.get_display_pages()],
-            ["promo", "factory", "product", "company_website"],
+            [page.page_id for page in DISPLAY_PAGES],
         )
 
     def test_external_display_pages_can_be_created_updated_and_deleted(self):
