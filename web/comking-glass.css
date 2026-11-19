@@ -1346,3 +1346,122 @@ body.workflow-page {
   .page-node-card,
   .page-dialog { background: rgba(255,255,255,.88); }
 }
+
+
+/* 第三轮微调：降低冷蓝环境光，恢复中性透明玻璃；修复“设为默认”按钮文字对比度。 */
+body.settings-page,
+body.display-pages-page,
+body.workflow-page {
+  background:
+    radial-gradient(ellipse at 12% 4%, rgba(197, 215, 230, .20), transparent 38%),
+    radial-gradient(ellipse at 88% 10%, rgba(210, 225, 224, .14), transparent 34%),
+    linear-gradient(145deg, #e7edf2 0%, #eff3f6 48%, #e7edef 100%);
+}
+
+/* 玻璃只保留自然白色反射，降低蓝青色偏和过饱和。 */
+.settings-header,
+.workflow-header {
+  background:
+    linear-gradient(120deg, rgba(255,255,255,.44), rgba(255,255,255,.18) 58%, rgba(244,248,251,.26)),
+    rgba(255,255,255,.10);
+  -webkit-backdrop-filter: saturate(155%) blur(34px);
+  backdrop-filter: saturate(155%) blur(34px);
+}
+.workflow-library,
+.workflow-inspector {
+  background:
+    linear-gradient(145deg, rgba(255,255,255,.40), rgba(255,255,255,.16) 58%, rgba(245,248,250,.22)),
+    rgba(255,255,255,.08);
+  -webkit-backdrop-filter: saturate(150%) blur(32px);
+  backdrop-filter: saturate(150%) blur(32px);
+}
+.editor-toolbar {
+  background:
+    linear-gradient(115deg, rgba(255,255,255,.40), rgba(255,255,255,.16) 60%, rgba(245,248,250,.22)),
+    rgba(255,255,255,.08);
+  -webkit-backdrop-filter: saturate(150%) blur(30px);
+  backdrop-filter: saturate(150%) blur(30px);
+}
+.workflow-runs {
+  background:
+    linear-gradient(110deg, rgba(255,255,255,.42), rgba(255,255,255,.17) 62%, rgba(245,248,250,.22)),
+    rgba(255,255,255,.08);
+  -webkit-backdrop-filter: saturate(155%) blur(32px);
+  backdrop-filter: saturate(155%) blur(32px);
+}
+.settings-panel,
+.display-pages-panel {
+  background:
+    linear-gradient(140deg, rgba(255,255,255,.43), rgba(255,255,255,.18) 60%, rgba(245,248,250,.24)),
+    rgba(255,255,255,.08);
+  -webkit-backdrop-filter: saturate(155%) blur(34px);
+  backdrop-filter: saturate(155%) blur(34px);
+}
+.display-pages-note {
+  background:
+    linear-gradient(140deg, rgba(255,255,255,.30), rgba(255,255,255,.12)),
+    rgba(255,255,255,.06);
+}
+.canvas-node {
+  background:
+    linear-gradient(145deg, rgba(255,255,255,.62), rgba(255,255,255,.32) 60%, rgba(246,249,251,.36)),
+    rgba(255,255,255,.12);
+  -webkit-backdrop-filter: saturate(155%) blur(24px);
+  backdrop-filter: saturate(155%) blur(24px);
+}
+.canvas-node-header {
+  background:
+    linear-gradient(110deg, rgba(255,255,255,.50), rgba(255,255,255,.20)),
+    rgba(246,249,251,.12);
+}
+.canvas-node[data-selected="true"] {
+  background:
+    linear-gradient(145deg, rgba(245,250,255,.70), rgba(255,255,255,.34) 60%, rgba(237,244,249,.38)),
+    rgba(255,255,255,.14);
+}
+.page-node-card {
+  background:
+    linear-gradient(135deg, rgba(255,255,255,.48), rgba(255,255,255,.20) 62%, rgba(246,249,251,.26)),
+    rgba(255,255,255,.10);
+  -webkit-backdrop-filter: saturate(155%) blur(24px);
+  backdrop-filter: saturate(155%) blur(24px);
+}
+.page-dialog,
+.pointer-diagnostics-panel,
+.pointer-calibration-hint {
+  background:
+    linear-gradient(140deg, rgba(255,255,255,.68), rgba(255,255,255,.40) 62%, rgba(246,249,251,.44)),
+    rgba(255,255,255,.16);
+  -webkit-backdrop-filter: saturate(160%) blur(38px);
+  backdrop-filter: saturate(160%) blur(38px);
+}
+
+/* “设为默认”使用明确的品牌强调色，不允许被通用玻璃按钮规则冲掉底色。 */
+.display-pages-page .page-node-actions .page-action.page-action-primary {
+  border: 1px solid rgba(18, 67, 111, .82);
+  color: #fff;
+  background: linear-gradient(180deg, #286da5 0%, #174f80 100%);
+  box-shadow: 0 4px 12px rgba(25, 66, 103, .16), inset 0 1px 0 rgba(255,255,255,.22);
+  text-shadow: 0 1px 1px rgba(10, 39, 66, .20);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+.display-pages-page .page-node-actions .page-action.page-action-primary:hover {
+  border-color: rgba(15, 57, 95, .92);
+  color: #fff;
+  background: linear-gradient(180deg, #205f94 0%, #123f69 100%);
+  box-shadow: 0 6px 16px rgba(25, 66, 103, .20), inset 0 1px 0 rgba(255,255,255,.24);
+}
+.display-pages-page .page-node-actions .page-action.page-action-primary:focus-visible {
+  outline: 3px solid rgba(38, 105, 160, .26);
+  outline-offset: 2px;
+}
+
+/* 减少玻璃滤镜饱和度后，交互按钮仍保留清晰的悬浮层次。 */
+.library-node,
+.run-entry,
+.connection-status,
+.connection-pill {
+  -webkit-backdrop-filter: saturate(150%) blur(18px);
+  backdrop-filter: saturate(150%) blur(18px);
+}
