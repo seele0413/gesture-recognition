@@ -2,6 +2,7 @@ import io
 import json
 import tempfile
 import unittest
+import urllib.error
 import zipfile
 from pathlib import Path
 from unittest.mock import patch
@@ -294,12 +295,198 @@ class WorkflowGeneratorConfigurationTests(unittest.TestCase):
                 with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                     generator.configure_api_key(invalid)
 
+    def test_chat_completions_api_request_uses_openai_compatible_schema(self):
+        with tempfile.TemporaryDirectory() as directory:
+            env_file = Path(directory) / ".env"
+            env_file.write_text(
+                "OPENAI_API_KEY=sk-proxy-key\nOPENAI_MODEL=deepseek-chat\n"
+                "OPENAI_BASE_URL=https://gateway.example/v1\nOPENAI_API_PROTOCOL=chat_completions\n",
+                encoding="utf-8",
+            )
+            captured = {}
+
+            def opener(request, timeout):
+                captured["url"] = request.full_url
+                captured["authorization"] = request.get_header("Authorization")
+                captured["payload"] = json.loads(request.data.decode("utf-8"))
+                return FakeResponse({
+                    "choices": [{
+                        "message": {
+                            "role": "assistant",
+                            "content": json.dumps(sample_plan(), ensure_ascii=False),
+                        },
+                        "finish_reason": "stop",
+                    }],
+                })
+
+            with patch.dict("os.environ", {
+                "OPENAI_API_KEY": "",
+                "OPENAI_MODEL": "",
+                "OPENAI_BASE_URL": "",
+                "OPENAI_API_PROTOCOL": "",
+            }):
+                generator = WorkflowGenerator(env_file=env_file, opener=opener)
+                plan = generator.generate_plan(
+                    "播放企业宣传片",
+                    "结束后停止",
+                    "Open_Palm",
+                    {"video.play": {"properties": {}, "required": [], "idempotent": True}},
+                    [{"page_id": "promo", "title": "企业宣传片", "enabled": True}],
+                )
+
+        self.assertEqual(plan["name"], "访客展厅讲解")
+        self.assertEqual(captured["url"], "https://gateway.example/v1/chat/completions")
+        self.assertEqual(captured["authorization"], "Bearer sk-proxy-key")
+        self.assertEqual(captured["payload"]["model"], "deepseek-chat")
+        self.assertEqual(captured["payload"]["response_format"]["type"], "json_schema")
+        self.assertTrue(captured["payload"]["response_format"]["json_schema"]["strict"])
+
+    def test_auto_protocol_falls_back_to_responses_when_chat_endpoint_is_missing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            env_file = Path(directory) / ".env"
+            env_file.write_text(
+                "OPENAI_API_KEY=sk-proxy-key\nOPENAI_MODEL=gpt-4o-mini\n"
+                "OPENAI_BASE_URL=https://gateway.example/v1\nOPENAI_API_PROTOCOL=auto\n",
+                encoding="utf-8",
+            )
+            requested = []
+
+            def opener(request, timeout):
+                requested.append(request.full_url)
+                if request.full_url.endswith("/chat/completions"):
+                    body = io.BytesIO(b'{"error":{"message":"Not Found"}}')
+                    raise urllib.error.HTTPError(request.full_url, 404, "Not Found", {}, body)
+                return FakeResponse({
+                    "output": [{
+                        "type": "message",
+                        "content": [{
+                            "type": "output_text",
+                            "text": json.dumps(sample_plan(), ensure_ascii=False),
+                        }],
+                    }],
+                })
+
+            with patch.dict("os.environ", {
+                "OPENAI_API_KEY": "",
+                "OPENAI_MODEL": "",
+                "OPENAI_BASE_URL": "",
+                "OPENAI_API_PROTOCOL": "",
+            }):
+                generator = WorkflowGenerator(env_file=env_file, opener=opener)
+                plan = generator.generate_plan(
+                    "播放企业宣传片", "", "Open_Palm",
+                    {"video.play": {"properties": {}, "required": [], "idempotent": True}}, [],
+                )
+
+        self.assertEqual(plan["name"], "访客展厅讲解")
+        self.assertEqual(requested, [
+            "https://gateway.example/v1/chat/completions",
+            "https://gateway.example/v1/responses",
+        ])
+
+    def test_chat_completions_falls_back_to_json_object_when_schema_format_is_unsupported(self):
+        with tempfile.TemporaryDirectory() as directory:
+            env_file = Path(directory) / ".env"
+            env_file.write_text(
+                "OPENAI_API_KEY=sk-proxy-key\nOPENAI_MODEL=deepseek-chat\n"
+                "OPENAI_BASE_URL=https://gateway.example/v1\nOPENAI_API_PROTOCOL=chat_completions\n",
+                encoding="utf-8",
+            )
+            payloads = []
+
+            def opener(request, timeout):
+                payload = json.loads(request.data.decode("utf-8"))
+                payloads.append(payload)
+                if len(payloads) == 1:
+                    body = io.BytesIO(b'{"error":{"message":"response_format json_schema is not supported"}}')
+                    raise urllib.error.HTTPError(request.full_url, 400, "Bad Request", {}, body)
+                return FakeResponse({
+                    "choices": [{
+                        "message": {"content": json.dumps(sample_plan(), ensure_ascii=False)},
+                    }],
+                })
+
+            with patch.dict("os.environ", {
+                "OPENAI_API_KEY": "",
+                "OPENAI_MODEL": "",
+                "OPENAI_BASE_URL": "",
+                "OPENAI_API_PROTOCOL": "",
+            }):
+                generator = WorkflowGenerator(env_file=env_file, opener=opener)
+                plan = generator.generate_plan(
+                    "播放企业宣传片", "", "Open_Palm",
+                    {"video.play": {"properties": {}, "required": [], "idempotent": True}}, [],
+                )
+
+        self.assertEqual(plan["name"], "访客展厅讲解")
+        self.assertEqual(payloads[0]["response_format"]["type"], "json_schema")
+        self.assertEqual(payloads[1]["response_format"]["type"], "json_object")
+
+    def test_test_connection_uses_chat_completions_without_saving_temporary_config(self):
+        with tempfile.TemporaryDirectory() as directory:
+            env_file = Path(directory) / ".env"
+            captured = {}
+
+            def opener(request, timeout):
+                captured["url"] = request.full_url
+                captured["payload"] = json.loads(request.data.decode("utf-8"))
+                return FakeResponse({
+                    "choices": [{"message": {"content": "connection_ok"}}],
+                })
+
+            with patch.dict("os.environ", {
+                "OPENAI_API_KEY": "",
+                "OPENAI_MODEL": "",
+                "OPENAI_BASE_URL": "",
+                "OPENAI_API_PROTOCOL": "",
+            }):
+                generator = WorkflowGenerator(env_file=env_file, opener=opener)
+                result = generator.test_connection(
+                    "sk-temporary-key",
+                    "https://gateway.example/v1",
+                    "qwen-plus",
+                    "chat_completions",
+                )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["protocol"], "chat_completions")
+        self.assertEqual(captured["url"], "https://gateway.example/v1/chat/completions")
+        self.assertFalse(env_file.exists())
+
+    def test_configure_saves_provider_settings_and_preserves_unrelated_values(self):
+        with tempfile.TemporaryDirectory() as directory:
+            env_file = Path(directory) / ".env"
+            env_file.write_text("OTHER_SETTING=keep\nOPENAI_API_KEY=old\n", encoding="utf-8")
+            with patch.dict("os.environ", {
+                "OPENAI_API_KEY": "",
+                "OPENAI_MODEL": "",
+                "OPENAI_BASE_URL": "",
+                "OPENAI_API_PROTOCOL": "",
+            }):
+                generator = WorkflowGenerator(env_file=env_file)
+                status = generator.configure(
+                    "sk-proxy-key",
+                    "https://gateway.example/v1",
+                    "qwen-plus",
+                    "chat_completions",
+                )
+            saved = env_file.read_text(encoding="utf-8")
+        self.assertEqual(status["base_url"], "https://gateway.example/v1")
+        self.assertEqual(status["model"], "qwen-plus")
+        self.assertEqual(status["protocol"], "chat_completions")
+        self.assertNotIn("api_key", status)
+        self.assertIn("OPENAI_API_KEY=sk-proxy-key", saved)
+        self.assertIn("OPENAI_BASE_URL=https://gateway.example/v1", saved)
+        self.assertIn("OPENAI_MODEL=qwen-plus", saved)
+        self.assertIn("OPENAI_API_PROTOCOL=chat_completions", saved)
+        self.assertIn("OTHER_SETTING=keep", saved)
+
     def test_responses_api_request_uses_strict_schema_and_parses_output(self):
         with tempfile.TemporaryDirectory() as directory:
             env_file = Path(directory) / ".env"
             env_file.write_text(
                 "OPENAI_API_KEY=sk-test-key\nOPENAI_MODEL=gpt-4o-mini\n"
-                "OPENAI_BASE_URL=https://api.example.test/v1\n",
+                "OPENAI_BASE_URL=https://api.example.test/v1\nOPENAI_API_PROTOCOL=responses\n",
                 encoding="utf-8",
             )
             captured = {}
@@ -323,6 +510,7 @@ class WorkflowGeneratorConfigurationTests(unittest.TestCase):
                 "OPENAI_API_KEY": "",
                 "OPENAI_MODEL": "",
                 "OPENAI_BASE_URL": "",
+                "OPENAI_API_PROTOCOL": "",
             }):
                 generator = WorkflowGenerator(env_file=env_file, opener=opener)
                 plan = generator.generate_plan(
@@ -357,28 +545,73 @@ class WorkflowGeneratorClientTests(unittest.TestCase):
     def test_frontend_api_key_endpoint_saves_without_returning_secret(self):
         expected_status = {
             "configured": True,
-            "provider": "OpenAI Responses API",
+            "provider": "OpenAI-compatible API",
             "model": "gpt-4o-mini",
+            "base_url": "https://api.openai.com/v1",
+            "protocol": "auto",
+            "protocol_label": "自动兼容",
             "extensions": [".pdf", ".docx", ".txt", ".md"],
             "max_upload_bytes": 5 * 1024 * 1024,
             "max_extracted_chars": 32000,
         }
-        with patch.object(WorkflowGenerator, "configure_api_key", return_value=expected_status) as configure:
+        with patch.object(WorkflowGenerator, "configure", return_value=expected_status) as configure:
             response = self.client.put(
                 "/api/workflow-generator/config",
-                json={"api_key": "sk-local-test-key"},
+                json={
+                    "api_key": "sk-local-test-key",
+                    "base_url": "https://api.example.test/v1",
+                    "model": "qwen-plus",
+                    "protocol": "chat_completions",
+                },
             )
         self.assertEqual(response.status_code, 200, response.text)
         self.assertTrue(response.json()["configured"])
         self.assertNotIn("api_key", response.json())
-        configure.assert_called_once_with("sk-local-test-key")
+        configure.assert_called_once_with(
+            api_key="sk-local-test-key",
+            base_url="https://api.example.test/v1",
+            model="qwen-plus",
+            protocol="chat_completions",
+        )
 
     def test_generator_status_endpoint_is_available(self):
         response = self.client.get("/api/workflow-generator/status")
         self.assertEqual(response.status_code, 200)
         self.assertIn("configured", response.json())
-        self.assertEqual(response.json()["provider"], "OpenAI Responses API")
+        self.assertEqual(response.json()["provider"], "OpenAI-compatible API")
+        self.assertEqual(response.json()["protocol"], "auto")
+        self.assertIn("base_url", response.json())
         self.assertIn(".docx", response.json()["extensions"])
+
+    def test_model_connection_test_endpoint_does_not_persist_or_return_api_key(self):
+        result = {
+            "ok": True,
+            "provider": "OpenAI-compatible API",
+            "base_url": "https://gateway.example/v1",
+            "model": "deepseek-chat",
+            "protocol": "chat_completions",
+            "protocol_label": "Chat Completions",
+            "message": "连接成功，模型已返回测试响应。",
+        }
+        with patch.object(WorkflowGenerator, "test_connection", return_value=result) as test_connection:
+            response = self.client.post(
+                "/api/workflow-generator/test",
+                json={
+                    "api_key": "sk-temporary-test-key",
+                    "base_url": "https://gateway.example/v1",
+                    "model": "deepseek-chat",
+                    "protocol": "chat_completions",
+                },
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()["ok"])
+        self.assertNotIn("api_key", response.json())
+        test_connection.assert_called_once_with(
+            "sk-temporary-test-key",
+            "https://gateway.example/v1",
+            "deepseek-chat",
+            "chat_completions",
+        )
 
     def test_rejects_unsupported_file_before_calling_model(self):
         response = self.client.post(
