@@ -707,7 +707,7 @@ function setEditingEnabled(enabled) {
   });
   ui.workflowName.disabled = !enabled;
   ui.workflowDescription.disabled = !enabled;
-  ui.workflowVersion.disabled = !enabled;
+  ui.workflowVersion.disabled = !enabled || workflowIsDraft;
   ui.triggerType.disabled = !enabled;
 }
 
