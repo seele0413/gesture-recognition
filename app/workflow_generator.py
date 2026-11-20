@@ -881,11 +881,10 @@ class WorkflowGenerator:
                     written.add(key_name)
                 continue
             updated_lines.append(line)
-        for key_name, value in updates.items():
-            if key_name not in written:
-                if updated_lines and updated_lines[-1].strip():
-                    updated_lines.append("")
-                updated_lines.append(f"{key_name}={value}")
+        missing_updates = [(key_name, value) for key_name, value in updates.items() if key_name not in written]
+        if missing_updates and updated_lines and updated_lines[-1].strip():
+            updated_lines.append("")
+        updated_lines.extend(f"{key_name}={value}" for key_name, value in missing_updates)
 
         content = "\n".join(updated_lines).rstrip() + "\n"
         temporary_path: Path | None = None
@@ -1027,17 +1026,21 @@ class WorkflowGenerator:
                 "strict": True,
                 "schema": schema,
             }
-        else:
+        elif format_mode == "json_object":
             text_format = {"type": "json_object"}
-        return {
+        else:
+            text_format = {}
+        payload = {
             "model": config["model"],
             "input": [
                 {"role": "system", "content": [{"type": "input_text", "text": system_prompt + "\n请只输出符合要求的 JSON，不要输出 Markdown 代码围栏。"}]},
                 {"role": "user", "content": [{"type": "input_text", "text": user_prompt}]},
             ],
-            "text": {"format": text_format},
             "max_output_tokens": 8000,
         }
+        if text_format:
+            payload["text"] = {"format": text_format}
+        return payload
 
     def _request_chat_generation(
         self,
@@ -1083,10 +1086,18 @@ class WorkflowGenerator:
         except ModelRequestError as error:
             if not self._format_unsupported(error):
                 raise
-            return self._post_json(
-                config, "responses",
-                self._responses_payload(config, system_prompt, user_prompt, None, "json_object"),
-            )
+            try:
+                return self._post_json(
+                    config, "responses",
+                    self._responses_payload(config, system_prompt, user_prompt, None, "json_object"),
+                )
+            except ModelRequestError as json_error:
+                if not self._format_unsupported(json_error):
+                    raise
+                return self._post_json(
+                    config, "responses",
+                    self._responses_payload(config, system_prompt, user_prompt, None, "none"),
+                )
 
     def _request_generation(
         self,
@@ -1234,8 +1245,11 @@ class WorkflowGenerator:
         if response_data.get("status") == "incomplete":
             raise ModelRequestError("模型输出不完整，请缩短文档或减少流程复杂度后重试")
         output_text = _extract_response_text(response_data)
+        normalized_output = output_text.strip()
+        if normalized_output.startswith("```"):
+            normalized_output = re.sub(r"^\`\`\`(?:json)?\s*|\s*\`\`\`$", "", normalized_output, flags=re.IGNORECASE).strip()
         try:
-            plan = json.loads(output_text)
+            plan = json.loads(normalized_output)
         except json.JSONDecodeError as error:
             raise ModelRequestError("模型返回的工作流结构不是有效 JSON") from error
         if not isinstance(plan, dict):
