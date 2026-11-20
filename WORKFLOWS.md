@@ -208,13 +208,13 @@ PRESENTATION_DECKS = {
 
 ## AI 文档生成器
 
-编辑器中的“AI 生成”入口把文档理解与工作流运行时分开：文档解析器提取 PDF、DOCX、TXT 或 Markdown 文本，WorkflowGenerator 使用项目当前的 ActionRegistry Schema、动作白名单和启用的展示页面目录调用 OpenAI Responses API Structured Outputs。模型只能返回受约束的流程计划；compile_workflow_plan 将模型节点 ID 转换为本项目节点 ID，生成画布位置，并为未明确的条件分支/普通后继添加安全结束路径。最终仍以 WorkflowEngine.validate 和展示页面兼容性校验为准，模型生成的 JSON 不会直接执行。
+编辑器中的“AI 生成”入口把文档理解与工作流运行时分开：文档解析器提取 PDF、DOCX、TXT 或 Markdown 文本，WorkflowGenerator 使用项目当前的 ActionRegistry Schema、动作白名单和启用的展示页面目录调用 OpenAI 兼容模型服务。支持 Chat Completions 与 Responses 两种协议；自动兼容模式优先请求 Chat Completions，遇到接口路径不支持时再尝试 Responses。结构化 JSON Schema 不受服务商支持时，会依次降级为 JSON Object 或普通 JSON 提示。模型只能返回受约束的流程计划；compile_workflow_plan 将模型节点 ID 转换为本项目节点 ID，生成画布位置，并为未明确的条件分支/普通后继添加安全结束路径。最终仍以 WorkflowEngine.validate 和展示页面兼容性校验为准，模型生成的 JSON 不会直接执行。
 
 - 上传限制：单文件 5 MB，抽取文本最多 32,000 字符，PDF 最多 80 页；DOCX 会提取段落和表格，扫描版 PDF 第一版不做 OCR。
 - 节点/连线限制：最多 30 个节点、60 条边；只允许当前注册动作与当前启用的展示页面 ID，不允许任意 URL、路径或代码。
 - 页面边界：外部网页只支持整页导航，不能在外部页面之后执行本地 DOM 控制动作；需要先通过 web.return_home 回到本地展示主页。
 - 人工审核：生成 API 只返回 enabled=false 的未保存草稿。前端“应用到画布”只更新当前编辑状态；用户手动保存后才会创建数据库记录，手动启用后才可响应手势。
-- API Key：项目根目录 .env 中配置 OPENAI_API_KEY、OPENAI_MODEL 和可选 OPENAI_BASE_URL。.env 已加入 .gitignore；.env.example 仅提供占位值。API 调用单独计费，不属于 ChatGPT 订阅。
+- 模型配置：项目根目录 .env 中配置 OPENAI_API_KEY、OPENAI_BASE_URL、OPENAI_MODEL 和 OPENAI_API_PROTOCOL（auto、chat_completions 或 responses）。网页弹窗可直接编辑这些配置并测试连接；留空 API Key 表示保留当前密钥。密钥不会由状态接口返回。.env 已加入 .gitignore；.env.example 仅提供占位值。API 调用费用由所选服务商按其规则计费，不属于 ChatGPT 订阅。
 - 隐私：文档正文会发送到用户配置的 OpenAI API 服务，不会保存在项目磁盘或 SQLite；不要上传未获授权的涉密文档。
-- 接口：GET /api/workflow-generator/status、POST /api/workflows/generate。生成接口使用 multipart/form-data，字段为 file、instructions 和 preferred_trigger。
+- 接口：GET /api/workflow-generator/status、PUT /api/workflow-generator/config、POST /api/workflow-generator/test、POST /api/workflows/generate。连接测试可使用尚未保存的表单配置，不会写入 .env；生成接口使用 multipart/form-data，字段为 file、instructions 和 preferred_trigger。
 - 自动化测试：tests/test_workflow_generator.py 覆盖文档解析、上传限制、严格 Schema、流程图编译、循环图布局、外部页面边界和生成 API 的未保存草稿语义。
