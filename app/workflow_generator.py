@@ -881,8 +881,8 @@ class WorkflowGenerator:
         current = self._configuration()
         next_values = {
             "OPENAI_API_KEY": current["api_key"],
-            "OPENAI_BASE_URL": self._normalize_base_url(current["base_url"]),
-            "OPENAI_MODEL": self._normalize_model(current["model"]),
+            "OPENAI_BASE_URL": self._normalize_base_url(base_url if base_url is not None else current["base_url"]),
+            "OPENAI_MODEL": self._normalize_model(model if model is not None else current["model"]),
             "OPENAI_API_PROTOCOL": current["protocol"],
         }
 
