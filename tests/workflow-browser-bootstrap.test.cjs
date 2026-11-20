@@ -42,11 +42,21 @@ test("gesture mappings are presented inside workflows instead of the settings pa
   assert.match(script, /function renderGestureWorkflowMap\(\)/);
 });
 
-test("AI workflow dialog accepts an API key without exposing it in status responses", () => {
+test("AI workflow dialog configures compatible model providers and tests connections without exposing secrets", () => {
   const workflows = fs.readFileSync(path.join(root, "web/workflows.html"), "utf8");
   const script = fs.readFileSync(path.join(root, "web/workflows.js"), "utf8");
   const backend = fs.readFileSync(path.join(root, "app/main.py"), "utf8");
+  const generator = fs.readFileSync(path.join(root, "app/workflow_generator.py"), "utf8");
   assert.match(workflows, /id="workflowGeneratorApiKey" type="password"/);
+  assert.match(workflows, /id="workflowGeneratorBaseUrl"/);
+  assert.match(workflows, /id="workflowGeneratorModel"/);
+  assert.match(workflows, /id="workflowGeneratorProtocol"/);
+  assert.match(workflows, /id="testWorkflowGeneratorConnection"/);
   assert.match(script, /\/api\/workflow-generator\/config/);
+  assert.match(script, /\/api\/workflow-generator\/test/);
   assert.match(backend, /@app\.put\("\/api\/workflow-generator\/config"\)/);
+  assert.match(backend, /@app\.post\("\/api\/workflow-generator\/test"\)/);
+  assert.match(generator, /chat\/completions/);
+  assert.match(generator, /OPENAI_API_PROTOCOL/);
+  assert.doesNotMatch(generator, /"api_key": config\["api_key"\]/);
 });
