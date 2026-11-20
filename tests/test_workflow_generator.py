@@ -518,6 +518,80 @@ class WorkflowGeneratorConfigurationTests(unittest.TestCase):
         self.assertNotIn(secret, str(caught.exception))
         self.assertIn("[密钥已隐藏]", str(caught.exception))
 
+    def test_plain_text_403_response_is_displayed_with_endpoint_and_request_id(self):
+        secret = "sk-secret-test-value-123456"
+        with tempfile.TemporaryDirectory() as directory:
+            env_file = Path(directory) / ".env"
+            env_file.write_text(
+                f"OPENAI_API_KEY={secret}\nOPENAI_MODEL=gpt-5.6-sol\n"
+                "OPENAI_BASE_URL=https://relay.example.test/v1\n"
+                "OPENAI_API_PROTOCOL=chat_completions\n",
+                encoding="utf-8",
+            )
+
+            def opener(request, timeout):
+                body = ("Access denied: IP is not in allowlist; key=" + secret).encode("utf-8")
+                raise urllib.error.HTTPError(
+                    request.full_url,
+                    403,
+                    "Forbidden",
+                    {"x-request-id": "req-test-403"},
+                    io.BytesIO(body),
+                )
+
+            with patch.dict("os.environ", {
+                "OPENAI_API_KEY": "",
+                "OPENAI_MODEL": "",
+                "OPENAI_BASE_URL": "",
+                "OPENAI_API_PROTOCOL": "",
+            }):
+                generator = WorkflowGenerator(env_file=env_file, opener=opener)
+                with self.assertRaises(ModelRequestError) as caught:
+                    generator.test_connection()
+
+        message = str(caught.exception)
+        self.assertIn("HTTP 403", message)
+        self.assertIn("/chat/completions", message)
+        self.assertIn("IP is not in allowlist", message)
+        self.assertIn("req-test-403", message)
+        self.assertIn("[密钥已隐藏]", message)
+        self.assertNotIn(secret, message)
+
+    def test_alternate_json_error_fields_are_extracted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            env_file = Path(directory) / ".env"
+            env_file.write_text(
+                "OPENAI_API_KEY=sk-test-key\nOPENAI_MODEL=gpt-5.6-sol\n"
+                "OPENAI_BASE_URL=https://relay.example.test/v1\n"
+                "OPENAI_API_PROTOCOL=chat_completions\n",
+                encoding="utf-8",
+            )
+
+            def opener(request, timeout):
+                body = json.dumps({
+                    "code": "model_access_denied",
+                    "msg": "This key is not authorized for gpt-5.6-sol",
+                }).encode("utf-8")
+                raise urllib.error.HTTPError(
+                    request.full_url,
+                    403,
+                    "Forbidden",
+                    {},
+                    io.BytesIO(body),
+                )
+
+            with patch.dict("os.environ", {
+                "OPENAI_API_KEY": "",
+                "OPENAI_MODEL": "",
+                "OPENAI_BASE_URL": "",
+                "OPENAI_API_PROTOCOL": "",
+            }):
+                generator = WorkflowGenerator(env_file=env_file, opener=opener)
+                with self.assertRaises(ModelRequestError) as caught:
+                    generator.test_connection()
+
+        self.assertIn("model_access_denied", str(caught.exception))
+
     def test_responses_api_request_uses_strict_schema_and_parses_output(self):
         with tempfile.TemporaryDirectory() as directory:
             env_file = Path(directory) / ".env"
