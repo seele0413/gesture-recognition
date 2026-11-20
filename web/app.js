@@ -1,13 +1,3 @@
-const GESTURES = [
-  ["Open_Palm", "张开手掌"],
-  ["Closed_Fist", "握拳"],
-  ["Thumb_Up", "竖拇指"],
-  ["Thumb_Down", "拇指向下"],
-  ["Pointing_Up", "食指向上"],
-  ["Victory", "比耶手势（主控锁定）"],
-  ["ILoveYou", "我爱你手势"],
-];
-
 const ACTIONS = [
   ["none", "不执行"],
   ["play_pause", "播放 / 暂停"],
@@ -30,8 +20,8 @@ const elements = Object.fromEntries(
     "connectionStatus", "connectionLabel", "streamError", "streamForm", "rtspUrl", "toggleRtspVisibility",
     "startStream", "stopStream", "videoFrame", "videoFeed", "personOverlay", "videoPlaceholder",
     "resolutionLabel", "candidateCount", "targetLabel", "visionDiagnostics", "handDiagnostics", "trackCount", "controllerCard", "controllerStatus",
-    "controllerTrackId", "controllerDetail", "unlockController", "trackList", "mappingGrid", "saveMappings",
-    "mappingStatus", "eventList", "clearEvents", "pipelineDiagnostics", "gestureConfidenceRange", "confidenceValue", "confidenceStatus",
+    "controllerTrackId", "controllerDetail", "unlockController", "trackList",
+    "eventList", "clearEvents", "pipelineDiagnostics", "gestureConfidenceRange", "confidenceValue", "confidenceStatus",
   ].map((id) => [id, document.getElementById(id)]),
 );
 
@@ -42,7 +32,6 @@ let appState = {
   frame_height: 0,
   controller: { state: "unlocked", track_id: null },
 };
-let mappings = {};
 let confidenceSaveTimer;
 let confidenceSaveQueue = Promise.resolve();
 
@@ -323,55 +312,6 @@ async function unlockController() {
   }
 }
 
-function buildMappings() {
-  elements.mappingGrid.replaceChildren();
-  for (const [gesture, label] of GESTURES) {
-    const row = document.createElement("div");
-    row.className = "mapping-row";
-    const gestureLabel = document.createElement("label");
-    gestureLabel.textContent = label;
-    gestureLabel.htmlFor = "mapping-" + gesture;
-    const select = document.createElement("select");
-    select.id = "mapping-" + gesture;
-    select.dataset.gesture = gesture;
-    const reservedForController = gesture === "Victory";
-    const availableActions = reservedForController
-      ? ACTIONS.filter(([action]) => action === "none")
-      : ACTIONS;
-    for (const [action, actionLabel] of availableActions) select.add(new Option(actionLabel, action));
-    select.value = reservedForController ? "none" : mappings[gesture] || "none";
-    select.disabled = reservedForController;
-    if (reservedForController) select.title = "比耶手势专用于主控锁定";
-    row.append(gestureLabel, select);
-    elements.mappingGrid.append(row);
-  }
-}
-
-async function loadMappings() {
-  try {
-    mappings = (await api("/api/mappings")).mappings;
-    buildMappings();
-  } catch (error) {
-    elements.mappingStatus.textContent = error.message;
-  }
-}
-
-async function saveMappings() {
-  const next = Object.fromEntries(
-    [...elements.mappingGrid.querySelectorAll("select")].map((select) => [select.dataset.gesture, select.value]),
-  );
-  elements.saveMappings.disabled = true;
-  try {
-    mappings = (await api("/api/mappings", { method: "PUT", body: JSON.stringify({ mappings: next }) })).mappings;
-    elements.mappingStatus.textContent = "映射已保存";
-    window.setTimeout(() => { elements.mappingStatus.textContent = ""; }, 1800);
-  } catch (error) {
-    elements.mappingStatus.textContent = error.message;
-  } finally {
-    elements.saveMappings.disabled = false;
-  }
-}
-
 async function loadRecognitionSettings() {
   try {
     const settings = await api("/api/recognition-settings");
@@ -437,7 +377,14 @@ function handleEvent(event) {
   const secondary = document.createElement("div");
   secondary.className = "event-secondary";
   const score = Math.round((event.confidence || 0) * 100);
-  secondary.textContent = event.target_id + " · " + event.handedness + " · " + score + "% · " + actionLabel(event.action);
+  const actionStatus = event.workflow_handled
+    ? "工作流已接管"
+    : event.action_triggered
+      ? actionLabel(event.action)
+      : event.workflow_triggered
+        ? "等待工作流匹配"
+        : actionLabel(event.action);
+  secondary.textContent = event.target_id + " · " + event.handedness + " · " + score + "% · " + actionStatus;
   row.append(primary, secondary);
   elements.eventList.prepend(row);
   while (elements.eventList.children.length > 8) elements.eventList.lastElementChild.remove();
@@ -465,13 +412,11 @@ elements.toggleRtspVisibility.addEventListener("click", () => {
   elements.toggleRtspVisibility.setAttribute("aria-pressed", String(!showing));
 });
 elements.unlockController.addEventListener("click", unlockController);
-elements.saveMappings.addEventListener("click", saveMappings);
 elements.gestureConfidenceRange.addEventListener("input", () => scheduleConfidenceSave());
 elements.gestureConfidenceRange.addEventListener("change", () => scheduleConfidenceSave(true));
 elements.clearEvents.addEventListener("click", () => elements.eventList.replaceChildren());
 window.addEventListener("resize", drawTracks);
 
-loadMappings();
 loadRecognitionSettings();
 refreshStatus();
 window.setInterval(refreshStatus, 250);
