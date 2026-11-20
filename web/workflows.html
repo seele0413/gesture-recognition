@@ -158,6 +158,16 @@
         <p id="workflowGeneratorStatus" class="workflow-generator-status" role="status">正在检查模型配置…</p>
         <p class="workflow-generator-privacy">文档正文会发送到已配置的 OpenAI API 进行解析，不会保存在项目磁盘中。请勿上传未经授权的涉密资料。生成结果仅为未启用草稿，需要你检查、校验和模拟后才能保存及启用。</p>
 
+        <section id="workflowGeneratorResult" class="workflow-generator-result" hidden aria-live="polite">
+          <h3>生成结果预览</h3>
+          <p id="workflowGeneratorSummary"></p>
+          <div id="workflowGeneratorReport"></div>
+          <div class="workflow-generator-actions">
+            <button id="applyGeneratedWorkflow" class="tool-button tool-primary" type="button" disabled>应用到画布</button>
+            <button id="regenerateWorkflow" class="tool-button" type="button">重新生成</button>
+          </div>
+        </section>
+
         <div class="workflow-generator-actions">
           <button id="workflowGeneratorSubmit" class="tool-button tool-primary" type="submit" disabled>解析并生成草稿</button>
           <button class="tool-button" type="button" id="cancelWorkflowGenerator">取消</button>
