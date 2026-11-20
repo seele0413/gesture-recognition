@@ -751,8 +751,8 @@ class WorkflowGenerator:
 
     def configure_api_key(self, api_key: str) -> dict[str, Any]:
         normalized = api_key.strip() if isinstance(api_key, str) else ""
-        if not normalized:
-            raise ValueError("请输入有效的 OpenAI API Key")
+        if not _api_key_is_configured(normalized):
+            raise ValueError("请输入真实的 OpenAI API Key，不要使用示例占位符")
         if len(normalized) > 512 or any(character.isspace() for character in normalized) or "\x00" in normalized:
             raise ValueError("API Key 格式无效，请检查是否包含空格或换行")
 
