@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, root_validator
@@ -24,6 +24,17 @@ from app.stream import StreamManager
 from app.video_actions import register_video_actions
 from app.web_actions import BrowserCommandAdapter, register_web_actions
 from app.workflow import new_workflow
+from app.workflow_generator import (
+    MAX_UPLOAD_BYTES,
+    DocumentParseError,
+    ModelNotConfiguredError,
+    ModelRequestError,
+    WorkflowGenerationError,
+    WorkflowGenerator,
+    build_generated_workflow,
+    external_page_control_issues,
+    extract_document_text,
+)
 
 
 class StreamStartRequest(BaseModel):
@@ -139,6 +150,7 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
     presentation_adapter = PresentationAdapter(store)
     register_ppt_actions(action_registry, store, presentation_adapter)
     workflow_engine = WorkflowEngine(store, action_registry, hub.publish_from_thread)
+    workflow_generator = WorkflowGenerator()
     display_channel.on_state_change = workflow_engine.set_display_connected
     display_channel.on_ready_change = workflow_engine.set_display_ready
     hub.add_listener(workflow_engine.on_event)
@@ -159,6 +171,7 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
     app.state.display_channel = display_channel
     app.state.action_registry = action_registry
     app.state.workflow_engine = workflow_engine
+    app.state.workflow_generator = workflow_generator
     app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
 
     @app.middleware("http")
@@ -385,6 +398,61 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
     @app.get("/api/actions")
     async def get_actions() -> dict:
         return {"actions": action_registry.describe()}
+
+    @app.get("/api/workflow-generator/status")
+    async def workflow_generator_status() -> dict:
+        return workflow_generator.status()
+
+    @app.post("/api/workflows/generate")
+    async def generate_workflow_from_document(
+        file: UploadFile = File(...),
+        instructions: str = Form(""),
+        preferred_trigger: str = Form("Open_Palm"),
+    ) -> dict:
+        try:
+            document_bytes = await file.read(MAX_UPLOAD_BYTES + 1)
+            extracted = extract_document_text(file.filename, document_bytes)
+            action_schemas = action_registry.schema_map()
+            pages = store.get_display_pages()
+            plan = await asyncio.to_thread(
+                workflow_generator.generate_plan,
+                extracted["text"],
+                instructions,
+                preferred_trigger,
+                action_schemas,
+                pages,
+            )
+            generated, warnings, questions, summary = build_generated_workflow(plan, action_schemas)
+            validation_errors = workflow_engine.validate(generated)
+            validation_errors.extend(
+                external_page_control_issues(
+                    generated,
+                    pages,
+                    store.get_default_display_page_id(),
+                )
+            )
+            return {
+                "workflow": generated,
+                "valid": not validation_errors,
+                "validation_errors": validation_errors,
+                "warnings": warnings,
+                "questions": questions,
+                "summary": summary,
+                "source": {
+                    "filename": extracted["filename"],
+                    "character_count": extracted["character_count"],
+                },
+            }
+        except DocumentParseError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        except ModelNotConfiguredError as error:
+            raise HTTPException(status_code=503, detail=str(error)) from error
+        except ModelRequestError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from error
+        except WorkflowGenerationError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        finally:
+            await file.close()
 
     @app.get("/api/pointer/settings")
     async def get_pointer_settings() -> dict:
