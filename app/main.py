@@ -50,21 +50,35 @@ class RecognitionSettingsRequest(BaseModel):
 
 
 class WorkflowGeneratorConfigRequest(BaseModel):
-    api_key: str = Field(min_length=1, max_length=512)
+    api_key: str | None = Field(default=None, max_length=512)
+    base_url: str | None = Field(default=None, max_length=512)
+    model: str | None = Field(default=None, max_length=128)
+    protocol: str | None = Field(default=None, max_length=32)
 
     class Config:
         extra = "forbid"
 
     @root_validator(pre=True)
-    def validate_api_key_value(cls, values):
+    def normalize_model_configuration(cls, values):
         if not isinstance(values, dict):
             return values
-        value = values.get("api_key")
-        if not isinstance(value, str) or not value.strip():
-            raise ValueError("请输入有效的 OpenAI API Key")
-        if any(character.isspace() for character in value.strip()) or "\x00" in value:
-            raise ValueError("API Key 格式无效，请检查是否包含空格或换行")
-        return {"api_key": value.strip()}
+        normalized = dict(values)
+        api_key = normalized.get("api_key")
+        if api_key is not None:
+            if not isinstance(api_key, str) or not api_key.strip():
+                raise ValueError("API Key 不能为空；留空表示保留已保存的密钥")
+            if any(character.isspace() for character in api_key.strip()) or "\x00" in api_key:
+                raise ValueError("API Key 格式无效，请检查是否包含空格或换行")
+            normalized["api_key"] = api_key.strip()
+        for field in ("base_url", "model", "protocol"):
+            value = normalized.get(field)
+            if value is not None:
+                if not isinstance(value, str) or not value.strip():
+                    raise ValueError(f"{field} 不能为空")
+                normalized[field] = value.strip()
+        if normalized.get("protocol") is not None:
+            normalized["protocol"] = normalized["protocol"].lower()
+        return normalized
 
 
 class DisplayPageCreateRequest(BaseModel):
@@ -436,9 +450,23 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
     async def update_workflow_generator_config(payload: WorkflowGeneratorConfigRequest) -> dict:
         try:
             # The secret is written to the ignored local .env file and is never returned.
-            return workflow_generator.configure_api_key(payload.api_key)
+            return workflow_generator.configure(
+                api_key=payload.api_key,
+                base_url=payload.base_url,
+                model=payload.model,
+                protocol=payload.protocol,
+            )
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
+
+    @app.post("/api/workflow-generator/test")
+    async def test_workflow_generator_connection() -> dict:
+        try:
+            return await asyncio.to_thread(workflow_generator.test_connection)
+        except ModelNotConfiguredError as error:
+            raise HTTPException(status_code=503, detail=str(error)) from error
+        except ModelRequestError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from error
 
     @app.post("/api/workflows/generate")
     async def generate_workflow_from_document(
