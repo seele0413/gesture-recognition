@@ -473,3 +473,65 @@
   .workflow-generator-form { padding: 16px; }
   .workflow-generator-heading h2 { font-size: 17px; }
 }
+
+
+/* Gesture-to-workflow overview: the old global action mapping now lives with workflows. */
+.gesture-workflow-panel {
+  display: grid;
+  gap: 7px;
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid #e0e5df;
+}
+.gesture-workflow-panel .section-title { margin-bottom: 0; }
+.gesture-workflow-panel .section-title h2 { margin: 0; color: #2b332d; font-size: 12px; font-weight: 650; }
+.gesture-workflow-map { display: grid; gap: 6px; }
+.gesture-map-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 3px;
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #e0e5df;
+  border-radius: 4px;
+  color: #354037;
+  background: #fbfcfa;
+  text-align: left;
+  cursor: pointer;
+}
+.gesture-map-row:hover { border-color: #aab9ad; background: #f3f7f3; }
+.gesture-map-row[data-active="true"] { border-color: #5b8063; background: #edf5ee; box-shadow: inset 3px 0 #5b8063; }
+.gesture-map-trigger { color: #496e51; font-size: 11px; font-weight: 700; }
+.gesture-map-name { overflow: hidden; color: #344037; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.gesture-map-meta { overflow: hidden; color: #818b82; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+
+/* API credentials are entered in the local workflow dialog and persisted server-side. */
+.workflow-generator-config {
+  display: grid;
+  gap: 7px;
+  padding: 10px;
+  border: 1px solid #dbe3db;
+  border-radius: 4px;
+  background: #f7faf7;
+}
+.workflow-generator-config-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.workflow-generator-config-heading label { color: #465247; font-size: 11px; font-weight: 650; }
+.workflow-generator-key-state { color: #8a7660; font-size: 10px; }
+.workflow-generator-key-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 7px; }
+.workflow-generator-key-row input {
+  min-width: 0;
+  min-height: 34px;
+  padding: 7px 9px;
+  border: 1px solid #cbd5cb;
+  border-radius: 3px;
+  color: #29312b;
+  background: #fff;
+  font-size: 12px;
+}
+.workflow-generator-key-row input:focus { outline: 2px solid rgba(70, 108, 85, .2); border-color: #6b8d72; }
+.workflow-generator-config > small { color: #79837b; font-size: 10px; line-height: 1.5; }
+
+@media (max-width: 540px) {
+  .workflow-generator-key-row { grid-template-columns: minmax(0, 1fr); }
+  .workflow-generator-key-row .tool-button { width: 100%; }
+}

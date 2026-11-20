@@ -109,6 +109,7 @@ def build_gesture_event(
     action: str,
     action_triggered: bool,
     landmarks: Sequence[Mapping[str, float]],
+    workflow_triggered: bool = False,
 ) -> dict[str, object]:
     if len(landmarks) != 21:
         raise ValueError("手势事件必须包含 21 个手部关键点")
@@ -124,6 +125,7 @@ def build_gesture_event(
         "timestamp_ms": int(timestamp_ms),
         "action": action,
         "action_triggered": bool(action_triggered),
+        "workflow_triggered": bool(workflow_triggered),
         "landmarks": [dict(point) for point in landmarks],
     }
 
@@ -238,8 +240,8 @@ class GestureGate:
         if action == "none":
             self._last_status[key] = {
                 "stable_frames": state.frames,
-                "reason": "该手势未映射网页动作",
-                "reason_code": "unmapped",
+                "reason": "手势已确认，等待匹配工作流",
+                "reason_code": "workflow_ready",
                 "confidence": confidence,
                 "confidence_threshold": self.confidence_threshold,
             }

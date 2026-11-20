@@ -4,6 +4,7 @@ import io
 import json
 import os
 import re
+import tempfile
 import urllib.error
 import urllib.request
 import zipfile
@@ -748,6 +749,63 @@ class WorkflowGenerator:
             "max_extracted_chars": MAX_EXTRACTED_CHARS,
         }
 
+    def configure_api_key(self, api_key: str) -> dict[str, Any]:
+        normalized = api_key.strip() if isinstance(api_key, str) else ""
+        if not _api_key_is_configured(normalized):
+            raise ValueError("请输入真实的 OpenAI API Key，不要使用示例占位符")
+        if len(normalized) > 512 or any(character.isspace() for character in normalized) or "\x00" in normalized:
+            raise ValueError("API Key 格式无效，请检查是否包含空格或换行")
+
+        self.env_file.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            existing_lines = self.env_file.read_text(encoding="utf-8-sig").splitlines()
+        except FileNotFoundError:
+            existing_lines = []
+        except OSError as error:
+            raise ValueError("无法读取本机 .env 配置文件，请检查项目目录权限") from error
+
+        updated_lines: list[str] = []
+        key_written = False
+        for line in existing_lines:
+            stripped = line.strip()
+            key_name = stripped.split("=", 1)[0].strip() if "=" in stripped else ""
+            if key_name == "OPENAI_API_KEY":
+                if not key_written:
+                    updated_lines.append("OPENAI_API_KEY=" + normalized)
+                    key_written = True
+                continue
+            updated_lines.append(line)
+        if not key_written:
+            if updated_lines and updated_lines[-1].strip():
+                updated_lines.append("")
+            updated_lines.append("OPENAI_API_KEY=" + normalized)
+
+        content = "\n".join(updated_lines).rstrip() + "\n"
+        temporary_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                "w",
+                encoding="utf-8",
+                newline="\n",
+                dir=self.env_file.parent,
+                prefix=".env.",
+                suffix=".tmp",
+                delete=False,
+            ) as temporary:
+                temporary.write(content)
+                temporary_path = Path(temporary.name)
+            os.chmod(temporary_path, 0o600)
+            os.replace(temporary_path, self.env_file)
+            os.chmod(self.env_file, 0o600)
+        except OSError as error:
+            if temporary_path is not None:
+                temporary_path.unlink(missing_ok=True)
+            raise ValueError("无法保存 API Key，请检查项目目录写入权限") from error
+
+        # Make the newly saved key available immediately; the .env file keeps it across restarts.
+        os.environ["OPENAI_API_KEY"] = normalized
+        return self.status()
+
     def generate_plan(
         self,
         document_text: str,
@@ -759,7 +817,7 @@ class WorkflowGenerator:
         config = self._configuration()
         if not _api_key_is_configured(config["api_key"]):
             raise ModelNotConfiguredError(
-                "尚未配置 OPENAI_API_KEY。请在项目根目录创建 .env，并按 .env.example 填写 API Key"
+                "尚未配置 OPENAI_API_KEY。请在 AI 工作流生成窗口的 API Key 配置栏中填写并保存"
             )
         if not document_text.strip():
             raise WorkflowGenerationError("文档正文为空")

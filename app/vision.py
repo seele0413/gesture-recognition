@@ -608,7 +608,7 @@ class VisionProcessor:
             self.gate.reset()
             for hand in hands:
                 if hand["track_id"] == track_id:
-                    hand["action_reason"] = "手势指针模式已启用，普通手势映射暂时暂停"
+                    hand["action_reason"] = "手势指针模式已启用，普通手势工作流触发暂时暂停"
                     hand["reason_code"] = "pointer_mode"
             return []
 
@@ -651,6 +651,7 @@ class VisionProcessor:
                     {"x": float(point.x), "y": float(point.y), "z": float(point.z)}
                     for point in hand["landmarks"]
                 ],
+                workflow_triggered=True,
             )
             if self.session_id:
                 self.store.record_gesture(self.session_id, event)

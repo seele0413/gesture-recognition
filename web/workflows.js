@@ -8,6 +8,9 @@ const ui = {
   workflowGeneratorDialog: document.getElementById("workflowGeneratorDialog"),
   workflowGeneratorForm: document.getElementById("workflowGeneratorForm"),
   workflowGeneratorFile: document.getElementById("workflowGeneratorFile"),
+  workflowGeneratorApiKey: document.getElementById("workflowGeneratorApiKey"),
+  workflowGeneratorKeyState: document.getElementById("workflowGeneratorKeyState"),
+  saveWorkflowGeneratorKey: document.getElementById("saveWorkflowGeneratorKey"),
   workflowGeneratorInstructions: document.getElementById("workflowGeneratorInstructions"),
   workflowGeneratorTrigger: document.getElementById("workflowGeneratorTrigger"),
   workflowGeneratorStatus: document.getElementById("workflowGeneratorStatus"),
@@ -26,6 +29,7 @@ const ui = {
   dryRunWorkflow: document.getElementById("dryRunWorkflow"),
   toggleWorkflow: document.getElementById("toggleWorkflow"),
   actionLibrary: document.getElementById("actionLibrary"),
+  gestureWorkflowMap: document.getElementById("gestureWorkflowMap"),
   triggerType: document.getElementById("triggerType"),
   triggerFields: document.getElementById("triggerFields"),
   edgeWhen: document.getElementById("edgeWhen"),
@@ -739,6 +743,56 @@ function renderWorkflowOptions() {
     ui.workflowSelect.append(option);
   }
   ui.workflowSelect.value = workflow?.id || "";
+  renderGestureWorkflowMap();
+}
+
+function workflowTriggerLabel(trigger) {
+  if (!trigger) return "未设置触发器";
+  if (trigger.type === "gesture_trigger") return GESTURE_LABELS[trigger.gesture] || trigger.gesture;
+  if (trigger.type === "gesture_sequence_trigger") {
+    return (trigger.gestures || []).map((gesture) => GESTURE_LABELS[gesture] || gesture).join(" → ");
+  }
+  return "主控锁定";
+}
+
+function workflowTargetLabel(definition) {
+  const nodes = Array.isArray(definition.nodes) ? definition.nodes : [];
+  const navigation = nodes.find((node) => node.type === "action" && node.action === "web.navigate_page");
+  const pageId = navigation?.params?.page_id;
+  if (pageId) return "目标页面 · " + pageId;
+  if (nodes.some((node) => node.type === "action" && String(node.action || "").startsWith("web."))) {
+    return "当前展示页面";
+  }
+  return "由动作节点决定";
+}
+
+function renderGestureWorkflowMap() {
+  if (!ui.gestureWorkflowMap) return;
+  ui.gestureWorkflowMap.replaceChildren();
+  const entries = workflows.filter((item) => item.trigger?.type !== "controller_locked");
+  if (!entries.length) {
+    ui.gestureWorkflowMap.append(make("p", "muted", "暂无手势工作流。新建工作流，在上方选择启动手势，再添加网页或视频动作节点。"));
+    return;
+  }
+  for (const item of entries) {
+    const row = make("button", "gesture-map-row");
+    row.type = "button";
+    row.dataset.active = String(item.id === workflow?.id);
+    row.title = "打开工作流：" + item.name;
+    const trigger = make("span", "gesture-map-trigger", workflowTriggerLabel(item.trigger));
+    const name = make("span", "gesture-map-name", item.name);
+    const state = make(
+      "span",
+      "gesture-map-meta",
+      (item.enabled ? "已启用" : "未启用") + " · " + workflowTargetLabel(item),
+    );
+    row.append(trigger, name, state);
+    row.addEventListener("click", () => {
+      if (workflowIsDraft && !window.confirm("切换工作流会丢弃当前 AI 草稿，是否继续？")) return;
+      loadWorkflow(item.id).catch((error) => setMessage(error.message, "error"));
+    });
+    ui.gestureWorkflowMap.append(row);
+  }
 }
 
 async function reloadWorkflowList() {
@@ -1621,21 +1675,55 @@ function renderWorkflowGeneratorResult(result) {
 async function refreshWorkflowGeneratorStatus() {
   const status = await api("/api/workflow-generator/status");
   if (status.configured) {
+    ui.workflowGeneratorKeyState.textContent = "已配置";
+    ui.workflowGeneratorApiKey.placeholder = "已配置；输入新 Key 可替换";
     ui.workflowGeneratorStatus.textContent =
       "模型已配置：" + status.model + "。文档将通过 Responses API 分析。";
     ui.workflowGeneratorStatus.dataset.state = "success";
     ui.workflowGeneratorSubmit.disabled = false;
   } else {
+    ui.workflowGeneratorKeyState.textContent = "未配置";
+    ui.workflowGeneratorApiKey.placeholder = "粘贴 sk- 开头的 API Key";
     ui.workflowGeneratorStatus.textContent =
-      "尚未配置模型 API Key。请在项目根目录复制 .env.example 为 .env，并填写 OPENAI_API_KEY。";
+      "尚未配置模型 API Key，请在下方输入并保存后再生成。";
     ui.workflowGeneratorStatus.dataset.state = "error";
     ui.workflowGeneratorSubmit.disabled = true;
+  }
+}
+
+async function saveWorkflowGeneratorApiKey() {
+  const apiKey = ui.workflowGeneratorApiKey.value.trim();
+  if (!apiKey) {
+    ui.workflowGeneratorStatus.textContent = "请先输入 OpenAI API Key。";
+    ui.workflowGeneratorStatus.dataset.state = "error";
+    return;
+  }
+  ui.saveWorkflowGeneratorKey.disabled = true;
+  ui.saveWorkflowGeneratorKey.textContent = "保存中…";
+  try {
+    const status = await api("/api/workflow-generator/config", {
+      method: "PUT",
+      body: JSON.stringify({ api_key: apiKey }),
+    });
+    ui.workflowGeneratorApiKey.value = "";
+    ui.workflowGeneratorKeyState.textContent = status.configured ? "已配置" : "未配置";
+    ui.workflowGeneratorApiKey.placeholder = status.configured ? "已配置；输入新 Key 可替换" : "粘贴 sk- 开头的 API Key";
+    ui.workflowGeneratorStatus.textContent = "API Key 已保存到本机 .env，可以开始生成工作流。";
+    ui.workflowGeneratorStatus.dataset.state = status.configured ? "success" : "error";
+    ui.workflowGeneratorSubmit.disabled = !status.configured;
+  } catch (error) {
+    ui.workflowGeneratorStatus.textContent = error.message || "API Key 保存失败";
+    ui.workflowGeneratorStatus.dataset.state = "error";
+  } finally {
+    ui.saveWorkflowGeneratorKey.disabled = false;
+    ui.saveWorkflowGeneratorKey.textContent = "保存密钥";
   }
 }
 
 function openWorkflowGenerator() {
   if (workflow && !window.confirm("AI 生成结果将替换当前画布内容。当前未保存的修改会丢失，是否继续？")) return;
   generatedWorkflowPreview = null;
+  ui.workflowGeneratorApiKey.value = "";
   ui.workflowGeneratorResult.hidden = true;
   ui.workflowGeneratorFile.value = "";
   ui.workflowGeneratorStatus.dataset.state = "";
@@ -1720,6 +1808,7 @@ function resetWorkflowGeneratorPreview() {
   ui.workflowGeneratorResult.hidden = true;
   ui.workflowGeneratorReport.replaceChildren();
   ui.workflowGeneratorFile.value = "";
+  ui.workflowGeneratorApiKey.value = "";
   ui.workflowGeneratorStatus.dataset.state = "";
   ui.workflowGeneratorStatus.textContent = "请选择文档并补充生成要求。";
 }
@@ -1793,6 +1882,13 @@ ui.newWorkflow.addEventListener("click", () => {
   createWorkflow().catch((error) => setMessage(error.message, "error"));
 });
 ui.generateWorkflow.addEventListener("click", openWorkflowGenerator);
+ui.saveWorkflowGeneratorKey.addEventListener("click", saveWorkflowGeneratorApiKey);
+ui.workflowGeneratorApiKey.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    saveWorkflowGeneratorApiKey();
+  }
+});
 ui.workflowGeneratorForm.addEventListener("submit", submitWorkflowGenerator);
 ui.applyGeneratedWorkflow.addEventListener("click", applyGeneratedWorkflow);
 ui.regenerateWorkflow.addEventListener("click", () => {

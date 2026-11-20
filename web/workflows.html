@@ -7,12 +7,12 @@
     <title>康晋电气手势控制平台 · 工作流</title>
     <link rel="icon" href="https://img.kompass.com/sys-master-images/h29/h63/9109303525406/comking%E6%96%B0logo-jpg" type="image/jpeg">
     <link rel="stylesheet" href="/static/styles.css?v=20261119-system-font-1">
-    <link rel="stylesheet" href="/static/workflows.css?v=20261120-ai-workflow-2">
+    <link rel="stylesheet" href="/static/workflows.css?v=20261120-workflow-gesture-map-1">
     <link rel="stylesheet" href="/static/industrial-ui.css?v=20261119-system-font-1">
     <link rel="stylesheet" href="/static/comking-glass.css?v=20261119-ui-polish-1">
     <script src="/static/pointer-geometry.js?v=20261118-workflow-fix-1" defer></script>
     <script src="/static/pointer-event-buffer.js?v=20261118-workflow-fix-1" defer></script>
-    <script src="/static/workflows.js?v=20261120-ai-workflow-2" defer></script>
+    <script src="/static/workflows.js?v=20261120-workflow-gesture-map-1" defer></script>
   </head>
   <body class="workflow-page">
     <header class="workflow-header">
@@ -74,6 +74,13 @@
           <h2>动作</h2>
           <p class="muted">正在读取动作…</p>
         </div>
+        <section class="gesture-workflow-panel" aria-labelledby="gestureWorkflowMapHeading">
+          <div class="section-title"><h2 id="gestureWorkflowMapHeading">手势工作流映射</h2></div>
+          <p class="muted">一个工作流设置一个启动手势。要用多个手势控制同一个网页，就分别创建多个工作流、分配不同手势，并让动作节点选择同一个登记页面。例如：张开手掌播放、握拳暂停、竖拇指下一页。</p>
+          <div id="gestureWorkflowMap" class="gesture-workflow-map" aria-live="polite">
+            <p class="muted">正在读取手势工作流…</p>
+          </div>
+        </section>
       </aside>
 
       <section class="workflow-editor" aria-label="工作流画布">
@@ -180,11 +187,23 @@
         </select>
         <small>如果文档明确指定了触发方式，AI 会优先遵循文档和补充要求。</small>
 
+        <section class="workflow-generator-config" aria-label="模型 API Key 配置">
+          <div class="workflow-generator-config-heading">
+            <label for="workflowGeneratorApiKey">OpenAI API Key</label>
+            <span id="workflowGeneratorKeyState" class="workflow-generator-key-state">未配置</span>
+          </div>
+          <div class="workflow-generator-key-row">
+            <input id="workflowGeneratorApiKey" type="password" maxlength="512" autocomplete="new-password" spellcheck="false" placeholder="粘贴 sk- 开头的 API Key">
+            <button id="saveWorkflowGeneratorKey" class="tool-button" type="button">保存密钥</button>
+          </div>
+          <small>密钥会保存在本机项目根目录的 .env 文件中，不会回传完整密钥，也不会保存在浏览器。</small>
+        </section>
+
         <label for="workflowGeneratorInstructions">补充要求</label>
         <textarea id="workflowGeneratorInstructions" name="instructions" rows="4" maxlength="2000" placeholder="例如：访客进入后先播放宣传片；播放完成后进入公司简介；每个页面停留 10 秒；最后进入产品中心。"></textarea>
 
         <p id="workflowGeneratorStatus" class="workflow-generator-status" role="status">正在检查模型配置…</p>
-        <p class="workflow-generator-privacy">文档正文会发送到已配置的 OpenAI API 进行解析，不会保存在项目磁盘中。请勿上传未经授权的涉密资料。生成结果仅为未启用草稿，需要你检查、校验和模拟后才能保存及启用。</p>
+        <p class="workflow-generator-privacy">文档正文会发送到已配置的 OpenAI API 进行解析，不会保存在项目磁盘中。API Key 仅保存在本机 .env 文件，请勿在公共电脑配置或上传未经授权的涉密资料。生成结果仅为未启用草稿，需要你检查、校验和模拟后才能保存及启用。</p>
 
         <section id="workflowGeneratorResult" class="workflow-generator-result" hidden aria-live="polite">
           <h3>生成结果预览</h3>

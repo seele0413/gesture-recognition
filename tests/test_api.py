@@ -87,7 +87,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn('href="/settings" target="_top"', promo)
         self.assertNotIn('target="_blank"', promo)
         self.assertIn('id="rtspUrl"', settings)
-        self.assertIn('id="mappingGrid"', settings)
+        self.assertNotIn('id="mappingGrid"', settings)
         self.assertIn('id="gestureConfidenceRange"', settings)
         self.assertIn('step="0.05"', settings)
 
@@ -567,8 +567,10 @@ class ApiTests(unittest.TestCase):
         workflow_page = self.client.get("/workflows").text
         self.assertIn('id="pointerMode"', workflow_page)
         self.assertIn('id="pointerMirror"', workflow_page)
+        self.assertIn('id="gestureWorkflowMap"', workflow_page)
+        self.assertIn('id="workflowGeneratorApiKey"', workflow_page)
         self.assertIn("/static/pointer-event-buffer.js?v=20261118-workflow-fix-1", workflow_page)
-        self.assertIn("/static/workflows.js?v=20261120-ai-workflow-2", workflow_page)
+        self.assertIn("/static/workflows.js?v=20261120-workflow-gesture-map-1", workflow_page)
         self.assertIn("/api/workflows", self.client.get("/static/workflows.js").text)
         self.assertEqual(
             self.client.get("/api/media-assets").json()["media_assets"][0]["id"],

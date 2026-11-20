@@ -144,7 +144,7 @@ class WorkflowEngine:
             return None
 
         self._notify_event_waiters(event)
-        if not event.get("action_triggered"):
+        if not (event.get("workflow_triggered") or event.get("action_triggered")):
             return None
         target_id = str(event.get("target_id", ""))
         authorized = self._controller_state == "locked" or (
@@ -229,7 +229,7 @@ class WorkflowEngine:
         created_at = utc_now()
         safe_trigger_event = {
             key: value for key, value in trigger_event.items()
-            if key in {"type", "target_id", "gesture", "confidence", "handedness", "timestamp_ms", "action", "action_triggered", "state", "track_id", "reason"}
+            if key in {"type", "target_id", "gesture", "confidence", "handedness", "timestamp_ms", "action", "action_triggered", "workflow_triggered", "state", "track_id", "reason"}
         }
         run = {
             "run_id": run_id, "workflow_id": definition["id"], "workflow_version": definition["version"],
@@ -480,7 +480,7 @@ class WorkflowEngine:
                 return event.get("type") == "controller" and event.get("state") == "locked"
             if expected == "controller_lost":
                 return event.get("type") == "controller" and event.get("state") in {"lost", "suspect", "reacquiring", "unlocked"}
-            return event.get("type") == "gesture" and event.get("gesture") == params.get("gesture") and bool(event.get("action_triggered"))
+            return event.get("type") == "gesture" and event.get("gesture") == params.get("gesture") and bool(event.get("workflow_triggered") or event.get("action_triggered"))
 
         future = asyncio.get_running_loop().create_future()
         entry = (future, matches)

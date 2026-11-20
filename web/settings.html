@@ -9,7 +9,7 @@
     <link rel="stylesheet" href="/static/styles.css?v=20261119-system-font-1">
     <link rel="stylesheet" href="/static/industrial-ui.css?v=20261119-system-font-1">
     <link rel="stylesheet" href="/static/comking-glass.css?v=20261119-ui-polish-1">
-    <script src="/static/app.js?v=20261113-controller-recovery-1" defer></script>
+    <script src="/static/app.js?v=20261120-workflow-gesture-map-1" defer></script>
   </head>
   <body class="settings-page">
     <header class="settings-header">
@@ -75,7 +75,7 @@
           </div>
           <label class="range-label" for="gestureConfidenceRange">手势分类置信度</label>
           <input id="gestureConfidenceRange" class="confidence-range" type="range" min="0.50" max="0.90" step="0.05" value="0.60">
-          <p class="panel-description">此灵敏度只影响主控锁定后的普通手势动作；比耶主控锁定使用手部关键点几何判断，不受此滑块影响。</p>
+          <p class="panel-description">此灵敏度影响主控锁定后的普通手势识别与工作流触发；比耶主控锁定使用手部关键点几何判断，不受此滑块影响。</p>
           <p id="confidenceStatus" class="form-status" role="status"></p>
         </section>
 
@@ -95,17 +95,6 @@
             <span id="controllerTrackId" class="controller-track-id">--</span>
           </div>
           <div id="trackList" class="track-list" aria-live="polite"></div>
-        </section>
-
-        <section class="settings-panel mapping-panel" aria-labelledby="mappingHeading">
-          <div class="panel-heading compact-heading">
-            <div>
-              <h2 id="mappingHeading">手势映射</h2>
-            </div>
-            <button id="saveMappings" class="button button-primary" type="button">保存</button>
-          </div>
-          <div id="mappingGrid" class="mapping-grid"></div>
-          <p id="mappingStatus" class="form-status" role="status"></p>
         </section>
 
         <section class="settings-panel events-panel" aria-labelledby="eventsHeading">

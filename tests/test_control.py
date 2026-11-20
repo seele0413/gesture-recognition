@@ -89,6 +89,12 @@ class ControlTests(unittest.TestCase):
         self.assertIsNone(gate.observe("person-1:Right", None, 0.0, "none", 1600))
         self.assertTrue(gate.observe("person-1:Right", "Thumb_Up", 0.9, "volume_up", 1800))
 
+    def test_unmapped_stable_gesture_is_ready_for_workflow_matching(self):
+        gate = GestureGate(stable_frames=1)
+        self.assertFalse(gate.observe("person:Right", "Pointing_Up", 0.9, "none", 1000))
+        self.assertEqual(gate.status("person:Right")["reason_code"], "workflow_ready")
+        self.assertIn("等待匹配工作流", gate.status("person:Right")["reason"])
+
     def test_mapping_validation(self):
         self.assertEqual(validate_mappings(DEFAULT_MAPPINGS), DEFAULT_MAPPINGS)
         invalid = dict(DEFAULT_MAPPINGS)
@@ -129,10 +135,11 @@ class ControlTests(unittest.TestCase):
             set(event),
             {
                 "type", "target_id", "target_name", "gesture", "confidence", "handedness",
-                "timestamp_ms", "action", "action_triggered", "landmarks",
+                "timestamp_ms", "action", "action_triggered", "workflow_triggered", "landmarks",
             },
         )
         self.assertEqual(event["type"], "gesture")
+        self.assertFalse(event["workflow_triggered"])
         self.assertEqual(len(event["landmarks"]), 21)
         with self.assertRaises(ValueError):
             build_gesture_event(

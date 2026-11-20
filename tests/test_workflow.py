@@ -116,6 +116,33 @@ class WorkflowEngineTests(unittest.IsolatedAsyncioTestCase):
             "handedness": "Right", "timestamp_ms": timestamp,
         })
 
+    async def test_workflow_trigger_does_not_depend_on_legacy_player_action_mapping(self):
+        workflow = self.store.save_workflow(self._workflow(action_count=1))
+        event = await self.engine.on_event({
+            "type": "gesture", "gesture": "Open_Palm", "target_id": "person-a",
+            "action_triggered": False, "workflow_triggered": True, "action": "none",
+            "confidence": 0.9, "handedness": "Right", "timestamp_ms": 99,
+        })
+        self.assertTrue(event["workflow_handled"])
+        await self.engine._active_task
+        self.assertEqual([item[0] for item in self.calls], [0])
+
+    async def test_different_gestures_can_dispatch_independent_workflows(self):
+        first = self._workflow(action_count=1, trigger={"type": "gesture_trigger", "gesture": "Open_Palm"})
+        second = self._workflow(action_count=1, trigger={"type": "gesture_trigger", "gesture": "Thumb_Up"})
+        self.store.save_workflow(first)
+        self.store.save_workflow(second)
+
+        first_event = await self._trigger(gesture="Open_Palm", timestamp=100)
+        self.assertTrue(first_event["workflow_handled"])
+        await self.engine._active_task
+
+        second_event = await self._trigger(gesture="Thumb_Up", timestamp=200)
+        self.assertTrue(second_event["workflow_handled"])
+        await self.engine._active_task
+        self.assertEqual([item[0] for item in self.calls], [0, 0])
+        self.assertEqual(len(self.store.get_workflow_runs()), 2)
+
     async def test_one_confirmed_master_gesture_runs_five_sequential_actions(self):
         workflow = self.store.save_workflow(self._workflow())
         event = await self._trigger()
