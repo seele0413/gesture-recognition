@@ -1744,16 +1744,22 @@ async function saveWorkflowGeneratorConfig() {
       ? "模型服务配置已保存。请点击“测试连接”确认中转站地址、Key 和模型均可用。"
       : "服务地址和模型已保存，但尚未配置有效 API Key。";
     ui.workflowGeneratorStatus.dataset.state = status.configured ? "success" : "error";
+    return status.configured;
   } catch (error) {
     ui.workflowGeneratorStatus.textContent = error.message || "模型服务配置保存失败";
     ui.workflowGeneratorStatus.dataset.state = "error";
+    return false;
   } finally {
     ui.saveWorkflowGeneratorConfig.disabled = false;
     ui.saveWorkflowGeneratorConfig.textContent = "保存配置";
+    ui.testWorkflowGeneratorConnection.disabled =
+      ui.workflowGeneratorKeyState.textContent !== "密钥已配置";
   }
 }
 
 async function testWorkflowGeneratorConnection() {
+  const ready = await saveWorkflowGeneratorConfig();
+  if (!ready) return;
   ui.testWorkflowGeneratorConnection.disabled = true;
   ui.testWorkflowGeneratorConnection.textContent = "测试中…";
   ui.workflowGeneratorStatus.textContent = "正在向配置的模型服务发送一条简短测试请求…";
