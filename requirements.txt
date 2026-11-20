@@ -4,3 +4,5 @@ mediapipe==0.10.21
 av==16.1.0
 opencv-contrib-python==4.11.0.86
 numpy==1.26.4
+python-multipart==0.0.20
+pypdf==7.1.1
