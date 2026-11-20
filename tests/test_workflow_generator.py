@@ -1,4 +1,5 @@
 import io
+import json
 import tempfile
 import unittest
 import zipfile
@@ -223,6 +224,20 @@ class WorkflowPlanCompilerTests(unittest.TestCase):
         self.assertEqual(external_page_control_issues(workflow, pages, "promo"), [])
 
 
+class FakeResponse:
+    def __init__(self, payload):
+        self.data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def read(self, size=-1):
+        return self.data if size < 0 else self.data[:size]
+
+
 class WorkflowGeneratorConfigurationTests(unittest.TestCase):
     def test_example_api_key_placeholder_is_not_treated_as_configured(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -236,6 +251,54 @@ class WorkflowGeneratorConfigurationTests(unittest.TestCase):
 
                 env_file.write_text("OPENAI_API_KEY=sk-real-example-value\n", encoding="utf-8")
                 self.assertTrue(generator.status()["configured"])
+
+
+    def test_responses_api_request_uses_strict_schema_and_parses_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            env_file = Path(directory) / ".env"
+            env_file.write_text(
+                "OPENAI_API_KEY=sk-test-key\nOPENAI_MODEL=gpt-4o-mini\n"
+                "OPENAI_BASE_URL=https://api.example.test/v1\n",
+                encoding="utf-8",
+            )
+            captured = {}
+
+            def opener(request, timeout):
+                captured["url"] = request.full_url
+                captured["authorization"] = request.get_header("Authorization")
+                captured["timeout"] = timeout
+                captured["payload"] = json.loads(request.data.decode("utf-8"))
+                return FakeResponse({
+                    "output": [{
+                        "type": "message",
+                        "content": [{
+                            "type": "output_text",
+                            "text": json.dumps(sample_plan(), ensure_ascii=False),
+                        }],
+                    }],
+                })
+
+            with patch.dict("os.environ", {
+                "OPENAI_API_KEY": "",
+                "OPENAI_MODEL": "",
+                "OPENAI_BASE_URL": "",
+            }):
+                generator = WorkflowGenerator(env_file=env_file, opener=opener)
+                plan = generator.generate_plan(
+                    "播放企业宣传片",
+                    "结束后停止",
+                    "Open_Palm",
+                    {"video.play": {"properties": {}, "required": [], "idempotent": True}},
+                    [{"page_id": "promo", "title": "企业宣传片", "enabled": True}],
+                )
+
+        self.assertEqual(plan["name"], "访客展厅讲解")
+        self.assertEqual(captured["url"], "https://api.example.test/v1/responses")
+        self.assertEqual(captured["authorization"], "Bearer sk-test-key")
+        self.assertEqual(captured["timeout"], 75)
+        self.assertEqual(captured["payload"]["text"]["format"]["type"], "json_schema")
+        self.assertTrue(captured["payload"]["text"]["format"]["strict"])
+        self.assertEqual(captured["payload"]["model"], "gpt-4o-mini")
 
 
 class WorkflowGeneratorClientTests(unittest.TestCase):
