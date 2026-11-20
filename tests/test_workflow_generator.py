@@ -266,6 +266,34 @@ class WorkflowGeneratorConfigurationTests(unittest.TestCase):
                 self.assertTrue(generator.status()["configured"])
 
 
+    def test_frontend_api_key_configuration_persists_and_preserves_other_env_values(self):
+        with tempfile.TemporaryDirectory() as directory:
+            env_file = Path(directory) / ".env"
+            env_file.write_text(
+                "# Existing model settings\nOPENAI_MODEL=gpt-4o-mini\n"
+                "OPENAI_BASE_URL=https://api.example.test/v1\nOTHER_SETTING=keep-me\n"
+                "OPENAI_API_KEY=old-key\n",
+                encoding="utf-8",
+            )
+            with patch.dict("os.environ", {"OPENAI_API_KEY": ""}):
+                generator = WorkflowGenerator(env_file=env_file)
+                status = generator.configure_api_key("sk-new-local-key")
+                saved = env_file.read_text(encoding="utf-8")
+                self.assertTrue(status["configured"])
+                self.assertNotIn("api_key", status)
+                self.assertIn("OPENAI_API_KEY=sk-new-local-key", saved)
+                self.assertIn("OPENAI_MODEL=gpt-4o-mini", saved)
+                self.assertIn("OPENAI_BASE_URL=https://api.example.test/v1", saved)
+                self.assertIn("OTHER_SETTING=keep-me", saved)
+                self.assertEqual(saved.count("OPENAI_API_KEY="), 1)
+
+    def test_frontend_api_key_configuration_rejects_whitespace_and_line_breaks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            generator = WorkflowGenerator(env_file=Path(directory) / ".env")
+            for invalid in ("", "sk-invalid key", "sk-invalid\\nOPENAI_MODEL=bad"):
+                with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                    generator.configure_api_key(invalid)
+
     def test_responses_api_request_uses_strict_schema_and_parses_output(self):
         with tempfile.TemporaryDirectory() as directory:
             env_file = Path(directory) / ".env"
@@ -325,6 +353,25 @@ class WorkflowGeneratorClientTests(unittest.TestCase):
     def tearDown(self):
         self.client.close()
         self.temp_dir.cleanup()
+
+    def test_frontend_api_key_endpoint_saves_without_returning_secret(self):
+        expected_status = {
+            "configured": True,
+            "provider": "OpenAI Responses API",
+            "model": "gpt-4o-mini",
+            "extensions": [".pdf", ".docx", ".txt", ".md"],
+            "max_upload_bytes": 5 * 1024 * 1024,
+            "max_extracted_chars": 32000,
+        }
+        with patch.object(WorkflowGenerator, "configure_api_key", return_value=expected_status) as configure:
+            response = self.client.put(
+                "/api/workflow-generator/config",
+                json={"api_key": "sk-local-test-key"},
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()["configured"])
+        self.assertNotIn("api_key", response.json())
+        configure.assert_called_once_with("sk-local-test-key")
 
     def test_generator_status_endpoint_is_available(self):
         response = self.client.get("/api/workflow-generator/status")
