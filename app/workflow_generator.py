@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import html
 import json
 import os
 import re
@@ -926,6 +927,47 @@ class WorkflowGenerator:
         detail = re.sub(r"(?i)sk-[A-Za-z0-9_-]{8,}", "[密钥已隐藏]", detail)
         return detail[:320]
 
+    def _extract_provider_error_detail(self, raw_body: bytes, api_key: str) -> str:
+        if not raw_body:
+            return "上游未返回错误详情；请检查密钥权限、模型授权、IP 白名单或服务商网关策略"
+
+        raw_text = raw_body.decode("utf-8", errors="replace").strip()
+        message = ""
+        try:
+            payload = json.loads(raw_text)
+        except (json.JSONDecodeError, TypeError):
+            payload = None
+
+        if isinstance(payload, dict):
+            error_value = payload.get("error")
+            if isinstance(error_value, dict):
+                for field in ("message", "detail", "msg", "description", "reason", "code", "type"):
+                    value = error_value.get(field)
+                    if value not in (None, ""):
+                        message = str(value)
+                        break
+            elif error_value not in (None, ""):
+                message = str(error_value)
+
+            if not message:
+                for field in ("message", "detail", "msg", "error_description", "description", "reason", "code"):
+                    value = payload.get(field)
+                    if value not in (None, ""):
+                        message = str(value)
+                        break
+        elif isinstance(payload, str):
+            message = payload.strip()
+
+        if not message:
+            # Some relays/CDNs return plain text or an HTML access-denied page
+            # instead of an OpenAI-compatible JSON error object.
+            message = re.sub(r"<[^>]*>", " ", raw_text)
+            message = html.unescape(re.sub(r"\\s+", " ", message)).strip()
+        if not message:
+            message = "上游返回了无法识别的错误响应"
+
+        return self._sanitize_provider_message(message, api_key)
+
     def _post_json(self, config: dict[str, str], endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
         request = urllib.request.Request(
             config["base_url"] + "/" + endpoint.lstrip("/"),
@@ -941,16 +983,22 @@ class WorkflowGenerator:
                 raw = response.read(2 * 1024 * 1024)
         except urllib.error.HTTPError as error:
             try:
-                body = json.loads(error.read(64 * 1024).decode("utf-8", errors="replace"))
-                error_value = body.get("error", {}) if isinstance(body, dict) else {}
-                message = error_value.get("message", "") if isinstance(error_value, dict) else str(error_value)
-                if not message and isinstance(body, dict):
-                    message = body.get("message", "")
-            except Exception:
-                message = ""
-            detail = self._sanitize_provider_message(message, config["api_key"])
+                raw_body = error.read(64 * 1024)
+            except OSError:
+                raw_body = b""
+            detail = self._extract_provider_error_detail(raw_body, config["api_key"])
+            request_id = ""
+            if error.headers:
+                request_id = (
+                    error.headers.get("x-request-id")
+                    or error.headers.get("request-id")
+                    or error.headers.get("cf-ray")
+                    or ""
+                )
+            trace_suffix = f"；服务商追踪 ID：{request_id[:120]}" if request_id else ""
+            endpoint_path = "/" + endpoint.lstrip("/")
             raise ModelRequestError(
-                f"模型服务请求失败（HTTP {error.code}）：{detail}",
+                f"模型服务请求失败（HTTP {error.code}，接口 {endpoint_path}）：{detail}{trace_suffix}",
                 status_code=error.code,
                 provider_message=detail,
             ) from error
