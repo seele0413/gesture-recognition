@@ -38,7 +38,7 @@ test("gesture mappings are presented inside workflows instead of the settings pa
   const script = fs.readFileSync(path.join(root, "web/workflows.js"), "utf8");
   assert.doesNotMatch(settings, /mappingGrid|mappingHeading|saveMappings/);
   assert.match(workflows, /id="gestureWorkflowMap"/);
-  assert.match(workflows, /不同手势可以执行不同动作，并共同控制同一个登记展示页面/);
+  assert.match(workflows, /要用多个手势控制同一个网页/);
   assert.match(script, /function renderGestureWorkflowMap\(\)/);
 });
 
