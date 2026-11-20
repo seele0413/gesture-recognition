@@ -215,6 +215,6 @@ PRESENTATION_DECKS = {
 - 页面边界：外部网页只支持整页导航，不能在外部页面之后执行本地 DOM 控制动作；需要先通过 web.return_home 回到本地展示主页。
 - 人工审核：生成 API 只返回 enabled=false 的未保存草稿。前端“应用到画布”只更新当前编辑状态；用户手动保存后才会创建数据库记录，手动启用后才可响应手势。
 - 模型配置：项目根目录 .env 中配置 OPENAI_API_KEY、OPENAI_BASE_URL、OPENAI_MODEL 和 OPENAI_API_PROTOCOL（auto、chat_completions 或 responses）。网页弹窗可直接编辑这些配置并测试连接；留空 API Key 表示保留当前密钥。密钥不会由状态接口返回。.env 已加入 .gitignore；.env.example 仅提供占位值。API 调用费用由所选服务商按其规则计费，不属于 ChatGPT 订阅。
-- 隐私：文档正文会发送到用户配置的 OpenAI API 服务，不会保存在项目磁盘或 SQLite；不要上传未获授权的涉密文档。
+- 隐私：文档正文会发送到用户配置的模型服务商，不会保存在项目磁盘或 SQLite；不要上传未获授权的涉密文档。
 - 接口：GET /api/workflow-generator/status、PUT /api/workflow-generator/config、POST /api/workflow-generator/test、POST /api/workflows/generate。连接测试可使用尚未保存的表单配置，不会写入 .env；生成接口使用 multipart/form-data，字段为 file、instructions 和 preferred_trigger。
 - 自动化测试：tests/test_workflow_generator.py 覆盖文档解析、上传限制、严格 Schema、流程图编译、循环图布局、外部页面边界和生成 API 的未保存草稿语义。
