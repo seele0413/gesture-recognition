@@ -535,3 +535,51 @@
   .workflow-generator-key-row { grid-template-columns: minmax(0, 1fr); }
   .workflow-generator-key-row .tool-button { width: 100%; }
 }
+
+
+/* Provider-neutral model service settings. */
+.workflow-generator-config {
+  gap: 8px;
+}
+.workflow-generator-config > strong {
+  color: #465247;
+  font-size: 12px;
+  font-weight: 700;
+}
+.workflow-generator-config > label {
+  margin-top: 3px;
+  color: #536055;
+  font-size: 11px;
+  font-weight: 650;
+}
+.workflow-generator-config input[type="password"],
+.workflow-generator-config input[type="url"],
+.workflow-generator-config input[type="text"],
+.workflow-generator-config select {
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  padding: 7px 9px;
+  border: 1px solid #cbd5cb;
+  border-radius: 4px;
+  color: #29312b;
+  background: #fff;
+  font: inherit;
+  font-size: 12px;
+}
+.workflow-generator-config input:focus,
+.workflow-generator-config select:focus {
+  outline: 2px solid rgba(70, 108, 85, .2);
+  border-color: #6b8d72;
+}
+.workflow-generator-config-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px;
+  margin-top: 3px;
+}
+.workflow-generator-config-actions .tool-button:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
