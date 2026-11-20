@@ -146,6 +146,8 @@ def _extract_docx(data: bytes) -> str:
     except (OSError, zipfile.BadZipFile, KeyError, RuntimeError) as error:
         raise DocumentParseError("DOCX 文件损坏或格式不受支持") from error
 
+    if b"<!DOCTYPE" in xml_data.upper() or b"<!ENTITY" in xml_data.upper():
+        raise DocumentParseError("DOCX 正文包含不支持的 XML 声明")
     try:
         root = ET.fromstring(xml_data)
     except ET.ParseError as error:
@@ -388,7 +390,7 @@ def build_plan_schema(action_schemas: dict[str, dict[str, Any]]) -> dict[str, An
             "type": "object",
             "properties": {
                 "type": {"type": "string", "enum": ["gesture_sequence_trigger"]},
-                "gestures": {"type": "array", "items": {"type": "string", "enum": list(ALLOWED_TRIGGER_GESTURES)}},
+                "gestures": {"type": "array", "items": {"type": "string", "enum": list(ALLOWED_TRIGGER_GESTURES)}, "minItems": 2, "maxItems": 5},
                 "sequence_window_ms": {"type": "integer", "minimum": 1000, "maximum": 30000},
             },
             "required": ["type", "gestures", "sequence_window_ms"],
@@ -419,10 +421,10 @@ def build_plan_schema(action_schemas: dict[str, dict[str, Any]]) -> dict[str, An
             "description": {"type": "string"},
             "summary": {"type": "string"},
             "trigger": {"anyOf": trigger_variants},
-            "nodes": {"type": "array", "items": {"anyOf": action_variants + [condition_node, delay_node, wait_node, end_node]}},
-            "edges": {"type": "array", "items": edge_schema},
-            "warnings": {"type": "array", "items": {"type": "string"}},
-            "questions": {"type": "array", "items": {"type": "string"}},
+            "nodes": {"type": "array", "items": {"anyOf": action_variants + [condition_node, delay_node, wait_node, end_node]}, "minItems": 1, "maxItems": MAX_GENERATED_NODES},
+            "edges": {"type": "array", "items": edge_schema, "maxItems": MAX_GENERATED_EDGES},
+            "warnings": {"type": "array", "items": {"type": "string"}, "maxItems": 20},
+            "questions": {"type": "array", "items": {"type": "string"}, "maxItems": 20},
         },
         "required": ["name", "description", "summary", "trigger", "nodes", "edges", "warnings", "questions"],
         "additionalProperties": False,
@@ -528,7 +530,7 @@ def compile_workflow_plan(plan: dict[str, Any]) -> tuple[dict[str, Any], list[st
         if not isinstance(edge, dict):
             raise WorkflowGenerationError(f"模型生成的第 {index} 条连线结构无效")
         source, target = edge.get("source"), edge.get("target")
-        if source not in id_map or target not in id_map:
+        if not isinstance(source, str) or not isinstance(target, str) or source not in id_map or target not in id_map:
             raise WorkflowGenerationError(f"模型生成的第 {index} 条连线引用了不存在的节点")
         item = {"source": id_map[source], "target": id_map[target]}
         if edge.get("when") is not None:
@@ -609,9 +611,8 @@ def _layout_nodes(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> N
     while queue:
         source = queue.popleft()
         for target in adjacency[source]:
-            candidate = depth[source] + 1
-            if candidate > depth.get(target, -1):
-                depth[target] = candidate
+            if target not in depth:
+                depth[target] = depth[source] + 1
                 queue.append(target)
     layers: dict[int, list[str]] = defaultdict(list)
     for node in nodes:
