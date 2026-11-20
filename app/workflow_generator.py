@@ -261,7 +261,10 @@ def _parameter_json_schema(rule: dict[str, Any]) -> dict[str, Any] | None:
     if isinstance(values, list):
         if not values:
             return None
-        schema: dict[str, Any] = {"type": "string", "enum": values}
+        kind = rule.get("type")
+        if kind not in {"string", "integer", "number", "boolean"}:
+            kind = "string"
+        schema: dict[str, Any] = {"type": kind, "enum": values}
     else:
         kind = rule.get("type")
         if kind not in {"string", "integer", "number", "boolean"}:
@@ -555,6 +558,8 @@ def compile_workflow_plan(plan: dict[str, Any]) -> tuple[dict[str, Any], list[st
     if end_nodes:
         end_id = end_nodes[0]["id"]
     else:
+        if len(nodes) >= MAX_GENERATED_NODES:
+            raise WorkflowGenerationError("生成结果需要一个结束节点，请减少业务节点数量后重试")
         end_id = "ai_end"
         while end_id in {node["id"] for node in nodes}:
             end_id += "_"
@@ -594,6 +599,11 @@ def compile_workflow_plan(plan: dict[str, Any]) -> tuple[dict[str, Any], list[st
             edges.append(edge)
             outgoing.append(edge)
             warnings.append(f"节点 {node_id} 未指定后继，已连接到结束节点")
+
+    if len(nodes) > MAX_GENERATED_NODES or len(edges) > MAX_GENERATED_EDGES:
+        raise WorkflowGenerationError(
+            f"补全结束路径后工作流超过限制（最多 {MAX_GENERATED_NODES} 个节点、{MAX_GENERATED_EDGES} 条连线）"
+        )
 
     workflow = new_workflow(str(plan.get("name") or "文档生成工作流")[:80])
     workflow["name"] = str(plan.get("name") or "文档生成工作流").strip()[:80] or "文档生成工作流"
