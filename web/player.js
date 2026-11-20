@@ -300,6 +300,14 @@ async function executeDisplayAction(action, params, timeoutMs = 10000) {
       if (typeof params.volume !== "number" || params.volume < 0 || params.volume > 1) throw new Error("音量范围无效");
       video.volume = params.volume;
       return { volume: video.volume };
+    case "video.volume_up":
+      video.volume = Math.min(1, Math.round((video.volume + 0.1) * 10) / 10);
+      showFeedback("音量 " + Math.round(video.volume * 100) + (video.muted ? "% · 已静音" : "%"));
+      return { volume: video.volume, muted: video.muted };
+    case "video.volume_down":
+      video.volume = Math.max(0, Math.round((video.volume - 0.1) * 10) / 10);
+      showFeedback("音量 " + Math.round(video.volume * 100) + (video.muted ? "% · 已静音" : "%"));
+      return { volume: video.volume, muted: video.muted };
     case "video.mute":
       video.muted = true;
       return { muted: true };
