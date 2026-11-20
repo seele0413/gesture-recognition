@@ -1743,11 +1743,19 @@ async function testWorkflowGeneratorConnection() {
       method: "POST",
       body: JSON.stringify(workflowGeneratorConfigPayload()),
     });
-    ui.workflowGeneratorKeyState.textContent = "连接正常";
-    ui.workflowGeneratorStatus.textContent =
-      result.message + " 模型：" + result.model + "；实际接口：" + result.protocol_label + "。";
+    const saved = await api("/api/workflow-generator/status");
+    const matchesSavedConfig =
+      !ui.workflowGeneratorApiKey.value.trim() &&
+      saved.configured &&
+      saved.base_url === ui.workflowGeneratorBaseUrl.value.trim() &&
+      saved.model === ui.workflowGeneratorModel.value.trim() &&
+      saved.protocol === ui.workflowGeneratorProtocol.value;
+    ui.workflowGeneratorKeyState.textContent = "连接测试成功";
+    ui.workflowGeneratorStatus.textContent = result.message + " 模型：" + result.model +
+      "；实际接口：" + result.protocol_label +
+      (matchesSavedConfig ? "。当前已保存配置可直接生成。" : "。这是未保存配置的测试结果；点击“保存配置”后才能用于生成。");
     ui.workflowGeneratorStatus.dataset.state = "success";
-    ui.workflowGeneratorSubmit.disabled = false;
+    ui.workflowGeneratorSubmit.disabled = !matchesSavedConfig;
   } catch (error) {
     ui.workflowGeneratorStatus.textContent = error.message || "连接测试失败";
     ui.workflowGeneratorStatus.dataset.state = "error";
