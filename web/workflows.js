@@ -29,6 +29,7 @@ const ui = {
   dryRunWorkflow: document.getElementById("dryRunWorkflow"),
   toggleWorkflow: document.getElementById("toggleWorkflow"),
   actionLibrary: document.getElementById("actionLibrary"),
+  gestureWorkflowMap: document.getElementById("gestureWorkflowMap"),
   triggerType: document.getElementById("triggerType"),
   triggerFields: document.getElementById("triggerFields"),
   edgeWhen: document.getElementById("edgeWhen"),
@@ -1725,7 +1726,6 @@ function openWorkflowGenerator() {
   ui.workflowGeneratorApiKey.value = "";
   ui.workflowGeneratorResult.hidden = true;
   ui.workflowGeneratorFile.value = "";
-  ui.workflowGeneratorApiKey.value = "";
   ui.workflowGeneratorStatus.dataset.state = "";
   ui.workflowGeneratorStatus.textContent = "正在检查模型配置…";
   ui.workflowGeneratorSubmit.disabled = true;
@@ -1808,6 +1808,7 @@ function resetWorkflowGeneratorPreview() {
   ui.workflowGeneratorResult.hidden = true;
   ui.workflowGeneratorReport.replaceChildren();
   ui.workflowGeneratorFile.value = "";
+  ui.workflowGeneratorApiKey.value = "";
   ui.workflowGeneratorStatus.dataset.state = "";
   ui.workflowGeneratorStatus.textContent = "请选择文档并补充生成要求。";
 }
@@ -1882,6 +1883,12 @@ ui.newWorkflow.addEventListener("click", () => {
 });
 ui.generateWorkflow.addEventListener("click", openWorkflowGenerator);
 ui.saveWorkflowGeneratorKey.addEventListener("click", saveWorkflowGeneratorApiKey);
+ui.workflowGeneratorApiKey.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    saveWorkflowGeneratorApiKey();
+  }
+});
 ui.workflowGeneratorForm.addEventListener("submit", submitWorkflowGenerator);
 ui.applyGeneratedWorkflow.addEventListener("click", applyGeneratedWorkflow);
 ui.regenerateWorkflow.addEventListener("click", () => {
