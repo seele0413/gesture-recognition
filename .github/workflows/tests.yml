@@ -4,11 +4,13 @@ on:
   push:
     branches:
       - feature/v2-architecture
+      - feature/document-workflow-generator
   pull_request:
     branches:
       - main
       - feature/hand-pointer-drag
       - feature/v2-architecture
+      - feature/document-workflow-generator
   workflow_dispatch:
 
 jobs:
