@@ -1247,7 +1247,7 @@ class WorkflowGenerator:
         output_text = _extract_response_text(response_data)
         normalized_output = output_text.strip()
         if normalized_output.startswith("```"):
-            normalized_output = re.sub(r"^\`\`\`(?:json)?\s*|\s*\`\`\`$", "", normalized_output, flags=re.IGNORECASE).strip()
+            normalized_output = re.sub(r"^```(?:json)?\s*|\s*```$", "", normalized_output, flags=re.IGNORECASE).strip()
         try:
             plan = json.loads(normalized_output)
         except json.JSONDecodeError as error:
