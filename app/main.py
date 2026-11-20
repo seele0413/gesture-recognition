@@ -172,6 +172,17 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
     app.state.action_registry = action_registry
     app.state.workflow_engine = workflow_engine
     app.state.workflow_generator = workflow_generator
+
+    def validate_workflow_definition(definition: dict) -> list[str]:
+        errors = workflow_engine.validate(definition)
+        errors.extend(
+            external_page_control_issues(
+                definition,
+                store.get_display_pages(),
+                store.get_default_display_page_id(),
+            )
+        )
+        return errors
     app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
 
     @app.middleware("http")
@@ -423,7 +434,7 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
                 pages,
             )
             generated, warnings, questions, summary = build_generated_workflow(plan, action_schemas)
-            validation_errors = workflow_engine.validate(generated)
+            validation_errors = validate_workflow_definition(generated)
             validation_errors.extend(
                 external_page_control_issues(
                     generated,
@@ -490,7 +501,7 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
 
     @app.post("/api/workflows/validate")
     async def validate_workflow_draft(payload: dict) -> dict:
-        errors = workflow_engine.validate(payload)
+        errors = validate_workflow_definition(payload)
         return {"valid": not errors, "errors": errors}
 
     @app.get("/api/workflows")
@@ -544,7 +555,7 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
         copied = new_workflow(source["name"] + " 副本")
         copied.update({key: source[key] for key in ("description", "trigger", "nodes", "edges")})
         copied["enabled"] = False
-        errors = workflow_engine.validate(copied)
+        errors = validate_workflow_definition(copied)
         if errors:
             raise HTTPException(status_code=400, detail=errors)
         return {"workflow": store.save_workflow(copied)}
@@ -560,7 +571,7 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
         workflow = store.get_workflow(workflow_id)
         if not workflow:
             raise HTTPException(status_code=404, detail="工作流不存在")
-        errors = workflow_engine.validate(workflow)
+        errors = validate_workflow_definition(workflow)
         return {"valid": not errors, "errors": errors}
 
     @app.post("/api/workflows/{workflow_id}/dry-run")
