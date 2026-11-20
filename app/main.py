@@ -49,6 +49,24 @@ class RecognitionSettingsRequest(BaseModel):
     gesture_confidence_threshold: float
 
 
+class WorkflowGeneratorConfigRequest(BaseModel):
+    api_key: str = Field(min_length=1, max_length=512)
+
+    class Config:
+        extra = "forbid"
+
+    @root_validator(pre=True)
+    def validate_api_key_value(cls, values):
+        if not isinstance(values, dict):
+            return values
+        value = values.get("api_key")
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("请输入有效的 OpenAI API Key")
+        if any(character.isspace() for character in value.strip()) or "\x00" in value:
+            raise ValueError("API Key 格式无效，请检查是否包含空格或换行")
+        return {"api_key": value.strip()}
+
+
 class DisplayPageCreateRequest(BaseModel):
     page_id: str
     title: str
@@ -413,6 +431,14 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
     @app.get("/api/workflow-generator/status")
     async def workflow_generator_status() -> dict:
         return workflow_generator.status()
+
+    @app.put("/api/workflow-generator/config")
+    async def update_workflow_generator_config(payload: WorkflowGeneratorConfigRequest) -> dict:
+        try:
+            # The secret is written to the ignored local .env file and is never returned.
+            return workflow_generator.configure_api_key(payload.api_key)
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
 
     @app.post("/api/workflows/generate")
     async def generate_workflow_from_document(
