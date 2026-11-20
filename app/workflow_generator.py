@@ -916,6 +916,16 @@ class WorkflowGenerator:
         # Backward-compatible entry point retained for existing callers/tests.
         return self.configure(api_key=api_key)
 
+    @staticmethod
+    def _sanitize_provider_message(message: Any, api_key: str) -> str:
+        detail = str(message or "模型服务返回错误")
+        if api_key:
+            detail = detail.replace(api_key, "[密钥已隐藏]")
+        # Also mask common OpenAI-style key fragments if a provider echoes a
+        # shortened or reformatted version of the credential in its error.
+        detail = re.sub(r"(?i)sk-[A-Za-z0-9_-]{8,}", "[密钥已隐藏]", detail)
+        return detail[:320]
+
     def _post_json(self, config: dict[str, str], endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
         request = urllib.request.Request(
             config["base_url"] + "/" + endpoint.lstrip("/"),
@@ -938,7 +948,7 @@ class WorkflowGenerator:
                     message = body.get("message", "")
             except Exception:
                 message = ""
-            detail = str(message)[:320] if message else "模型服务返回错误"
+            detail = self._sanitize_provider_message(message, config["api_key"])
             raise ModelRequestError(
                 f"模型服务请求失败（HTTP {error.code}）：{detail}",
                 status_code=error.code,
@@ -947,7 +957,7 @@ class WorkflowGenerator:
         except (urllib.error.URLError, TimeoutError, OSError) as error:
             raise ModelRequestError(
                 "无法连接模型服务，请检查网络和 API Base URL",
-                provider_message=str(error)[:240],
+                provider_message=self._sanitize_provider_message(error, config["api_key"]),
             ) from error
 
         try:
@@ -959,7 +969,11 @@ class WorkflowGenerator:
         if response_data.get("error"):
             error_value = response_data["error"]
             message = error_value.get("message", "") if isinstance(error_value, dict) else str(error_value)
-            raise ModelRequestError(str(message)[:320] or "模型服务返回错误")
+            detail = self._sanitize_provider_message(message, config["api_key"])
+            raise ModelRequestError(
+                "模型服务返回错误：" + detail,
+                provider_message=detail,
+            )
         return response_data
 
     @staticmethod
