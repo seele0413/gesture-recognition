@@ -17,6 +17,8 @@ from app.control import (
     validate_mappings,
 )
 from app.settings import MEDIA_DIR
+from app.display_pages import DEFAULT_DISPLAY_PAGE_ID, DISPLAY_PAGE_SEED_VERSION, DISPLAY_PAGES, validate_display_page_id
+from app.pointer import DEFAULT_POINTER_SETTINGS, validate_pointer_settings
 
 
 class ControlStore:
@@ -146,6 +148,25 @@ class ControlStore:
                     path TEXT NOT NULL,
                     enabled INTEGER NOT NULL DEFAULT 1
                 );
+                CREATE TABLE IF NOT EXISTS display_pages (
+                    page_id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    description TEXT NOT NULL DEFAULT '',
+                    path TEXT,
+                    page_type TEXT NOT NULL CHECK (page_type IN ('local', 'external')),
+                    url TEXT,
+                    parent_id TEXT REFERENCES display_pages(page_id) ON DELETE RESTRICT,
+                    sort_order INTEGER NOT NULL DEFAULT 0,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    CHECK (
+                        (page_type = 'local' AND path IS NOT NULL AND url IS NULL AND parent_id IS NULL)
+                        OR (page_type = 'external' AND path IS NULL AND url IS NOT NULL)
+                    )
+                );
+                CREATE INDEX IF NOT EXISTS idx_display_pages_parent_order
+                    ON display_pages(parent_id, sort_order, page_id);
                 """
             )
             connection.execute(
@@ -155,6 +176,10 @@ class ControlStore:
             connection.execute(
                 "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
                 ("gesture_confidence_threshold", json.dumps(DEFAULT_GESTURE_CONFIDENCE_THRESHOLD)),
+            )
+            connection.execute(
+                "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
+                ("pointer_settings", json.dumps(DEFAULT_POINTER_SETTINGS)),
             )
             row = connection.execute(
                 "SELECT value FROM settings WHERE key = ?", ("gesture_mappings",)
@@ -176,9 +201,50 @@ class ControlStore:
                     "UPDATE settings SET value = ? WHERE key = ?",
                     (json.dumps(DEFAULT_GESTURE_CONFIDENCE_THRESHOLD), "gesture_confidence_threshold"),
                 )
+            pointer_row = connection.execute(
+                "SELECT value FROM settings WHERE key = ?", ("pointer_settings",)
+            ).fetchone()
+            try:
+                validate_pointer_settings(json.loads(pointer_row["value"]))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                connection.execute(
+                    "UPDATE settings SET value = ? WHERE key = ?",
+                    (json.dumps(DEFAULT_POINTER_SETTINGS), "pointer_settings"),
+                )
             connection.execute(
                 "INSERT OR IGNORE INTO media_assets (asset_id, title, filename, enabled) VALUES (?, ?, ?, 1)",
                 ("company-promo", "企业宣传片", "company-promo.mp4"),
+            )
+            seed_version_row = connection.execute(
+                "SELECT value FROM settings WHERE key = ?", ("display_page_seed_version",)
+            ).fetchone()
+            try:
+                seed_version = int(seed_version_row["value"]) if seed_version_row else 0
+            except (TypeError, ValueError):
+                seed_version = 0
+            if seed_version < DISPLAY_PAGE_SEED_VERSION:
+                now = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+                for sort_order, page in enumerate(DISPLAY_PAGES):
+                    connection.execute(
+                        """INSERT OR IGNORE INTO display_pages
+                           (page_id, title, description, path, page_type, url, parent_id,
+                            sort_order, enabled, created_at, updated_at)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)""",
+                        (page.page_id, page.title, page.description, page.path, page.page_type,
+                         page.url, page.parent_id, sort_order, now, now),
+                    )
+                connection.execute(
+                    "INSERT INTO settings (key, value) VALUES (?, ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    ("display_page_seed_version", str(DISPLAY_PAGE_SEED_VERSION)),
+                )
+            connection.execute(
+                "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
+                ("display_pages_seeded", "1"),
+            )
+            connection.execute(
+                "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
+                ("display_default_page_id", json.dumps(DEFAULT_DISPLAY_PAGE_ID)),
             )
 
     def clear_temporary(self, session_id: str | None = None) -> None:
@@ -278,6 +344,28 @@ class ControlStore:
                 ("gesture_confidence_threshold", json.dumps(threshold)),
             )
         return threshold
+
+    def get_pointer_settings(self) -> dict[str, Any]:
+        with self._lock, self._connection() as connection:
+            row = connection.execute(
+                "SELECT value FROM settings WHERE key = ?", ("pointer_settings",)
+            ).fetchone()
+        return validate_pointer_settings(json.loads(row["value"]))
+
+    def set_pointer_settings(self, value: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            raise ValueError("指针设置必须是对象")
+        # Keep read/merge/write atomic so concurrent partial updates cannot overwrite one another.
+        with self._lock:
+            current = self.get_pointer_settings()
+            clean = validate_pointer_settings({**current, **value})
+            with self._connection() as connection:
+                connection.execute(
+                    "INSERT INTO settings (key, value) VALUES (?, ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    ("pointer_settings", json.dumps(clean)),
+                )
+        return clean
 
     def save_workflow(self, definition: dict[str, Any]) -> dict[str, Any]:
         workflow = dict(definition)
@@ -479,6 +567,190 @@ class ControlStore:
         if not path.is_relative_to(MEDIA_DIR.resolve()):
             return None
         return {"id": row["asset_id"], "title": row["title"], "path": path}
+
+    def get_display_pages(self, include_disabled: bool = False) -> list[dict[str, Any]]:
+        query = ("SELECT page_id, title, description, path, page_type, url, parent_id, "
+                 "sort_order, enabled, created_at, updated_at FROM display_pages")
+        if not include_disabled:
+            query += " WHERE enabled = 1"
+        query += " ORDER BY sort_order, created_at, page_id"
+        with self._lock, self._connection() as connection:
+            rows = connection.execute(query).fetchall()
+        return [{**dict(row), "enabled": bool(row["enabled"])} for row in rows]
+
+    def get_display_page(self, page_id: str) -> dict[str, Any] | None:
+        with self._lock, self._connection() as connection:
+            row = connection.execute(
+                """SELECT page_id, title, description, path, page_type, url, parent_id,
+                          sort_order, enabled, created_at, updated_at
+                   FROM display_pages WHERE page_id = ?""", (page_id,)
+            ).fetchone()
+        return {**dict(row), "enabled": bool(row["enabled"])} if row else None
+
+    def get_display_page_ids(self) -> tuple[str, ...]:
+        with self._lock, self._connection() as connection:
+            rows = connection.execute(
+                "SELECT page_id FROM display_pages WHERE enabled = 1 ORDER BY sort_order, created_at, page_id"
+            ).fetchall()
+        return tuple(row["page_id"] for row in rows)
+
+    def get_display_page_labels(self) -> dict[str, str]:
+        pages = {page["page_id"]: page for page in self.get_display_pages()}
+        labels: dict[str, str] = {}
+        for page_id, page in pages.items():
+            names: list[str] = []
+            visited: set[str] = set()
+            current = page
+            while current:
+                current_id = current["page_id"]
+                if current_id in visited:
+                    break
+                visited.add(current_id)
+                names.append(current["title"])
+                parent_id = current["parent_id"]
+                current = pages.get(parent_id) if parent_id else None
+            labels[page_id] = " / ".join(reversed(names))
+        return labels
+
+    def get_default_display_page_id(self) -> str:
+        with self._lock, self._connection() as connection:
+            row = connection.execute(
+                "SELECT value FROM settings WHERE key = ?", ("display_default_page_id",)
+            ).fetchone()
+            page_id = json.loads(row["value"]) if row else DEFAULT_DISPLAY_PAGE_ID
+            page = connection.execute(
+                "SELECT page_id FROM display_pages WHERE page_id = ? AND enabled = 1", (page_id,)
+            ).fetchone()
+        if page:
+            return str(page["page_id"])
+        available = self.get_display_page_ids()
+        return DEFAULT_DISPLAY_PAGE_ID if DEFAULT_DISPLAY_PAGE_ID in available else (available or (DEFAULT_DISPLAY_PAGE_ID,))[0]
+
+    def set_default_display_page_id(self, page_id: str) -> str:
+        page = self.get_display_page(page_id)
+        if not page or not page["enabled"]:
+            raise ValueError("默认展示页面必须是已启用的登记页面")
+        with self._lock, self._connection() as connection:
+            connection.execute(
+                "INSERT INTO settings (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                ("display_default_page_id", json.dumps(page_id)),
+            )
+        return page_id
+
+    def create_display_page(self, page: dict[str, Any]) -> dict[str, Any]:
+        page_id = validate_display_page_id(page.get("page_id"))
+        if page.get("page_type") != "external":
+            raise ValueError("网页管理接口目前只允许登记外部 HTTPS 网页")
+        now = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+        with self._lock, self._connection() as connection:
+            if connection.execute("SELECT 1 FROM display_pages WHERE page_id = ?", (page_id,)).fetchone():
+                raise ValueError("页面 ID 已存在")
+            order = connection.execute(
+                "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_order FROM display_pages"
+            ).fetchone()["next_order"]
+            connection.execute(
+                """INSERT INTO display_pages
+                   (page_id, title, description, path, page_type, url, parent_id,
+                    sort_order, enabled, created_at, updated_at)
+                   VALUES (?, ?, ?, NULL, 'external', ?, ?, ?, ?, ?, ?)""",
+                (page_id, page["title"], page.get("description", ""), page["url"],
+                 page.get("parent_id"), order, int(bool(page.get("enabled", True))), now, now),
+            )
+        return self.get_display_page(page_id)
+
+    def update_display_page(self, page_id: str, changes: dict[str, Any]) -> dict[str, Any] | None:
+        current = self.get_display_page(page_id)
+        if not current:
+            return None
+        if current["page_type"] != "external":
+            raise ValueError("内置本地展示页面不能通过网页管理接口修改")
+        values = {
+            "title": changes.get("title", current["title"]),
+            "description": changes.get("description", current["description"]),
+            "url": changes.get("url", current["url"]),
+            "parent_id": changes.get("parent_id", current["parent_id"]),
+            "enabled": changes.get("enabled", current["enabled"]),
+        }
+        if not values["enabled"] and self.is_display_page_referenced(page_id):
+            raise ValueError("该页面仍被工作流引用，请先修改或删除相关工作流")
+        if not values["enabled"]:
+            with self._lock, self._connection() as connection:
+                default_row = connection.execute(
+                    "SELECT value FROM settings WHERE key = ?", ("display_default_page_id",)
+                ).fetchone()
+                default_id = json.loads(default_row["value"]) if default_row else DEFAULT_DISPLAY_PAGE_ID
+                if default_id == page_id:
+                    raise ValueError("默认展示页面不能停用，请先更换默认页面")
+                if connection.execute(
+                    "SELECT 1 FROM display_pages WHERE parent_id = ? AND enabled = 1 LIMIT 1",
+                    (page_id,),
+                ).fetchone():
+                    raise ValueError("该页面仍有启用的子页面，请先停用或调整子页面")
+        with self._lock, self._connection() as connection:
+            # Keep the host relationship valid for disabled descendants too.
+            # A disabled child may be re-enabled later without changing its parent.
+            children = connection.execute(
+                "SELECT url FROM display_pages WHERE parent_id = ?", (page_id,)
+            ).fetchall()
+            if children:
+                from urllib.parse import urlsplit
+                new_host = urlsplit(values["url"]).hostname
+                if any(urlsplit(row["url"]).hostname != new_host for row in children):
+                    raise ValueError("该页面已有子页面；修改域名会使子页面失去父级归属")
+            connection.execute(
+                """UPDATE display_pages SET title = ?, description = ?, url = ?, parent_id = ?,
+                   enabled = ?, updated_at = ? WHERE page_id = ?""",
+                (values["title"], values["description"], values["url"], values["parent_id"],
+                 int(bool(values["enabled"])), datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+                 page_id),
+            )
+        return self.get_display_page(page_id)
+
+    def is_display_page_referenced(self, page_id: str) -> bool:
+        with self._lock, self._connection() as connection:
+            rows = connection.execute("SELECT definition_json FROM workflows").fetchall()
+        for row in rows:
+            try:
+                definition = json.loads(row["definition_json"])
+            except (TypeError, json.JSONDecodeError):
+                continue
+            nodes = definition.get("nodes", []) if isinstance(definition, dict) else []
+            for node in nodes:
+                params = node.get("params") if isinstance(node, dict) else None
+                if isinstance(params, dict) and params.get("page_id") == page_id:
+                    return True
+        return False
+
+    def delete_display_page(self, page_id: str) -> bool:
+        with self._lock, self._connection() as connection:
+            row = connection.execute("SELECT page_type FROM display_pages WHERE page_id = ?", (page_id,)).fetchone()
+            if not row:
+                return False
+            if row["page_type"] != "external":
+                raise ValueError("内置本地展示页面不能删除")
+            default_row = connection.execute(
+                "SELECT value FROM settings WHERE key = ?", ("display_default_page_id",)
+            ).fetchone()
+            default_id = json.loads(default_row["value"]) if default_row else DEFAULT_DISPLAY_PAGE_ID
+            if default_id == page_id:
+                raise ValueError("默认展示页面不能删除，请先更换默认页面")
+            if connection.execute(
+                "SELECT 1 FROM display_pages WHERE parent_id = ? LIMIT 1", (page_id,)
+            ).fetchone():
+                raise ValueError("该页面仍有子页面，请先删除或调整子页面")
+            rows = connection.execute("SELECT definition_json FROM workflows").fetchall()
+            for item in rows:
+                try:
+                    definition = json.loads(item["definition_json"])
+                except (TypeError, json.JSONDecodeError):
+                    continue
+                for node in definition.get("nodes", []) if isinstance(definition, dict) else []:
+                    params = node.get("params") if isinstance(node, dict) else None
+                    if isinstance(params, dict) and params.get("page_id") == page_id:
+                        raise ValueError("该页面仍被工作流引用，请先修改或删除相关工作流")
+            connection.execute("DELETE FROM display_pages WHERE page_id = ?", (page_id,))
+        return True
 
     def sync_media_assets(self, assets: dict[str, dict[str, str]]) -> None:
         with self._lock, self._connection() as connection:

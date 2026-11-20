@@ -194,6 +194,7 @@ class StreamManager:
         self.hub = hub
         self._confidence_threshold = store.get_gesture_confidence_threshold()
         self._pointer_mode_enabled = False
+        self._pointer_settings = store.get_pointer_settings()
         self.models_dir = models_dir
         self.capture_factory = capture_factory
         self.processor_factory = processor_factory
@@ -367,9 +368,24 @@ class StreamManager:
             self.hub.publish_from_thread({
                 "type": "pointer", "active": False, "pressed": False,
                 "x": 0.5, "y": 0.5, "track_id": None, "handedness": None,
+                "controller_id": None, "hand_track_id": None, "identity_confirmed": False,
                 "timestamp_ms": int(time.monotonic() * 1000),
             })
         return {"enabled": self._pointer_mode_enabled, "controller": controller}
+
+    def get_pointer_settings(self) -> dict[str, Any]:
+        with self._lock:
+            return dict(self._pointer_settings)
+
+    def set_pointer_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
+        clean = self.store.set_pointer_settings(settings)
+        with self._lock:
+            self._pointer_settings = clean
+            processor = self._processor
+        setter = getattr(processor, "set_pointer_settings", None) if processor else None
+        if setter:
+            setter(clean)
+        return dict(clean)
 
     def get_status(self) -> dict[str, Any]:
         with self._lock:
@@ -396,6 +412,7 @@ class StreamManager:
                 "state": self._state,
                 "error": self._error,
                 "pointer_mode_enabled": self._pointer_mode_enabled,
+                "pointer_settings": dict(self._pointer_settings),
                 "frame_width": self._frame_width,
                 "frame_height": self._frame_height,
                 "frame_ready": frame_fresh,
@@ -583,6 +600,9 @@ class StreamManager:
                         apply_threshold = getattr(processor, "set_confidence_threshold", None)
                         if apply_threshold:
                             apply_threshold(self.store.get_gesture_confidence_threshold())
+                        apply_pointer_settings = getattr(processor, "set_pointer_settings", None)
+                        if apply_pointer_settings:
+                            apply_pointer_settings(dict(self._pointer_settings))
                         apply_pointer_mode = getattr(processor, "set_pointer_mode", None)
                         if apply_pointer_mode:
                             apply_pointer_mode(self._pointer_mode_enabled)

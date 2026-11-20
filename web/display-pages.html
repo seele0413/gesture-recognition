@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#145da8">
+    <title>康晋电气手势控制平台 · 网页管理</title>
+    <link rel="icon" href="https://img.kompass.com/sys-master-images/h29/h63/9109303525406/comking%E6%96%B0logo-jpg" type="image/jpeg">
+    <link rel="stylesheet" href="/static/styles.css?v=20261119-system-font-1">
+    <link rel="stylesheet" href="/static/display-pages.css?v=20261118-display-pages-2">
+    <link rel="stylesheet" href="/static/industrial-ui.css?v=20261119-system-font-1">
+    <link rel="stylesheet" href="/static/comking-glass.css?v=20261119-ui-polish-1">
+    <script src="/static/display-pages.js?v=20261119-page-actions-1" defer></script>
+  </head>
+  <body class="display-pages-page">
+    <header class="settings-header">
+      <a class="settings-brand" href="/" aria-label="返回大屏">
+        <span class="comking-logo-shell"><img class="comking-logo" src="https://img.kompass.com/sys-master-images/h29/h63/9109303525406/comking%E6%96%B0logo-jpg" alt="COMKING" loading="eager"></span>
+        <span><strong>康晋电气</strong><small>手势控制平台 · 网页管理</small></span>
+      </a>
+      <div class="settings-header-tools">
+        <span id="pageConnection" class="connection-status" data-state="stopped" role="status">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span id="pageConnectionLabel">正在读取网页</span>
+        </span>
+        <a class="back-link" href="/workflows">工作流</a>
+        <a class="back-link" href="/display-pages" aria-current="page">网页管理</a>
+        <a class="back-link" href="/settings">设置</a>
+        <a class="back-link" href="/">返回大屏</a>
+      </div>
+    </header>
+
+    <main class="display-pages-layout">
+      <section class="display-pages-heading">
+        <div>
+          <h1>展示网页管理</h1>
+          <p class="display-pages-description">直接登记网页网址，建立主页与子页面关系。登记后可在工作流的「切换展示主页」动作中选择。</p>
+        </div>
+        <button id="addPage" class="button button-primary" type="button">＋ 添加网页</button>
+      </section>
+
+      <div id="pageStatus" class="page-status" data-kind="info" role="status" aria-live="polite">
+        正在加载已登记页面…
+      </div>
+
+      <section class="display-pages-panel" aria-labelledby="pageTreeHeading">
+        <div class="display-pages-panel-heading">
+          <div>
+            <h2 id="pageTreeHeading">网页目录与访问状态</h2>
+          </div>
+          <span id="pageCount" class="page-count">0 个页面</span>
+        </div>
+        <div id="pageTree" class="page-tree">
+          <p class="page-empty">正在读取页面目录…</p>
+        </div>
+      </section>
+
+      <section class="display-pages-note">
+        <strong>接入说明</strong>
+        <p>只需填写 HTTPS 网址，不需要上传 HTML、CSS 或 JavaScript。子页面必须与父页面使用相同域名。状态说明：工作流可调用表示页面已启用；工作流不可调用表示页面已停用；嵌入兼容性待现场验证表示系统尚未确认目标网站是否允许 iframe 嵌入。地址检测只校验 HTTPS 地址格式和公开域名规则，不会请求第三方网站；实际显示效果需要在大屏中验证。</p>
+      </section>
+    </main>
+
+    <dialog id="pageDialog" class="page-dialog" aria-labelledby="pageDialogTitle">
+      <form id="pageForm" class="page-form">
+        <div class="page-dialog-heading">
+          <div>
+            <h2 id="pageDialogTitle">添加展示网页</h2>
+          </div>
+          <button id="closePageDialog" class="dialog-close" type="button" aria-label="关闭">×</button>
+        </div>
+
+        <label for="pageId">页面唯一 ID</label>
+        <input id="pageId" name="page_id" required maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,63}" placeholder="例如 energy_storage" autocomplete="off">
+        <small class="field-help">只能使用英文字母、数字、下划线、点和连字符；创建后不可修改。</small>
+
+        <label for="pageTitle">页面名称</label>
+        <input id="pageTitle" name="title" required maxlength="120" placeholder="例如 储能系列产品">
+
+        <label for="pageUrl">网页地址 URL</label>
+        <div class="url-input-row">
+          <input id="pageUrl" name="url" type="url" required maxlength="2048" placeholder="https://www.example.com/products/">
+          <button id="validatePageUrl" class="button button-secondary" type="button">检测地址</button>
+        </div>
+        <p id="urlFeedback" class="url-feedback" role="status"></p>
+
+        <label for="pageParent">所属父页面</label>
+        <select id="pageParent" name="parent_id">
+          <option value="">作为独立主页</option>
+        </select>
+        <small class="field-help">选择父页面后，这个网页会显示在对应页面下面。子页面必须与父页面属于同一个域名。</small>
+
+        <label for="pageDescription">页面说明</label>
+        <textarea id="pageDescription" name="description" rows="3" maxlength="500" placeholder="可选，说明这个页面展示什么内容"></textarea>
+
+        <label class="page-enabled-option" for="pageEnabled">
+          <input id="pageEnabled" name="enabled" type="checkbox" checked>
+          <span>启用此页面（启用后可被工作流调用）</span>
+        </label>
+
+        <p id="pageFormError" class="page-form-error" role="alert"></p>
+        <div class="page-dialog-actions">
+          <button id="cancelPageDialog" class="button button-secondary" type="button">取消</button>
+          <button id="savePage" class="button button-primary" type="submit">保存网页</button>
+        </div>
+      </form>
+    </dialog>
+  </body>
+</html>

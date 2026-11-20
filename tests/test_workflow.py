@@ -12,7 +12,8 @@ from app.ppt_actions import PresentationAdapter
 from app.video_actions import register_video_actions
 from app.workflow import new_workflow
 from app.workflow_validator import validate_workflow
-from app.web_actions import BrowserCommandAdapter
+from app.display_pages import DISPLAY_PAGE_IDS
+from app.web_actions import BrowserCommandAdapter, register_web_actions
 
 
 class WorkflowValidatorTests(unittest.TestCase):
@@ -81,6 +82,7 @@ class WorkflowEngineTests(unittest.IsolatedAsyncioTestCase):
         )
         self.engine = WorkflowEngine(self.store, self.actions)
         self.engine.set_display_connected(True)
+        self.engine.set_display_ready(True)
         await self.engine.on_event({"type": "controller", "state": "locked", "track_id": "person-a"})
 
     async def asyncTearDown(self):
@@ -113,6 +115,33 @@ class WorkflowEngineTests(unittest.IsolatedAsyncioTestCase):
             "action_triggered": True, "action": "play_pause", "confidence": 0.9,
             "handedness": "Right", "timestamp_ms": timestamp,
         })
+
+    async def test_workflow_trigger_does_not_depend_on_legacy_player_action_mapping(self):
+        workflow = self.store.save_workflow(self._workflow(action_count=1))
+        event = await self.engine.on_event({
+            "type": "gesture", "gesture": "Open_Palm", "target_id": "person-a",
+            "action_triggered": False, "workflow_triggered": True, "action": "none",
+            "confidence": 0.9, "handedness": "Right", "timestamp_ms": 99,
+        })
+        self.assertTrue(event["workflow_handled"])
+        await self.engine._active_task
+        self.assertEqual([item[0] for item in self.calls], [0])
+
+    async def test_different_gestures_can_dispatch_independent_workflows(self):
+        first = self._workflow(action_count=1, trigger={"type": "gesture_trigger", "gesture": "Open_Palm"})
+        second = self._workflow(action_count=1, trigger={"type": "gesture_trigger", "gesture": "Thumb_Up"})
+        self.store.save_workflow(first)
+        self.store.save_workflow(second)
+
+        first_event = await self._trigger(gesture="Open_Palm", timestamp=100)
+        self.assertTrue(first_event["workflow_handled"])
+        await self.engine._active_task
+
+        second_event = await self._trigger(gesture="Thumb_Up", timestamp=200)
+        self.assertTrue(second_event["workflow_handled"])
+        await self.engine._active_task
+        self.assertEqual([item[0] for item in self.calls], [0, 0])
+        self.assertEqual(len(self.store.get_workflow_runs()), 2)
 
     async def test_one_confirmed_master_gesture_runs_five_sequential_actions(self):
         workflow = self.store.save_workflow(self._workflow())
@@ -204,30 +233,67 @@ class WorkflowEngineTests(unittest.IsolatedAsyncioTestCase):
         await self.engine._active_task
         self.assertEqual(len(self.calls), 1)
 
-    async def test_controller_suspect_cancels_workflow_and_reacquired_master_can_control(self):
+    async def test_controller_suspect_pauses_workflow_until_hand_identity_is_confirmed(self):
         workflow = self._workflow(action_count=1)
-        workflow["nodes"].insert(0, {"id": "wait", "type": "delay", "params": {"delay_ms": 500}})
+        workflow["nodes"].insert(0, {"id": "wait", "type": "delay", "params": {"delay_ms": 10}})
         workflow["edges"] = [{"source": "wait", "target": "action-0"}, {"source": "action-0", "target": "end"}]
         self.store.save_workflow(workflow)
         await self._trigger()
+        task = self.engine._active_task
         run_id = self.engine._active_run_id
-        await self.engine.on_event({
-            "type": "controller", "state": "suspect", "track_id": "person-a",
-            "controller_id": "controller-test", "reason": "track_unmatched",
-        })
-        await self.engine._active_task
-        run = self.store.get_workflow_run(run_id)
-        self.assertEqual(run["status"], "cancelled")
-        self.assertEqual(self.engine._controller_state, "suspect")
-        rejected = await self._trigger(timestamp=200)
-        self.assertIsNone(rejected)
-        await self.engine.on_event({
-            "type": "controller", "state": "locked", "track_id": "person-a",
-            "controller_id": "controller-test", "reason": "reacquired",
-        })
+        await asyncio.sleep(0)
+        await self.engine.on_event({"type": "controller", "state": "suspect", "track_id": "person-a",
+                                    "controller_id": "controller-test", "reason": "track_unmatched",
+                                    "identity_confirmed": False})
+        await asyncio.sleep(0.03)
+        self.assertFalse(task.done())
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.store.get_workflow_run(run_id)["status"], "running")
+        await self.engine.on_event({"type": "controller", "state": "suspect", "track_id": "person-a",
+                                    "controller_id": "controller-test", "reason": "hand_identity_confirmed",
+                                    "identity_confirmed": True})
+        await task
+        self.assertEqual(self.store.get_workflow_run(run_id)["status"], "success")
+        self.assertEqual([item[0] for item in self.calls], [0])
+
+    async def test_reacquiring_cancels_workflow_paused_during_suspect(self):
+        workflow = self._workflow(action_count=1)
+        workflow["nodes"].insert(0, {"id": "wait", "type": "delay", "params": {"delay_ms": 10}})
+        workflow["edges"] = [{"source": "wait", "target": "action-0"}, {"source": "action-0", "target": "end"}]
+        self.store.save_workflow(workflow)
+        await self._trigger()
+        task = self.engine._active_task
+        run_id = self.engine._active_run_id
+        await asyncio.sleep(0)
+        await self.engine.on_event({"type": "controller", "state": "suspect", "track_id": "person-a",
+                                    "controller_id": "controller-test", "reason": "track_unmatched",
+                                    "identity_confirmed": False})
+        await asyncio.sleep(0.03)
+        self.assertFalse(task.done())
+        await self.engine.on_event({"type": "controller", "state": "reacquiring", "track_id": "person-a",
+                                    "controller_id": "controller-test", "reason": "track_reacquiring"})
+        await task
+        self.assertEqual(self.store.get_workflow_run(run_id)["status"], "cancelled")
+        self.assertEqual(self.calls, [])
+
+    async def test_identity_confirmed_suspect_controller_can_trigger_workflow(self):
+        self.store.save_workflow(self._workflow(action_count=1))
+        await self.engine.on_event({"type": "controller", "state": "suspect", "track_id": "person-a",
+                                    "controller_id": "controller-test", "reason": "hand_identity_confirmed",
+                                    "identity_confirmed": True})
         accepted = await self._trigger(timestamp=300)
         self.assertTrue(accepted["workflow_handled"])
         await self.engine._active_task
+        self.assertEqual(self.store.get_workflow_runs()[0]["status"], "success")
+
+    async def test_controller_locked_trigger_accepts_v_gesture_reason(self):
+        workflow = self._workflow(action_count=1, trigger={"type": "controller_locked"})
+        self.store.save_workflow(workflow)
+        await self.engine.on_event({"type": "controller", "state": "unlocked", "track_id": None})
+        await self.engine.on_event({"type": "controller", "state": "locked", "track_id": "person-a",
+                                    "controller_id": "controller-test", "reason": "v_gesture"})
+        await self.engine._active_task
+        self.assertEqual(self.store.get_workflow_runs()[0]["status"], "success")
 
     async def test_action_timeout_is_recorded_as_timeout_and_stops_following_nodes(self):
         async def slow(_params, _context):
@@ -287,6 +353,7 @@ class WorkflowEngineTests(unittest.IsolatedAsyncioTestCase):
             )
             engine = WorkflowEngine(self.store, registry)
             engine.set_display_connected(True)
+            engine.set_display_ready(True)
             await engine.on_event({"type": "controller", "state": "locked", "track_id": "person-a"})
             workflow = self._workflow(action_count=1)
             workflow["nodes"] = [
@@ -338,10 +405,18 @@ class _FakeSocket:
 
 
 class DisplayCommandTests(unittest.IsolatedAsyncioTestCase):
+    async def _connect_ready(self, channel, socket):
+        self.assertTrue(await channel.connect(socket))
+        await channel.receive(socket, {
+            "type": "display:ready",
+            "page_id": "promo",
+            "generation": 1,
+        })
+
     async def test_command_waits_for_matching_ack_and_rejects_second_client(self):
         channel = DisplayCommandChannel()
         socket = _FakeSocket()
-        self.assertTrue(await channel.connect(socket))
+        await self._connect_ready(channel, socket)
         rejected = _FakeSocket()
         self.assertFalse(await channel.connect(rejected))
         self.assertEqual(rejected.closed[0], 1013)
@@ -360,12 +435,105 @@ class DisplayCommandTests(unittest.IsolatedAsyncioTestCase):
     async def test_disconnect_fails_pending_command(self):
         channel = DisplayCommandChannel()
         socket = _FakeSocket()
-        await channel.connect(socket)
+        await self._connect_ready(channel, socket)
         pending = asyncio.create_task(channel.execute({"run_id": "r", "command_id": "c"}, 1000))
         await asyncio.sleep(0)
         await channel.disconnect(socket)
         with self.assertRaises(ConnectionError):
             await pending
+
+    async def test_ack_with_wrong_run_id_is_ignored(self):
+        channel = DisplayCommandChannel()
+        socket = _FakeSocket()
+        await self._connect_ready(channel, socket)
+        pending = asyncio.create_task(channel.execute(
+            {"run_id": "run-a", "command_id": "command-a", "action": "web.navigate_page",
+             "params": {"page_id": "factory"}}, 1000
+        ))
+        await asyncio.sleep(0)
+        await channel.receive(socket, {
+            "type": "ack", "run_id": "run-b", "command_id": "command-a",
+            "success": True, "result": {"page_id": "product"},
+        })
+        await asyncio.sleep(0)
+        self.assertFalse(pending.done())
+        await channel.receive(socket, {
+            "type": "ack", "run_id": "run-a", "command_id": "command-a",
+            "success": True, "result": {"page_id": "factory"},
+        })
+        self.assertEqual(await pending, {"page_id": "factory"})
+        await channel.disconnect(socket)
+
+    async def test_negative_ack_fails_workflow_action_with_bounded_error(self):
+        channel = DisplayCommandChannel()
+        socket = _FakeSocket()
+        await self._connect_ready(channel, socket)
+        pending = asyncio.create_task(channel.execute(
+            {"run_id": "run-a", "command_id": "command-b", "action": "web.navigate_page",
+             "params": {"page_id": "missing"}}, 1000
+        ))
+        await asyncio.sleep(0)
+        await channel.receive(socket, {
+            "type": "ack", "run_id": "run-a", "command_id": "command-b",
+            "success": False, "error": "页面未登记",
+        })
+        with self.assertRaisesRegex(RuntimeError, "页面未登记"):
+            await pending
+        await channel.disconnect(socket)
+
+    async def test_timeout_removes_pending_command(self):
+        channel = DisplayCommandChannel()
+        socket = _FakeSocket()
+        await self._connect_ready(channel, socket)
+        with self.assertRaises(asyncio.TimeoutError):
+            await channel.execute(
+                {"run_id": "run-a", "command_id": "command-timeout", "action": "web.navigate_page",
+                 "params": {"page_id": "product"}}, 10
+            )
+        self.assertEqual(channel._pending, {})
+        await channel.disconnect(socket)
+
+    async def test_navigate_page_schema_reads_dynamic_ids_and_hierarchical_labels(self):
+        channel = DisplayCommandChannel()
+        registry = ActionRegistry()
+        page_ids = ["promo", "company_website"]
+        labels = {"promo": "企业宣传片", "company_website": "康晋电气官网"}
+        register_web_actions(
+            registry, BrowserCommandAdapter(channel),
+            page_ids_provider=lambda: tuple(page_ids),
+            page_labels_provider=lambda: dict(labels),
+        )
+        schema = registry.schema_map()["web.navigate_page"]["properties"]["page_id"]
+        self.assertEqual(schema["enum"], page_ids)
+        self.assertEqual(schema["enum_labels"]["company_website"], "康晋电气官网")
+        page_ids.append("energy_storage")
+        labels["energy_storage"] = "康晋电气官网 / 产品中心 / 储能系列"
+        refreshed = registry.schema_map()["web.navigate_page"]["properties"]["page_id"]
+        self.assertEqual(refreshed["enum"], page_ids)
+        self.assertEqual(refreshed["enum_labels"]["energy_storage"], labels["energy_storage"])
+        self.assertIn("web.navigate_parent", registry.schema_map())
+
+    async def test_registered_navigate_page_action_sends_page_id_and_waits_for_ack(self):
+        channel = DisplayCommandChannel()
+        socket = _FakeSocket()
+        await self._connect_ready(channel, socket)
+        registry = ActionRegistry()
+        register_web_actions(registry, BrowserCommandAdapter(channel))
+        schema = registry.schema_map()["web.navigate_page"]
+        self.assertEqual(schema["properties"]["page_id"]["enum"], list(DISPLAY_PAGE_IDS))
+        pending = asyncio.create_task(registry.execute(
+            "web.navigate_page", {"page_id": "factory"},
+            {"run_id": "run-a", "command_id": "command-page", "timeout_ms": 1000},
+        ))
+        await asyncio.sleep(0)
+        self.assertEqual(socket.sent[0]["action"], "web.navigate_page")
+        self.assertEqual(socket.sent[0]["params"], {"page_id": "factory"})
+        await channel.receive(socket, {
+            "type": "ack", "run_id": "run-a", "command_id": "command-page",
+            "success": True, "result": {"page_id": "factory", "changed": True},
+        })
+        self.assertEqual(await pending, {"page_id": "factory", "changed": True})
+        await channel.disconnect(socket)
 
 
 if __name__ == "__main__":

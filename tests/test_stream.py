@@ -66,6 +66,10 @@ class FakeProcessor:
     def __init__(self, _store, _publish, _models_dir, _session_id):
         self.controller = type("Controller", (), {"snapshot": lambda _self: {"state": "unlocked", "track_id": None}})()
         self.confidence_threshold = 0.6
+        self.pointer_settings = None
+
+    def set_pointer_settings(self, settings):
+        self.pointer_settings = dict(settings)
 
     def set_confidence_threshold(self, threshold):
         self.confidence_threshold = threshold
@@ -241,6 +245,46 @@ class StreamManagerTests(unittest.TestCase):
         settings = self.manager.set_gesture_confidence_threshold(0.65)
         self.assertEqual(settings["gesture_confidence_threshold"], 0.65)
         self.assertEqual(self.manager._processor.confidence_threshold, 0.65)
+
+    def test_pointer_settings_apply_live_and_survive_processor_recreation(self):
+        created = []
+
+        def processor_factory(store, publish, models_dir, session_id):
+            processor = FakeProcessor(store, publish, models_dir, session_id)
+            created.append(processor)
+            return processor
+
+        manager = StreamManager(
+            self.store,
+            EventHub(),
+            capture_factory=lambda _url: FakeCapture(),
+            processor_factory=processor_factory,
+        )
+        try:
+            manager.start("rtsp://camera.local/live")
+            deadline = time.monotonic() + 3
+            while time.monotonic() < deadline and (
+                not created or created[0].pointer_settings is None
+            ):
+                time.sleep(0.01)
+            self.assertTrue(created)
+            self.assertEqual(created[0].pointer_settings, self.store.get_pointer_settings())
+
+            updated = manager.set_pointer_settings({"min_cutoff": 1.9, "press_stable_frames": 3})
+            self.assertEqual(created[0].pointer_settings, updated)
+            self.assertEqual(manager.get_status()["pointer_settings"], updated)
+
+            manager.stop()
+            manager.start("rtsp://camera.local/live")
+            deadline = time.monotonic() + 3
+            while time.monotonic() < deadline and (
+                len(created) < 2 or created[1].pointer_settings is None
+            ):
+                time.sleep(0.01)
+            self.assertGreaterEqual(len(created), 2)
+            self.assertEqual(created[1].pointer_settings, updated)
+        finally:
+            manager.stop()
 
     def test_single_processing_error_is_skipped_without_reconnecting(self):
         capture = FakeCapture()

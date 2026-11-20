@@ -24,7 +24,8 @@ def make_hand(*, track_id="person-1", handedness="Right", confidence=0.9, is_loc
 
 class HandPointerControllerTests(unittest.TestCase):
     def setUp(self):
-        self.pointer = HandPointerController(max_update_hz=1000000)
+        self.pointer = HandPointerController(max_update_hz=60)
+        self.pointer.min_update_interval = 0.0
         self.pointer.set_enabled(True)
 
     @staticmethod
@@ -43,15 +44,45 @@ class HandPointerControllerTests(unittest.TestCase):
         self.assertEqual(event["track_id"], "person-1")
         self.assertAlmostEqual(event["x"], 0.65, places=4)
 
-    def test_pinch_uses_hysteresis_and_releases(self):
+    def test_pinch_requires_stable_press_and_release_frames(self):
         hover = self.pointer.update([make_hand()], "locked", "person-1", 100)
         self.assertFalse(hover["pressed"])
-        pressed = self.pointer.update([self.pinch(make_hand(), 0.52)], "locked", "person-1", 120)
+        first_press = self.pointer.update([self.pinch(make_hand(), 0.52)], "locked", "person-1", 120)
+        self.assertFalse(first_press["pressed"])
+        pressed = self.pointer.update([self.pinch(make_hand(), 0.52)], "locked", "person-1", 140)
         self.assertTrue(pressed["pressed"])
-        held = self.pointer.update([self.pinch(make_hand(), 0.56)], "locked", "person-1", 140)
+        held = self.pointer.update([self.pinch(make_hand(), 0.56)], "locked", "person-1", 160)
         self.assertTrue(held["pressed"])
-        up = self.pointer.update([self.pinch(make_hand(), 0.62)], "locked", "person-1", 160)
-        self.assertFalse(up["pressed"])
+        first_release = self.pointer.update([self.pinch(make_hand(), 0.62)], "locked", "person-1", 180)
+        self.assertTrue(first_release["pressed"])
+        released = self.pointer.update([self.pinch(make_hand(), 0.62)], "locked", "person-1", 200)
+        self.assertFalse(released["pressed"])
+
+    def test_suspect_pointer_requires_confirmed_hand_identity(self):
+        self.assertIsNone(self.pointer.update(
+            [make_hand()], "suspect", "person-1", 100,
+            identity_confirmed=False, controller_id="controller-1",
+        ))
+        event = self.pointer.update(
+            [make_hand()], "suspect", "person-1", 120,
+            identity_confirmed=True, controller_id="controller-1",
+        )
+        self.assertIsNotNone(event)
+        self.assertTrue(event["active"])
+        self.assertTrue(event["identity_confirmed"])
+        self.assertEqual(event["controller_id"], "controller-1")
+
+    def test_unconfirmed_suspect_releases_an_active_drag(self):
+        self.pointer.update([make_hand()], "locked", "person-1", 100)
+        self.pointer.update([self.pinch(make_hand(), 0.52)], "locked", "person-1", 120)
+        pressed = self.pointer.update([self.pinch(make_hand(), 0.52)], "locked", "person-1", 125)
+        self.assertTrue(pressed["pressed"])
+        released = self.pointer.update(
+            [], "suspect", "person-1", 130, identity_confirmed=False, controller_id="controller-1",
+        )
+        self.assertIsNotNone(released)
+        self.assertFalse(released["active"])
+        self.assertFalse(released["pressed"])
 
     def test_short_detection_dropout_keeps_cursor_visible(self):
         first = self.pointer.update([make_hand()], "locked", "person-1", 100)
@@ -64,6 +95,7 @@ class HandPointerControllerTests(unittest.TestCase):
     def test_pressed_dropout_releases_drag_but_keeps_cursor_briefly(self):
         self.pointer.update([make_hand()], "locked", "person-1", 100)
         self.pointer.update([self.pinch(make_hand(), 0.52)], "locked", "person-1", 120)
+        self.pointer.update([self.pinch(make_hand(), 0.52)], "locked", "person-1", 130)
         release = self.pointer.update([], "locked", "person-1", 140)
         self.assertTrue(release["active"])
         self.assertFalse(release["pressed"])
@@ -80,8 +112,10 @@ class HandPointerControllerTests(unittest.TestCase):
     def test_more_sensitive_pinch_threshold(self):
         hand = make_hand()
         hand["landmarks"][4] = SimpleNamespace(x=0.72, y=0.50, z=0.0)
-        event = self.pointer.update([hand], "locked", "person-1", 100)
-        self.assertTrue(event["active"])
+        first = self.pointer.update([hand], "locked", "person-1", 100)
+        self.assertTrue(first["active"])
+        self.assertFalse(first["pressed"])
+        event = self.pointer.update([hand], "locked", "person-1", 120)
         self.assertTrue(event["pressed"])
 
     def test_relaxed_index_angle_keeps_pointer_active(self):
@@ -95,6 +129,61 @@ class HandPointerControllerTests(unittest.TestCase):
         event = self.pointer.update([hand], "locked", "person-1", 100)
         self.assertIsNotNone(event)
         self.assertTrue(event["active"])
+
+    def test_one_euro_filter_smooths_small_jitter(self):
+        from app.pointer import OneEuroFilter
+
+        smoother = OneEuroFilter(min_cutoff=1.0, beta=0.0)
+        self.assertAlmostEqual(smoother.filter(0.5, 100), 0.5)
+        filtered = smoother.filter(0.6, 116)
+        self.assertGreater(filtered, 0.5)
+        self.assertLess(filtered, 0.6)
+
+    def test_one_euro_filter_increases_responsiveness_for_fast_motion(self):
+        from app.pointer import OneEuroFilter
+
+        slow = OneEuroFilter(min_cutoff=1.0, beta=0.0)
+        fast = OneEuroFilter(min_cutoff=1.0, beta=0.5)
+        slow.filter(0.2, 100)
+        fast.filter(0.2, 100)
+        slow_value = slow.filter(0.8, 116)
+        fast_value = fast.filter(0.8, 116)
+        self.assertGreater(fast_value, slow_value)
+
+    def test_pointer_settings_are_validated_and_applied(self):
+        settings = self.pointer.set_settings({"min_cutoff": 1.5, "press_stable_frames": 3})
+        self.assertEqual(settings["min_cutoff"], 1.5)
+        self.assertEqual(settings["press_stable_frames"], 3)
+        with self.assertRaises(ValueError):
+            self.pointer.set_settings({"press_threshold": 0.6, "release_threshold": 0.5})
+        with self.assertRaises(ValueError):
+            self.pointer.set_settings({"unknown_option": 1})
+        with self.assertRaises(ValueError):
+            self.pointer.set_settings({"beta": float("nan")})
+
+    def test_pointer_event_exposes_controller_and_hand_track_identity(self):
+        hand = make_hand()
+        hand["hand_track_id"] = "hand-7"
+        event = self.pointer.update(
+            [hand], "locked", "person-1", 100, controller_id="controller-7",
+        )
+        self.assertEqual(event["controller_id"], "controller-7")
+        self.assertEqual(event["hand_track_id"], "hand-7")
+        self.assertTrue(event["identity_confirmed"])
+
+    def test_one_euro_filter_handles_repeated_and_reversed_timestamps(self):
+        from app.pointer import OneEuroFilter
+
+        smoother = OneEuroFilter()
+        self.assertEqual(smoother.filter(0.2, 100), 0.2)
+        values = [
+            smoother.filter(0.3, 100),
+            smoother.filter(0.4, 90),
+            smoother.filter(0.5, 101),
+        ]
+        self.assertTrue(all(math.isfinite(value) for value in values))
+        smoother.reset()
+        self.assertEqual(smoother.filter(0.7, 10), 0.7)
 
     def test_controller_v_sign_is_not_used_as_drag_pointer(self):
         self.assertIsNone(self.pointer.update([make_hand(is_lock_gesture=True)], "locked", "person-1", 100))

@@ -11,6 +11,7 @@ from typing import Any, Callable
 
 from app.control import GESTURES, GestureGate, build_controller_event, build_gesture_event
 from app.controller import ControllerLock, analyze_v_gesture
+from app.hand_tracking import HandTrackManager
 from app.pointer import HandPointerController
 from app.database import ControlStore
 from app.settings import MAX_INFERENCE_WIDTH, MODEL_DIR, MODEL_FILES
@@ -65,6 +66,8 @@ class VisionProcessor:
         self.controller = ControllerLock()
         self.gate = GestureGate(confidence_threshold=store.get_gesture_confidence_threshold())
         self.pointer = HandPointerController()
+        self.hand_track_manager = HandTrackManager()
+        self._suspect_identity_confirmed = False
         self.pointer_mode_enabled = False
         self.low_confidence_result_count = 0
         self.last_timestamp_ms = 0
@@ -158,7 +161,7 @@ class VisionProcessor:
         controller_state = self.controller.snapshot()["state"]
         gesture_max_width = (
             max(self.max_inference_width, getattr(self, "lock_acquisition_width", self.max_inference_width))
-            if controller_state == "unlocked"
+            if controller_state in {"unlocked", "suspect"}
             else self.max_inference_width
         )
         gesture_frame = source_frame
@@ -230,22 +233,57 @@ class VisionProcessor:
                 self.gate.reset(preserve_cooldowns=True)
                 self._publish_controller("locked", "v_gesture", timestamp_ms)
 
+            if not hasattr(self, "hand_track_manager"):
+                self.hand_track_manager = HandTrackManager()
+            if not hasattr(self, "_suspect_identity_confirmed"):
+                self._suspect_identity_confirmed = False
+
             transitions = self.controller.update_tracking(visible_track_ids, timestamp_ms)
             if transitions:
                 self.gate.reset(preserve_cooldowns=True)
                 for state, reason in transitions:
                     self._publish_controller(state, reason, timestamp_ms)
+                    if state in {"unlocked", "reacquiring"}:
+                        self.hand_track_manager.reset()
+                        self._suspect_identity_confirmed = False
+
+            controller = self.controller.snapshot()
+            controller_state = controller["state"]
+            controller_track_id = controller["track_id"]
+            controller_id = controller["controller_id"]
+            identity_confirmed = controller_state == "locked"
+            matched_suspect_hands: list[dict[str, Any]] = []
+
+            if controller_state == "locked" and controller_track_id and controller_id:
+                self.hand_track_manager.observe_locked(hands, controller_track_id, controller_id, timestamp_ms)
+                self._suspect_identity_confirmed = False
+                control_hands = hands
+                pointer_hands = self._pointer_hands(hands, tracks, controller_track_id) if self.pointer_mode_enabled else hands
+            elif controller_state == "suspect" and controller_track_id and controller_id:
+                matched_suspect_hands = self.hand_track_manager.associate(hands, controller_track_id, controller_id, timestamp_ms)
+                identity_confirmed = bool(matched_suspect_hands)
+                if identity_confirmed != self._suspect_identity_confirmed:
+                    self._suspect_identity_confirmed = identity_confirmed
+                    self.gate.reset(preserve_cooldowns=True)
+                    self._publish_controller(
+                        "suspect",
+                        "hand_identity_confirmed" if identity_confirmed else "hand_identity_unconfirmed",
+                        timestamp_ms,
+                        identity_confirmed=identity_confirmed,
+                    )
+                control_hands = matched_suspect_hands if identity_confirmed else hands
+                pointer_hands = matched_suspect_hands if identity_confirmed else []
+            else:
+                self.hand_track_manager.reset()
+                self._suspect_identity_confirmed = False
+                control_hands = hands
+                pointer_hands = []
 
             control_started = time.perf_counter()
-            events = self._process_controller_hands(hands, timestamp_ms)
-            controller = self.controller.snapshot()
-            pointer_hands = (
-                self._pointer_hands(hands, tracks, controller["track_id"])
-                if self.pointer_mode_enabled
-                else hands
-            )
+            events = self._process_controller_hands(control_hands, timestamp_ms, identity_confirmed=identity_confirmed)
             pointer_event = self.pointer.update(
-                pointer_hands, controller["state"], controller["track_id"], timestamp_ms
+                pointer_hands, controller_state, controller_track_id, timestamp_ms,
+                identity_confirmed=identity_confirmed, controller_id=controller_id,
             )
             if pointer_event:
                 self.publish(pointer_event)
@@ -261,6 +299,7 @@ class VisionProcessor:
                 hand["is_lock_gesture"] and hand.get("lock_track_id") is not None
                 for hand in hands
             ),
+            "confirmed_hand_track_count": sum(hand.get("identity_confirmed", False) for hand in hands),
             "hands": hand_diagnostics,
             "lock_progress": controller["lock_progress"],
             "last_gesture": hand_diagnostics[0] if hand_diagnostics else None,
@@ -454,6 +493,9 @@ class VisionProcessor:
             "lock_spread_ratio": hand["lock_spread_ratio"],
             "lock_association_reason": hand.get("lock_association_reason", hand["association_reason"]),
             "lock_track_id": hand.get("lock_track_id"),
+            "hand_track_id": hand.get("hand_track_id"),
+            "identity_confirmed": bool(hand.get("identity_confirmed", False)),
+            "identity_match_distance": hand.get("identity_match_distance"),
             "action": hand["action"],
             "action_reason": hand["action_reason"],
             "reason_code": hand["reason_code"],
@@ -465,13 +507,17 @@ class VisionProcessor:
             ],
         }
 
-    def _publish_controller(self, state: str, reason: str, timestamp_ms: int) -> None:
+    def _publish_controller(
+        self, state: str, reason: str, timestamp_ms: int, *,
+        identity_confirmed: bool | None = None,
+    ) -> None:
         controller_event = build_controller_event(
             state=state,
             track_id=self.controller.track_id,
             controller_id=self.controller.controller_id,
             timestamp_ms=int(time.time() * 1000),
             reason=reason,
+            identity_confirmed=identity_confirmed,
         )
         if self.session_id:
             self.store.update_controller(
@@ -486,6 +532,8 @@ class VisionProcessor:
         with self.lock:
             changed = self.controller.unlock()
             self.gate.reset(preserve_cooldowns=True)
+            self.hand_track_manager.reset()
+            self._suspect_identity_confirmed = False
             pointer_event = self.pointer.reset(self.last_timestamp_ms)
             if pointer_event:
                 self.publish(pointer_event)
@@ -507,10 +555,21 @@ class VisionProcessor:
                 self.publish(pointer_event)
             return self.pointer_mode_enabled
 
-    def _process_controller_hands(self, hands: list[dict[str, Any]], timestamp_ms: int) -> list[dict[str, Any]]:
+    def set_pointer_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
+        with self.lock:
+            pointer_event = self.pointer.reset(self.last_timestamp_ms)
+            if pointer_event:
+                self.publish(pointer_event)
+            return self.pointer.set_settings(settings)
+
+    def _process_controller_hands(
+        self, hands: list[dict[str, Any]], timestamp_ms: int, *, identity_confirmed: bool = False,
+    ) -> list[dict[str, Any]]:
         controller = self.controller.snapshot()
         track_id = controller["track_id"]
-        if controller["state"] != "locked" or not track_id:
+        controller_state = controller["state"]
+        authorized = controller_state == "locked" or (controller_state == "suspect" and identity_confirmed)
+        if not authorized or not track_id:
             self.gate.reset()
             for hand in hands:
                 if controller["state"] in {"suspect", "reacquiring"}:
@@ -549,7 +608,7 @@ class VisionProcessor:
             self.gate.reset()
             for hand in hands:
                 if hand["track_id"] == track_id:
-                    hand["action_reason"] = "手势指针模式已启用，普通手势映射暂时暂停"
+                    hand["action_reason"] = "手势指针模式已启用，普通手势工作流触发暂时暂停"
                     hand["reason_code"] = "pointer_mode"
             return []
 
@@ -592,6 +651,7 @@ class VisionProcessor:
                     {"x": float(point.x), "y": float(point.y), "z": float(point.z)}
                     for point in hand["landmarks"]
                 ],
+                workflow_triggered=True,
             )
             if self.session_id:
                 self.store.record_gesture(self.session_id, event)

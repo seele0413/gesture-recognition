@@ -202,3 +202,351 @@
   color: #76521d;
   background: #fff7e8;
 }
+
+
+/* Four-point camera-to-canvas calibration. The overlay never intercepts pointer input. */
+.pointer-calibration-overlay {
+  position: fixed;
+  z-index: 9998;
+  overflow: hidden;
+  border: 1px solid rgba(61, 93, 69, .72);
+  background: rgba(27, 42, 31, .12);
+  pointer-events: none;
+}
+.pointer-calibration-overlay[hidden] { display: none; }
+.pointer-calibration-hint {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  max-width: calc(100% - 24px);
+  padding: 8px 13px;
+  border: 1px solid rgba(255, 255, 255, .65);
+  border-radius: 5px;
+  color: #26352a;
+  background: rgba(255, 255, 255, .94);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, .16);
+  font-size: 12px;
+  font-weight: 650;
+  text-align: center;
+  transform: translateX(-50%);
+}
+.pointer-calibration-target {
+  position: absolute;
+  width: 42px;
+  height: 42px;
+  border: 3px solid #e0a63b;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .22);
+  box-shadow: 0 0 0 5px rgba(224, 166, 59, .2), 0 2px 12px rgba(0, 0, 0, .22);
+  transform: translate(-50%, -50%);
+}
+.pointer-calibration-target::before,
+.pointer-calibration-target::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  background: #e0a63b;
+  content: "";
+  transform: translate(-50%, -50%);
+}
+.pointer-calibration-target::before { width: 58px; height: 2px; }
+.pointer-calibration-target::after { width: 2px; height: 58px; }
+#pointerCalibrate[data-state="calibrated"] {
+  border-color: #4b7956;
+  color: #3e6849;
+  background: #f0f7f1;
+}
+.hand-pointer-cursor {
+  will-change: left, top;
+  transform: translate3d(-50%, -50%, 0);
+}
+
+
+/* Local-only pointer diagnostics used during real-camera acceptance. */
+.pointer-diagnostics-panel {
+  position: fixed;
+  z-index: 9996;
+  top: 92px;
+  right: 18px;
+  width: min(390px, calc(100vw - 36px));
+  padding: 13px;
+  border: 1px solid #cbd5cc;
+  border-radius: 6px;
+  color: #28332b;
+  background: rgba(255, 255, 255, .97);
+  box-shadow: 0 8px 28px rgba(30, 45, 34, .18);
+  font-size: 12px;
+}
+.pointer-diagnostics-panel[hidden] { display: none; }
+.pointer-diagnostics-header,
+.pointer-diagnostics-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.pointer-diagnostics-header { margin-bottom: 11px; }
+.pointer-diagnostics-header strong { font-size: 13px; }
+.pointer-diagnostics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+.pointer-diagnostics-grid > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid #e1e7e1;
+  border-radius: 4px;
+  background: #f7f9f7;
+}
+.pointer-diagnostics-grid span { color: #78837a; font-size: 10px; }
+.pointer-diagnostics-grid strong {
+  overflow-wrap: anywhere;
+  color: #2f4936;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.pointer-diagnostics-state {
+  margin: 10px 0;
+  color: #667269;
+  font-size: 10px;
+  line-height: 1.6;
+}
+.pointer-diagnostics-actions { justify-content: flex-end; }
+.pointer-diagnostics-actions .tool-button { min-height: 29px; }
+@media (max-width: 700px) {
+  .pointer-diagnostics-panel { top: auto; right: 10px; bottom: 10px; width: calc(100vw - 20px); }
+}
+
+
+/* Editing the workflow is independent from the camera-driven pointer. */
+.pointer-mode-hint {
+  align-self: center;
+  color: #758078;
+  font-size: 10px;
+  line-height: 1.35;
+  max-width: 150px;
+}
+@media (max-width: 1100px) {
+  .pointer-mode-hint { flex-basis: 100%; max-width: none; }
+}
+
+/* AI document-to-workflow generation and review. */
+.workflow-generator-dialog {
+  width: min(680px, calc(100vw - 32px));
+  max-width: 680px;
+  max-height: min(88vh, 900px);
+  padding: 0;
+  border: 1px solid #cbd5cc;
+  border-radius: 8px;
+  color: #28332b;
+  background: #fff;
+  box-shadow: 0 18px 60px rgba(24, 39, 29, .28);
+}
+.workflow-generator-dialog::backdrop { background: rgba(20, 29, 22, .48); }
+.workflow-generator-form {
+  display: grid;
+  gap: 11px;
+  padding: 22px;
+  overflow: auto;
+}
+.workflow-generator-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 5px;
+}
+.workflow-generator-heading h2 {
+  margin: 0 0 6px;
+  font-size: 19px;
+  font-weight: 650;
+}
+.workflow-generator-heading p,
+.workflow-generator-form small,
+.workflow-generator-privacy {
+  margin: 0;
+  color: #748078;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.workflow-generator-form > label {
+  margin-top: 5px;
+  color: #46534a;
+  font-size: 12px;
+  font-weight: 650;
+}
+.workflow-generator-form input[type="file"],
+.workflow-generator-form select,
+.workflow-generator-form textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 10px 11px;
+  border: 1px solid #d3dbd4;
+  border-radius: 5px;
+  color: #28332b;
+  background: #fbfcfb;
+  font: inherit;
+  font-size: 13px;
+}
+.workflow-generator-form input[type="file"] { padding: 8px; }
+.workflow-generator-form textarea { resize: vertical; line-height: 1.55; }
+.workflow-generator-form input:focus,
+.workflow-generator-form select:focus,
+.workflow-generator-form textarea:focus {
+  outline: 2px solid rgba(76, 122, 86, .22);
+  border-color: #73947a;
+}
+.workflow-generator-status {
+  margin: 4px 0 0;
+  padding: 9px 11px;
+  border-radius: 5px;
+  color: #536257;
+  background: #f2f5f2;
+  font-size: 12px;
+  line-height: 1.55;
+}
+.workflow-generator-status[data-state="error"] {
+  color: #8a3e35;
+  background: #fbf0ee;
+}
+.workflow-generator-status[data-state="success"] {
+  color: #3d6946;
+  background: #eff6ef;
+}
+.workflow-generator-privacy {
+  padding: 10px 11px;
+  border-left: 3px solid #d6a34b;
+  background: #fbf8f0;
+}
+.workflow-generator-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.workflow-generator-result {
+  display: grid;
+  gap: 9px;
+  padding: 13px;
+  border: 1px solid #dce4dc;
+  border-radius: 6px;
+  background: #f8faf8;
+}
+.workflow-generator-result[hidden] { display: none; }
+.workflow-generator-result h3 { margin: 0; font-size: 14px; }
+.workflow-generator-result > p {
+  margin: 0;
+  color: #46534a;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.workflow-generator-report {
+  display: grid;
+  gap: 8px;
+  max-height: 230px;
+  overflow: auto;
+}
+.workflow-generator-report section {
+  padding: 8px 10px;
+  border-radius: 4px;
+  background: #fff;
+}
+.workflow-generator-report h4 {
+  margin: 0 0 5px;
+  font-size: 11px;
+}
+.workflow-generator-report ul {
+  margin: 0;
+  padding-left: 18px;
+  color: #657168;
+  font-size: 11px;
+  line-height: 1.6;
+}
+.workflow-generator-report .report-error h4 { color: #9a433a; }
+.workflow-generator-report .report-warning h4 { color: #88652b; }
+.workflow-generator-report .report-question h4 { color: #4c657f; }
+.workflow-generator-report .report-ok h4 { color: #3f7048; }
+@media (max-width: 700px) {
+  .workflow-generator-form { padding: 16px; }
+  .workflow-generator-heading h2 { font-size: 17px; }
+}
+
+
+/* Gesture-to-workflow overview: the old global action mapping now lives with workflows. */
+.gesture-workflow-panel {
+  display: grid;
+  gap: 7px;
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid #e0e5df;
+}
+.gesture-workflow-panel .section-title { margin-bottom: 0; }
+.gesture-workflow-panel .section-title h2 { margin: 0; color: #2b332d; font-size: 12px; font-weight: 650; }
+.gesture-workflow-map { display: grid; gap: 6px; }
+.gesture-map-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 3px;
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #e0e5df;
+  border-radius: 4px;
+  color: #354037;
+  background: #fbfcfa;
+  text-align: left;
+  cursor: pointer;
+}
+.gesture-map-row:hover { border-color: #aab9ad; background: #f3f7f3; }
+.gesture-map-row[data-active="true"] { border-color: #5b8063; background: #edf5ee; box-shadow: inset 3px 0 #5b8063; }
+.gesture-map-trigger { color: #496e51; font-size: 11px; font-weight: 700; }
+.gesture-map-name { overflow: hidden; color: #344037; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.gesture-map-meta { overflow: hidden; color: #818b82; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+
+/* API credentials are entered in the local workflow dialog and persisted server-side. */
+.workflow-generator-config {
+  display: grid;
+  gap: 7px;
+  padding: 10px;
+  border: 1px solid #dbe3db;
+  border-radius: 4px;
+  background: #f7faf7;
+}
+.workflow-generator-config-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.workflow-generator-config-heading strong,
+.workflow-generator-config > label { color: #465247; font-size: 11px; font-weight: 650; }
+.workflow-generator-key-state { color: #8a7660; font-size: 10px; }
+.workflow-generator-config > input {
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  padding: 7px 9px;
+  border: 1px solid #cbd5cb;
+  border-radius: 3px;
+  color: #29312b;
+  background: #fff;
+  font: inherit;
+  font-size: 12px;
+}
+.workflow-generator-config > input:focus,
+.workflow-generator-config > select:focus { outline: 2px solid rgba(70, 108, 85, .2); border-color: #6b8d72; }
+.workflow-generator-config > select {
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 9px;
+  border: 1px solid #cbd5cb;
+  border-radius: 3px;
+  color: #29312b;
+  background: #fff;
+  font: inherit;
+  font-size: 12px;
+}
+.workflow-generator-config > small { color: #79837b; font-size: 10px; line-height: 1.5; }
+.workflow-generator-config-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+
+@media (max-width: 540px) {
+  .workflow-generator-config-actions { display: grid; grid-template-columns: 1fr; }
+  .workflow-generator-config-actions .tool-button { width: 100%; }
+}
