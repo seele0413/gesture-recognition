@@ -801,7 +801,11 @@ class WorkflowGenerator:
             base_url = config["base_url"]
             base_url_valid = False
         protocol = config["protocol"] if config["protocol"] in self.SUPPORTED_PROTOCOLS else "auto"
-        model_valid = bool(config["model"]) and len(config["model"]) <= 128
+        try:
+            self._normalize_model(config["model"])
+            model_valid = True
+        except ValueError:
+            model_valid = False
         return {
             "configured": (
                 _api_key_is_configured(config["api_key"])
@@ -922,7 +926,7 @@ class WorkflowGenerator:
         markers = (
             "json_schema", "json schema", "response_format", "text.format",
             "structured output", "strict", "schema is not supported",
-            "unsupported parameter", "not support schema",
+            "unsupported parameter", "not support schema", "json_object", "json mode",
         )
         return not detail or any(marker in detail for marker in markers)
 
@@ -935,6 +939,7 @@ class WorkflowGenerator:
             "responses api", "responses endpoint", "unknown endpoint",
             "unrecognized request url", "no route", "unsupported path",
             "endpoint not found", "not implemented", "method not allowed",
+            "not supported", "unsupported",
         )
         return any(marker in detail for marker in markers)
 
@@ -1035,6 +1040,7 @@ class WorkflowGenerator:
         schema: dict[str, Any],
         max_tokens: int,
         json_mode: bool = False,
+        plain_mode: bool = False,
     ) -> str:
         text_format = (
             {"type": "json_object"}
@@ -1046,16 +1052,17 @@ class WorkflowGenerator:
                 "schema": schema,
             }
         )
-        effective_system = self._json_mode_instruction(system_prompt, schema) if json_mode else system_prompt
+        effective_system = self._json_mode_instruction(system_prompt, schema) if json_mode or plain_mode else system_prompt
         payload = {
             "model": config["model"],
             "input": [
                 {"role": "system", "content": [{"type": "input_text", "text": effective_system}]},
                 {"role": "user", "content": [{"type": "input_text", "text": user_prompt}]},
             ],
-            "text": {"format": text_format},
             "max_output_tokens": max_tokens,
         }
+        if not plain_mode:
+            payload["text"] = {"format": text_format}
         response_data = self._post_json(config, "/responses", payload)
         if response_data.get("status") == "incomplete":
             raise ModelRequestError("模型输出不完整，请缩短文档或减少流程复杂度后重试")
@@ -1069,6 +1076,7 @@ class WorkflowGenerator:
         schema: dict[str, Any],
         max_tokens: int,
         json_mode: bool = False,
+        plain_mode: bool = False,
     ) -> str:
         response_format = (
             {"type": "json_object"}
@@ -1082,16 +1090,17 @@ class WorkflowGenerator:
                 },
             }
         )
-        effective_system = self._json_mode_instruction(system_prompt, schema) if json_mode else system_prompt
+        effective_system = self._json_mode_instruction(system_prompt, schema) if json_mode or plain_mode else system_prompt
         payload = {
             "model": config["model"],
             "messages": [
                 {"role": "system", "content": effective_system},
                 {"role": "user", "content": user_prompt},
             ],
-            "response_format": response_format,
             "max_tokens": max_tokens,
         }
+        if not plain_mode:
+            payload["response_format"] = response_format
         response_data = self._post_json(config, "/chat/completions", payload)
         return self._extract_chat_completion_text(response_data)
 
@@ -1106,14 +1115,18 @@ class WorkflowGenerator:
     ) -> str:
         request_method = self._request_responses if protocol == "responses" else self._request_chat_completions
         try:
-            return request_method(config, system_prompt, user_prompt, schema, max_tokens, False)
+            return request_method(config, system_prompt, user_prompt, schema, max_tokens, False, False)
         except ModelRequestError as error:
             if not self._schema_format_error(error):
                 raise
-            # Many OpenAI-compatible gateways implement the endpoint but not
-            # strict JSON Schema. JSON mode plus an explicit schema prompt is the
-            # next compatibility level; the application still validates output.
-            return request_method(config, system_prompt, user_prompt, schema, max_tokens, True)
+            # Many gateways do not support strict JSON Schema. Try JSON mode,
+            # then plain JSON prompting if response_format itself is unsupported.
+            try:
+                return request_method(config, system_prompt, user_prompt, schema, max_tokens, True, False)
+            except ModelRequestError as json_mode_error:
+                if not self._schema_format_error(json_mode_error):
+                    raise
+                return request_method(config, system_prompt, user_prompt, schema, max_tokens, False, True)
 
     def _request_compatible(
         self,
