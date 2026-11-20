@@ -1583,7 +1583,6 @@ function renderWorkflowGeneratorResult(result) {
   }
 
   ui.workflowGeneratorResult.hidden = false;
-  ui.workflowGeneratorApplyButton?.setAttribute("aria-hidden", "false");
   ui.applyGeneratedWorkflow.disabled = !generated;
   ui.applyGeneratedWorkflow.textContent = errors.length ? "应用到画布（需修正）" : "应用到画布";
   ui.workflowGeneratorStatus.textContent = errors.length
@@ -1678,9 +1677,9 @@ function applyGeneratedWorkflow() {
   renderTrigger();
   renderCanvas();
   renderInspector();
+  const errors = generatedWorkflowPreview.validation_errors || [];
   ui.workflowGeneratorDialog.close();
 
-  const errors = generatedWorkflowPreview.validation_errors || [];
   setMessage(
     errors.length
       ? "AI 草稿已载入画布，但有 " + errors.length + " 项校验错误。修正后再保存。"
@@ -1762,7 +1761,10 @@ async function initialize() {
   });
 }
 
-ui.newWorkflow.addEventListener("click", () => createWorkflow().catch((error) => setMessage(error.message, "error")));
+ui.newWorkflow.addEventListener("click", () => {
+  if (workflowIsDraft && !window.confirm("新建工作流会丢弃当前 AI 草稿，是否继续？")) return;
+  createWorkflow().catch((error) => setMessage(error.message, "error"));
+});
 ui.generateWorkflow.addEventListener("click", openWorkflowGenerator);
 ui.workflowGeneratorForm.addEventListener("submit", submitWorkflowGenerator);
 ui.applyGeneratedWorkflow.addEventListener("click", applyGeneratedWorkflow);
