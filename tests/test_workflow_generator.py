@@ -223,6 +223,19 @@ class WorkflowPlanCompilerTests(unittest.TestCase):
         }
         self.assertEqual(external_page_control_issues(workflow, pages, "promo"), [])
 
+    def test_external_page_check_ignores_malformed_graph_fields_safely(self):
+        malformed_workflows = [
+            {"nodes": None, "edges": [None, {"source": [], "target": {}}]},
+            {
+                "nodes": [{"id": "scene", "type": "action", "action": "web.set_scene", "params": None}],
+                "edges": None,
+            },
+            {"nodes": "not-a-node-list", "edges": {"source": "scene", "target": "scene"}},
+        ]
+        for workflow in malformed_workflows:
+            with self.subTest(workflow=workflow):
+                self.assertEqual(external_page_control_issues(workflow, [], "promo"), [])
+
 
 class FakeResponse:
     def __init__(self, payload):
