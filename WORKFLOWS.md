@@ -92,7 +92,7 @@ flowchart LR
 
 工作流编辑器左侧的“手势工作流映射”面板汇总已保存工作流的启动手势、启用状态和目标页面。要用多个手势控制同一个登记页面，分别创建多个工作流并为它们分配不同的启动手势，再在动作节点中选择同一个页面或同一组页面动作。每个普通手势只能绑定一个已启用的工作流；重复触发器会在启用时被拒绝。设置页不再维护独立的全局手势映射表；旧版映射数据保留用于兼容回退。
 
-AI 文档生成器支持官方 OpenAI 和常见 OpenAI 兼容中转站。在 /workflows 的 AI 生成窗口配置 API Key、API Base URL、模型名称和接口协议；Base URL 填服务商提供的 API 根地址（通常以 /v1 结尾，不要带 /responses 或 /chat/completions）。接口协议支持 auto、responses、chat_completions。auto 优先尝试 Responses API；若服务商未实现该接口则切换到 Chat Completions；若不支持 strict JSON Schema，则降级为 JSON mode，并由本地工作流校验器继续检查结构。配置保存到项目根目录 .env（该文件已被 .gitignore 忽略），接口不会回传密钥。保存后建议点击“测试连接”，确认鉴权、模型和实际接口可用，再上传文档生成工作流。对应环境变量为 OPENAI_API_KEY、OPENAI_BASE_URL、OPENAI_MODEL 和 OPENAI_API_PROTOCOL。
+AI 文档生成器支持官方 OpenAI 和常见 OpenAI 兼容中转站。在 /workflows 的 AI 生成窗口配置 API Key、API Base URL、模型名称和接口协议；Base URL 填服务商提供的 API 根地址（通常以 /v1 结尾，不要带 /responses 或 /chat/completions）。接口协议支持 auto、responses、chat_completions。auto 优先尝试 Responses API；若服务商未实现该接口则切换到 Chat Completions；若不支持 strict JSON Schema，则依次尝试 JSON mode 和普通 JSON 提示模式，并由本地工作流校验器继续检查结构。配置保存到项目根目录 .env（该文件已被 .gitignore 忽略），接口不会回传密钥。保存后建议点击“测试连接”，确认鉴权、模型和实际接口可用，再上传文档生成工作流。对应环境变量为 OPENAI_API_KEY、OPENAI_BASE_URL、OPENAI_MODEL 和 OPENAI_API_PROTOCOL。
 
 触发器：
 
