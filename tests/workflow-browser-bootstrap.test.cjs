@@ -31,3 +31,22 @@ test("workflow editor keeps camera-pointer module failure separate from mouse ed
   assert.match(source, /if \(!pointerEventBuffer \|\| !window\.PointerGeometry\)/);
   assert.match(source, /鼠标和键盘编辑仍然可用/);
 });
+
+test("gesture mappings are presented inside workflows instead of the settings page", () => {
+  const settings = fs.readFileSync(path.join(root, "web/settings.html"), "utf8");
+  const workflows = fs.readFileSync(path.join(root, "web/workflows.html"), "utf8");
+  const script = fs.readFileSync(path.join(root, "web/workflows.js"), "utf8");
+  assert.doesNotMatch(settings, /mappingGrid|mappingHeading|saveMappings/);
+  assert.match(workflows, /id="gestureWorkflowMap"/);
+  assert.match(workflows, /不同手势可以执行不同动作，并共同控制同一个登记展示页面/);
+  assert.match(script, /function renderGestureWorkflowMap\(\)/);
+});
+
+test("AI workflow dialog accepts an API key without exposing it in status responses", () => {
+  const workflows = fs.readFileSync(path.join(root, "web/workflows.html"), "utf8");
+  const script = fs.readFileSync(path.join(root, "web/workflows.js"), "utf8");
+  const backend = fs.readFileSync(path.join(root, "app/main.py"), "utf8");
+  assert.match(workflows, /id="workflowGeneratorApiKey" type="password"/);
+  assert.match(script, /\/api\/workflow-generator\/config/);
+  assert.match(backend, /@app\.put\("\/api\/workflow-generator\/config"\)/);
+});
