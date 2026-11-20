@@ -187,23 +187,41 @@
         </select>
         <small>如果文档明确指定了触发方式，AI 会优先遵循文档和补充要求。</small>
 
-        <section class="workflow-generator-config" aria-label="模型 API Key 配置">
+        <section class="workflow-generator-config" aria-label="AI 模型服务配置">
           <div class="workflow-generator-config-heading">
-            <label for="workflowGeneratorApiKey">OpenAI API Key</label>
+            <strong>模型服务配置</strong>
             <span id="workflowGeneratorKeyState" class="workflow-generator-key-state">未配置</span>
           </div>
-          <div class="workflow-generator-key-row">
-            <input id="workflowGeneratorApiKey" type="password" maxlength="512" autocomplete="new-password" spellcheck="false" placeholder="粘贴 sk- 开头的 API Key">
-            <button id="saveWorkflowGeneratorKey" class="tool-button" type="button">保存密钥</button>
+          <label for="workflowGeneratorApiKey">API Key</label>
+          <input id="workflowGeneratorApiKey" type="password" maxlength="512" autocomplete="new-password" spellcheck="false" placeholder="粘贴中转站或官方服务商 API Key">
+          <small>留空表示继续使用本机已保存的密钥。</small>
+
+          <label for="workflowGeneratorBaseUrl">API Base URL</label>
+          <input id="workflowGeneratorBaseUrl" type="url" maxlength="2048" autocomplete="url" spellcheck="false" placeholder="https://api.example.com/v1" value="https://api.openai.com/v1">
+
+          <label for="workflowGeneratorModel">模型名称</label>
+          <input id="workflowGeneratorModel" type="text" maxlength="160" spellcheck="false" placeholder="例如 gpt-4o-mini" value="gpt-4o-mini">
+
+          <label for="workflowGeneratorProtocol">接口协议</label>
+          <select id="workflowGeneratorProtocol">
+            <option value="auto" selected>自动兼容（推荐，优先 Chat Completions）</option>
+            <option value="chat_completions">Chat Completions API</option>
+            <option value="responses">Responses API</option>
+          </select>
+          <small>自动兼容模式优先使用中转站普遍支持的 Chat Completions；遇到接口路径不支持时再尝试 Responses。结构化 JSON Schema 不受支持时，会降级为 JSON Object 或普通 JSON 提示。</small>
+
+          <div class="workflow-generator-config-actions">
+            <button id="saveWorkflowGeneratorConfig" class="tool-button" type="button">保存配置</button>
+            <button id="testWorkflowGeneratorConnection" class="tool-button" type="button">测试连接</button>
           </div>
-          <small>密钥会保存在本机项目根目录的 .env 文件中，不会回传完整密钥，也不会保存在浏览器。</small>
+          <small>配置保存在本机项目根目录的 .env 文件中。API Key 不会返回浏览器或显示在状态接口中。</small>
         </section>
 
         <label for="workflowGeneratorInstructions">补充要求</label>
         <textarea id="workflowGeneratorInstructions" name="instructions" rows="4" maxlength="2000" placeholder="例如：访客进入后先播放宣传片；播放完成后进入公司简介；每个页面停留 10 秒；最后进入产品中心。"></textarea>
 
         <p id="workflowGeneratorStatus" class="workflow-generator-status" role="status">正在检查模型配置…</p>
-        <p class="workflow-generator-privacy">文档正文会发送到已配置的 OpenAI API 进行解析，不会保存在项目磁盘中。API Key 仅保存在本机 .env 文件，请勿在公共电脑配置或上传未经授权的涉密资料。生成结果仅为未启用草稿，需要你检查、校验和模拟后才能保存及启用。</p>
+        <p class="workflow-generator-privacy">文档正文会发送到你配置的模型服务商进行解析，不会保存在项目磁盘中。API Key 仅保存在本机 .env 文件，请勿在公共电脑配置或上传未经授权的涉密资料。生成结果仅为未启用草稿，需要你检查、校验和模拟后才能保存及启用。</p>
 
         <section id="workflowGeneratorResult" class="workflow-generator-result" hidden aria-live="polite">
           <h3>生成结果预览</h3>
