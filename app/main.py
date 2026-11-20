@@ -435,13 +435,6 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
             )
             generated, warnings, questions, summary = build_generated_workflow(plan, action_schemas)
             validation_errors = validate_workflow_definition(generated)
-            validation_errors.extend(
-                external_page_control_issues(
-                    generated,
-                    pages,
-                    store.get_default_display_page_id(),
-                )
-            )
             return {
                 "workflow": generated,
                 "valid": not validation_errors,
