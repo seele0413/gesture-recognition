@@ -4,6 +4,21 @@ const ui = {
   workflowDescription: document.getElementById("workflowDescription"),
   workflowVersion: document.getElementById("workflowVersion"),
   newWorkflow: document.getElementById("newWorkflow"),
+  generateWorkflow: document.getElementById("generateWorkflow"),
+  workflowGeneratorDialog: document.getElementById("workflowGeneratorDialog"),
+  workflowGeneratorForm: document.getElementById("workflowGeneratorForm"),
+  workflowGeneratorFile: document.getElementById("workflowGeneratorFile"),
+  workflowGeneratorInstructions: document.getElementById("workflowGeneratorInstructions"),
+  workflowGeneratorTrigger: document.getElementById("workflowGeneratorTrigger"),
+  workflowGeneratorStatus: document.getElementById("workflowGeneratorStatus"),
+  workflowGeneratorSubmit: document.getElementById("workflowGeneratorSubmit"),
+  workflowGeneratorResult: document.getElementById("workflowGeneratorResult"),
+  workflowGeneratorSummary: document.getElementById("workflowGeneratorSummary"),
+  workflowGeneratorReport: document.getElementById("workflowGeneratorReport"),
+  applyGeneratedWorkflow: document.getElementById("applyGeneratedWorkflow"),
+  regenerateWorkflow: document.getElementById("regenerateWorkflow"),
+  closeWorkflowGenerator: document.getElementById("closeWorkflowGenerator"),
+  cancelWorkflowGenerator: document.getElementById("cancelWorkflowGenerator"),
   copyWorkflow: document.getElementById("copyWorkflow"),
   saveWorkflow: document.getElementById("saveWorkflow"),
   deleteWorkflow: document.getElementById("deleteWorkflow"),
@@ -66,6 +81,8 @@ const NODE_TYPES = ["action", "condition", "delay", "wait_event", "end"];
 
 let workflows = [];
 let workflow = null;
+let workflowIsDraft = false;
+let generatedWorkflowPreview = null;
 let actionDefinitions = [];
 let selectedNodeId = null;
 let linkSourceId = null;
@@ -682,8 +699,11 @@ function setMessage(message, state = "ok") {
 }
 
 function setEditingEnabled(enabled) {
-  [ui.copyWorkflow, ui.saveWorkflow, ui.deleteWorkflow, ui.validateWorkflow, ui.dryRunWorkflow, ui.toggleWorkflow].forEach((button) => {
+  [ui.saveWorkflow, ui.validateWorkflow, ui.dryRunWorkflow].forEach((button) => {
     button.disabled = !enabled;
+  });
+  [ui.copyWorkflow, ui.deleteWorkflow, ui.toggleWorkflow].forEach((button) => {
+    button.disabled = !enabled || workflowIsDraft;
   });
   ui.workflowName.disabled = !enabled;
   ui.workflowDescription.disabled = !enabled;
@@ -729,6 +749,7 @@ async function loadWorkflow(workflowId) {
   if (!workflowId) return;
   const response = await api("/api/workflows/" + encodeURIComponent(workflowId));
   workflow = response.workflow;
+  workflowIsDraft = false;
   selectedNodeId = null;
   linkSourceId = null;
   nodeStatuses.clear();
@@ -1323,15 +1344,22 @@ function updateZoom() {
 }
 
 async function saveWorkflow() {
+  if (!workflow) return;
   updateHeaderData();
-  const response = await api("/api/workflows/" + encodeURIComponent(workflow.id), {
-    method: "PUT", body: JSON.stringify(workflow),
+  const isNewDraft = workflowIsDraft;
+  const endpoint = isNewDraft
+    ? "/api/workflows"
+    : "/api/workflows/" + encodeURIComponent(workflow.id);
+  const response = await api(endpoint, {
+    method: isNewDraft ? "POST" : "PUT",
+    body: JSON.stringify(workflow),
   });
   workflow = response.workflow;
+  workflowIsDraft = false;
   await reloadWorkflowList();
   await loadVersions();
   refreshHeader();
-  setMessage("已保存为版本 v" + workflow.version);
+  setMessage(isNewDraft ? "AI 工作流草稿已保存为 v" + workflow.version : "已保存为版本 v" + workflow.version);
 }
 
 async function validateCurrent() {
@@ -1378,6 +1406,7 @@ async function deleteWorkflow() {
   if (!workflow || !window.confirm(`确定删除“${workflow.name}”吗？此操作不可撤销。`)) return;
   await api("/api/workflows/" + encodeURIComponent(workflow.id), { method: "DELETE" });
   workflow = null;
+  workflowIsDraft = false;
   selectedNodeId = null;
   await reloadWorkflowList();
   if (workflows.length) await loadWorkflow(workflows[0].id);
@@ -1524,6 +1553,151 @@ function deleteNode() {
   setMessage("节点已移除；请连接剩余节点并校验", "error");
 }
 
+function appendGeneratorReportSection(title, items, className) {
+  const section = make("section", className);
+  section.append(make("h4", "", title));
+  const list = make("ul");
+  for (const item of items) list.append(make("li", "", String(item)));
+  section.append(list);
+  ui.workflowGeneratorReport.append(section);
+}
+
+function renderWorkflowGeneratorResult(result) {
+  generatedWorkflowPreview = result;
+  const generated = result.workflow;
+  const nodeCount = Array.isArray(generated?.nodes) ? generated.nodes.length : 0;
+  const edgeCount = Array.isArray(generated?.edges) ? generated.edges.length : 0;
+  ui.workflowGeneratorSummary.textContent =
+    (result.summary || generated?.description || "已根据文档生成工作流草稿。") +
+    " · " + nodeCount + " 个节点 · " + edgeCount + " 条连线";
+  ui.workflowGeneratorReport.replaceChildren();
+
+  const errors = Array.isArray(result.validation_errors) ? result.validation_errors : [];
+  const warnings = Array.isArray(result.warnings) ? result.warnings : [];
+  const questions = Array.isArray(result.questions) ? result.questions : [];
+  if (errors.length) appendGeneratorReportSection("需要修正的校验错误", errors, "report-error");
+  if (warnings.length) appendGeneratorReportSection("生成假设与提醒", warnings, "report-warning");
+  if (questions.length) appendGeneratorReportSection("需要你确认的问题", questions, "report-question");
+  if (!errors.length && !warnings.length && !questions.length) {
+    appendGeneratorReportSection("检查结果", ["结构校验通过，没有发现需要额外确认的事项。"], "report-ok");
+  }
+
+  ui.workflowGeneratorResult.hidden = false;
+  ui.workflowGeneratorApplyButton?.setAttribute("aria-hidden", "false");
+  ui.applyGeneratedWorkflow.disabled = !generated;
+  ui.applyGeneratedWorkflow.textContent = errors.length ? "应用到画布（需修正）" : "应用到画布";
+  ui.workflowGeneratorStatus.textContent = errors.length
+    ? "已生成草稿，但存在校验错误。可以先应用到画布，修正后再保存。"
+    : "生成完成。请检查节点参数、页面跳转和流程分支。";
+  ui.workflowGeneratorStatus.dataset.state = errors.length ? "error" : "success";
+}
+
+async function refreshWorkflowGeneratorStatus() {
+  const status = await api("/api/workflow-generator/status");
+  if (status.configured) {
+    ui.workflowGeneratorStatus.textContent =
+      "模型已配置：" + status.model + "。文档将通过 Responses API 分析。";
+    ui.workflowGeneratorStatus.dataset.state = "success";
+    ui.workflowGeneratorSubmit.disabled = false;
+  } else {
+    ui.workflowGeneratorStatus.textContent =
+      "尚未配置模型 API Key。请在项目根目录复制 .env.example 为 .env，并填写 OPENAI_API_KEY。";
+    ui.workflowGeneratorStatus.dataset.state = "error";
+    ui.workflowGeneratorSubmit.disabled = true;
+  }
+}
+
+function openWorkflowGenerator() {
+  if (workflow && !window.confirm("AI 生成结果将替换当前画布内容。当前未保存的修改会丢失，是否继续？")) return;
+  generatedWorkflowPreview = null;
+  ui.workflowGeneratorResult.hidden = true;
+  ui.workflowGeneratorFile.value = "";
+  ui.workflowGeneratorStatus.dataset.state = "";
+  ui.workflowGeneratorStatus.textContent = "正在检查模型配置…";
+  ui.workflowGeneratorSubmit.disabled = true;
+  ui.workflowGeneratorDialog.showModal();
+  refreshWorkflowGeneratorStatus().catch((error) => {
+    ui.workflowGeneratorStatus.textContent = "无法读取模型配置：" + error.message;
+    ui.workflowGeneratorStatus.dataset.state = "error";
+  });
+}
+
+async function submitWorkflowGenerator(event) {
+  event.preventDefault();
+  const file = ui.workflowGeneratorFile.files?.[0];
+  if (!file) {
+    ui.workflowGeneratorStatus.textContent = "请先选择一份需求文档。";
+    ui.workflowGeneratorStatus.dataset.state = "error";
+    return;
+  }
+  if (file.size > 5 * 1024 * 1024) {
+    ui.workflowGeneratorStatus.textContent = "文件不能超过 5 MB。";
+    ui.workflowGeneratorStatus.dataset.state = "error";
+    return;
+  }
+
+  ui.workflowGeneratorSubmit.disabled = true;
+  ui.workflowGeneratorSubmit.textContent = "正在解析文档并生成…";
+  ui.workflowGeneratorResult.hidden = true;
+  ui.workflowGeneratorStatus.textContent = "正在读取文档、分析业务步骤并构建节点，请稍候…";
+  ui.workflowGeneratorStatus.dataset.state = "";
+  try {
+    const formData = new FormData(ui.workflowGeneratorForm);
+    const response = await fetch("/api/workflows/generate", {
+      method: "POST",
+      cache: "no-store",
+      body: formData,
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const detail = Array.isArray(result.detail) ? result.detail.join("；") : result.detail;
+      throw new Error(detail || "文档解析失败，请检查文件和模型配置");
+    }
+    renderWorkflowGeneratorResult(result);
+  } catch (error) {
+    ui.workflowGeneratorStatus.textContent = error.message || "生成失败，请稍后重试";
+    ui.workflowGeneratorStatus.dataset.state = "error";
+  } finally {
+    ui.workflowGeneratorSubmit.disabled = false;
+    ui.workflowGeneratorSubmit.textContent = "解析并生成草稿";
+  }
+}
+
+function applyGeneratedWorkflow() {
+  if (!generatedWorkflowPreview?.workflow) return;
+  workflow = structuredClone(generatedWorkflowPreview.workflow);
+  workflow.enabled = false;
+  workflowIsDraft = true;
+  selectedNodeId = null;
+  linkSourceId = null;
+  nodeStatuses.clear();
+  activeRunId = null;
+  ui.workflowVersion.replaceChildren(make("option", "", "未保存草稿"));
+  ui.workflowVersion.value = "";
+  refreshHeader();
+  renderTrigger();
+  renderCanvas();
+  renderInspector();
+  ui.workflowGeneratorDialog.close();
+
+  const errors = generatedWorkflowPreview.validation_errors || [];
+  setMessage(
+    errors.length
+      ? "AI 草稿已载入画布，但有 " + errors.length + " 项校验错误。修正后再保存。"
+      : "AI 草稿已载入画布。请检查节点参数，执行校验和模拟后再保存。",
+    errors.length ? "error" : "ok",
+  );
+}
+
+function resetWorkflowGeneratorPreview() {
+  generatedWorkflowPreview = null;
+  ui.workflowGeneratorResult.hidden = true;
+  ui.workflowGeneratorReport.replaceChildren();
+  ui.workflowGeneratorFile.value = "";
+  ui.workflowGeneratorStatus.dataset.state = "";
+  ui.workflowGeneratorStatus.textContent = "请选择文档并补充生成要求。";
+}
+
 async function initialize() {
   const errors = [];
   const pointerAvailable = Boolean(pointerEventBuffer && window.PointerGeometry);
@@ -1581,16 +1755,40 @@ async function initialize() {
   if (displayResult.status === "rejected") errors.push("展示页面状态读取失败：" + displayResult.reason.message);
   if (!pointerAvailable) errors.push("手势指针模块未加载；鼠标和键盘编辑不受影响");
   if (errors.length) setMessage(errors.join("；"), "error");
+  refreshWorkflowGeneratorStatus().catch((error) => {
+    ui.workflowGeneratorStatus.textContent = "模型配置检查失败：" + error.message;
+    ui.workflowGeneratorStatus.dataset.state = "error";
+    ui.workflowGeneratorSubmit.disabled = true;
+  });
 }
 
 ui.newWorkflow.addEventListener("click", () => createWorkflow().catch((error) => setMessage(error.message, "error")));
+ui.generateWorkflow.addEventListener("click", openWorkflowGenerator);
+ui.workflowGeneratorForm.addEventListener("submit", submitWorkflowGenerator);
+ui.applyGeneratedWorkflow.addEventListener("click", applyGeneratedWorkflow);
+ui.regenerateWorkflow.addEventListener("click", () => {
+  generatedWorkflowPreview = null;
+  ui.workflowGeneratorResult.hidden = true;
+  ui.workflowGeneratorSubmit.disabled = false;
+  ui.workflowGeneratorStatus.textContent = "可以修改补充要求后重新生成。";
+  ui.workflowGeneratorStatus.dataset.state = "";
+});
+ui.closeWorkflowGenerator.addEventListener("click", () => ui.workflowGeneratorDialog.close());
+ui.cancelWorkflowGenerator.addEventListener("click", () => ui.workflowGeneratorDialog.close());
+ui.workflowGeneratorDialog.addEventListener("close", resetWorkflowGeneratorPreview);
 ui.copyWorkflow.addEventListener("click", () => duplicateWorkflow().catch((error) => setMessage(error.message, "error")));
 ui.deleteWorkflow.addEventListener("click", () => deleteWorkflow().catch((error) => setMessage(error.message, "error")));
 ui.saveWorkflow.addEventListener("click", () => saveWorkflow().catch((error) => setMessage(error.message, "error")));
 ui.validateWorkflow.addEventListener("click", () => validateCurrent().catch((error) => setMessage(error.message, "error")));
 ui.dryRunWorkflow.addEventListener("click", () => dryRun().catch((error) => setMessage(error.message, "error")));
 ui.toggleWorkflow.addEventListener("click", () => toggleWorkflow().catch((error) => setMessage(error.message, "error")));
-ui.workflowSelect.addEventListener("change", () => loadWorkflow(ui.workflowSelect.value).catch((error) => setMessage(error.message, "error")));
+ui.workflowSelect.addEventListener("change", () => {
+  if (workflowIsDraft && !window.confirm("切换工作流会丢弃当前 AI 草稿，是否继续？")) {
+    ui.workflowSelect.value = "";
+    return;
+  }
+  loadWorkflow(ui.workflowSelect.value).catch((error) => setMessage(error.message, "error"));
+});
 ui.workflowName.addEventListener("input", updateHeaderData);
 ui.workflowDescription.addEventListener("input", updateHeaderData);
 ui.triggerType.addEventListener("change", () => {
