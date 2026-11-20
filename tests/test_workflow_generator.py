@@ -8,6 +8,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from app.main import create_app
+from app.workflow import new_workflow
 from app.workflow_generator import (
     DocumentParseError,
     ModelNotConfiguredError,
@@ -271,6 +272,38 @@ class WorkflowGeneratorClientTests(unittest.TestCase):
             )
         self.assertEqual(response.status_code, 503)
         self.assertIn("API Key", response.json()["detail"])
+
+    def test_validation_api_rejects_local_page_controls_after_external_navigation(self):
+        workflow = new_workflow("外部页面后执行本地动作")
+        workflow["nodes"] = [
+            {
+                "id": "external",
+                "type": "action",
+                "action": "web.navigate_page",
+                "params": {"page_id": "company_website"},
+                "timeout_ms": 5000,
+                "on_error": "stop",
+                "retries": 0,
+            },
+            {
+                "id": "local-scene",
+                "type": "action",
+                "action": "web.set_scene",
+                "params": {"scene": "welcome"},
+                "timeout_ms": 5000,
+                "on_error": "stop",
+                "retries": 0,
+            },
+            {"id": "end", "type": "end", "params": {}},
+        ]
+        workflow["edges"] = [
+            {"source": "external", "target": "local-scene"},
+            {"source": "local-scene", "target": "end"},
+        ]
+        response = self.client.post("/api/workflows/validate", json=workflow)
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["valid"])
+        self.assertTrue(any("外部网页之后" in item for item in response.json()["errors"]))
 
 
 if __name__ == "__main__":
