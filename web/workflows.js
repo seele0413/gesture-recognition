@@ -9,8 +9,12 @@ const ui = {
   workflowGeneratorForm: document.getElementById("workflowGeneratorForm"),
   workflowGeneratorFile: document.getElementById("workflowGeneratorFile"),
   workflowGeneratorApiKey: document.getElementById("workflowGeneratorApiKey"),
+  workflowGeneratorBaseUrl: document.getElementById("workflowGeneratorBaseUrl"),
+  workflowGeneratorModel: document.getElementById("workflowGeneratorModel"),
+  workflowGeneratorProtocol: document.getElementById("workflowGeneratorProtocol"),
   workflowGeneratorKeyState: document.getElementById("workflowGeneratorKeyState"),
-  saveWorkflowGeneratorKey: document.getElementById("saveWorkflowGeneratorKey"),
+  saveWorkflowGeneratorConfig: document.getElementById("saveWorkflowGeneratorConfig"),
+  testWorkflowGeneratorConnection: document.getElementById("testWorkflowGeneratorConnection"),
   workflowGeneratorInstructions: document.getElementById("workflowGeneratorInstructions"),
   workflowGeneratorTrigger: document.getElementById("workflowGeneratorTrigger"),
   workflowGeneratorStatus: document.getElementById("workflowGeneratorStatus"),
@@ -1672,51 +1676,84 @@ function renderWorkflowGeneratorResult(result) {
   ui.workflowGeneratorStatus.dataset.state = errors.length ? "error" : "success";
 }
 
+function workflowGeneratorConfigPayload() {
+  return {
+    api_key: ui.workflowGeneratorApiKey.value.trim() || null,
+    base_url: ui.workflowGeneratorBaseUrl.value.trim(),
+    model: ui.workflowGeneratorModel.value.trim(),
+    protocol: ui.workflowGeneratorProtocol.value,
+  };
+}
+
 async function refreshWorkflowGeneratorStatus() {
   const status = await api("/api/workflow-generator/status");
+  ui.workflowGeneratorBaseUrl.value = status.base_url || "https://api.openai.com/v1";
+  ui.workflowGeneratorModel.value = status.model || "gpt-4o-mini";
+  ui.workflowGeneratorProtocol.value = status.protocol || "auto";
   if (status.configured) {
-    ui.workflowGeneratorKeyState.textContent = "已配置";
-    ui.workflowGeneratorApiKey.placeholder = "已配置；输入新 Key 可替换";
+    ui.workflowGeneratorKeyState.textContent = "密钥已配置";
+    ui.workflowGeneratorApiKey.placeholder = "留空保留当前密钥；输入新 Key 可替换";
     ui.workflowGeneratorStatus.textContent =
-      "模型已配置：" + status.model + "。文档将通过 Responses API 分析。";
+      "当前模型：" + status.model + " · " + status.protocol_label + " · " + status.base_url;
     ui.workflowGeneratorStatus.dataset.state = "success";
     ui.workflowGeneratorSubmit.disabled = false;
   } else {
-    ui.workflowGeneratorKeyState.textContent = "未配置";
-    ui.workflowGeneratorApiKey.placeholder = "粘贴 sk- 开头的 API Key";
+    ui.workflowGeneratorKeyState.textContent = "尚未配置密钥";
+    ui.workflowGeneratorApiKey.placeholder = "粘贴中转站或官方服务商 API Key";
     ui.workflowGeneratorStatus.textContent =
-      "尚未配置模型 API Key，请在下方输入并保存后再生成。";
+      "请填写 API Key、Base URL 和模型名称，保存配置并测试连接后再生成。";
     ui.workflowGeneratorStatus.dataset.state = "error";
     ui.workflowGeneratorSubmit.disabled = true;
   }
 }
 
-async function saveWorkflowGeneratorApiKey() {
-  const apiKey = ui.workflowGeneratorApiKey.value.trim();
-  if (!apiKey) {
-    ui.workflowGeneratorStatus.textContent = "请先输入 OpenAI API Key。";
-    ui.workflowGeneratorStatus.dataset.state = "error";
-    return;
-  }
-  ui.saveWorkflowGeneratorKey.disabled = true;
-  ui.saveWorkflowGeneratorKey.textContent = "保存中…";
+async function saveWorkflowGeneratorConfig() {
+  ui.saveWorkflowGeneratorConfig.disabled = true;
+  ui.saveWorkflowGeneratorConfig.textContent = "保存中…";
   try {
     const status = await api("/api/workflow-generator/config", {
       method: "PUT",
-      body: JSON.stringify({ api_key: apiKey }),
+      body: JSON.stringify(workflowGeneratorConfigPayload()),
     });
     ui.workflowGeneratorApiKey.value = "";
-    ui.workflowGeneratorKeyState.textContent = status.configured ? "已配置" : "未配置";
-    ui.workflowGeneratorApiKey.placeholder = status.configured ? "已配置；输入新 Key 可替换" : "粘贴 sk- 开头的 API Key";
-    ui.workflowGeneratorStatus.textContent = "API Key 已保存到本机 .env，可以开始生成工作流。";
+    ui.workflowGeneratorKeyState.textContent = status.configured ? "密钥已配置" : "尚未配置密钥";
+    ui.workflowGeneratorApiKey.placeholder = status.configured
+      ? "留空保留当前密钥；输入新 Key 可替换"
+      : "粘贴中转站或官方服务商 API Key";
+    ui.workflowGeneratorStatus.textContent =
+      "模型配置已保存：" + status.model + " · " + status.protocol_label + "。建议先测试连接。";
     ui.workflowGeneratorStatus.dataset.state = status.configured ? "success" : "error";
     ui.workflowGeneratorSubmit.disabled = !status.configured;
   } catch (error) {
-    ui.workflowGeneratorStatus.textContent = error.message || "API Key 保存失败";
+    ui.workflowGeneratorStatus.textContent = error.message || "模型配置保存失败";
     ui.workflowGeneratorStatus.dataset.state = "error";
   } finally {
-    ui.saveWorkflowGeneratorKey.disabled = false;
-    ui.saveWorkflowGeneratorKey.textContent = "保存密钥";
+    ui.saveWorkflowGeneratorConfig.disabled = false;
+    ui.saveWorkflowGeneratorConfig.textContent = "保存配置";
+  }
+}
+
+async function testWorkflowGeneratorConnection() {
+  ui.testWorkflowGeneratorConnection.disabled = true;
+  ui.testWorkflowGeneratorConnection.textContent = "测试中…";
+  ui.workflowGeneratorStatus.textContent = "正在连接模型服务并发送一条最小测试请求…";
+  ui.workflowGeneratorStatus.dataset.state = "";
+  try {
+    const result = await api("/api/workflow-generator/test", {
+      method: "POST",
+      body: JSON.stringify(workflowGeneratorConfigPayload()),
+    });
+    ui.workflowGeneratorKeyState.textContent = "连接正常";
+    ui.workflowGeneratorStatus.textContent =
+      result.message + " 模型：" + result.model + "；实际接口：" + result.protocol_label + "。";
+    ui.workflowGeneratorStatus.dataset.state = "success";
+    ui.workflowGeneratorSubmit.disabled = false;
+  } catch (error) {
+    ui.workflowGeneratorStatus.textContent = error.message || "连接测试失败";
+    ui.workflowGeneratorStatus.dataset.state = "error";
+  } finally {
+    ui.testWorkflowGeneratorConnection.disabled = false;
+    ui.testWorkflowGeneratorConnection.textContent = "测试连接";
   }
 }
 
@@ -1882,11 +1919,12 @@ ui.newWorkflow.addEventListener("click", () => {
   createWorkflow().catch((error) => setMessage(error.message, "error"));
 });
 ui.generateWorkflow.addEventListener("click", openWorkflowGenerator);
-ui.saveWorkflowGeneratorKey.addEventListener("click", saveWorkflowGeneratorApiKey);
+ui.saveWorkflowGeneratorConfig.addEventListener("click", saveWorkflowGeneratorConfig);
+ui.testWorkflowGeneratorConnection.addEventListener("click", testWorkflowGeneratorConnection);
 ui.workflowGeneratorApiKey.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {
     event.preventDefault();
-    saveWorkflowGeneratorApiKey();
+    saveWorkflowGeneratorConfig();
   }
 });
 ui.workflowGeneratorForm.addEventListener("submit", submitWorkflowGenerator);
