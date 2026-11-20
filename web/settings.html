@@ -3,17 +3,19 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#f2f4f1">
-    <title>康晋电气 · 播放与手势设置</title>
-    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="/static/styles.css?v=20261113-controller-recovery-1">
+    <meta name="theme-color" content="#145da8">
+    <title>康晋电气手势控制平台 · 设置</title>
+    <link rel="icon" href="https://img.kompass.com/sys-master-images/h29/h63/9109303525406/comking%E6%96%B0logo-jpg" type="image/jpeg">
+    <link rel="stylesheet" href="/static/styles.css?v=20261119-system-font-1">
+    <link rel="stylesheet" href="/static/industrial-ui.css?v=20261119-system-font-1">
+    <link rel="stylesheet" href="/static/comking-glass.css?v=20261119-ui-polish-1">
     <script src="/static/app.js?v=20261113-controller-recovery-1" defer></script>
   </head>
   <body class="settings-page">
     <header class="settings-header">
       <a class="settings-brand" href="/" aria-label="返回宣传片主页">
-        <span class="settings-brand-mark">康</span>
-        <span><strong>康晋电气</strong><small>大屏播放设置</small></span>
+        <span class="comking-logo-shell"><img class="comking-logo" src="https://img.kompass.com/sys-master-images/h29/h63/9109303525406/comking%E6%96%B0logo-jpg" alt="COMKING" loading="eager"></span>
+        <span><strong>康晋电气</strong><small>手势控制平台 · 设置</small></span>
       </a>
       <div class="settings-header-tools">
         <div id="connectionStatus" class="connection-status" data-state="stopped" role="status" aria-live="polite">
@@ -22,6 +24,7 @@
         </div>
         <a class="back-link" href="/workflows">工作流</a>
         <a class="back-link" href="/display-pages">网页管理</a>
+        <a class="back-link" href="/settings" aria-current="page">设置</a>
         <a class="back-link" href="/">返回大屏</a>
       </div>
     </header>
@@ -30,7 +33,6 @@
       <section class="settings-panel stream-panel" aria-labelledby="streamHeading">
         <div class="panel-heading">
           <div>
-            <p class="eyebrow">CAMERA SOURCE</p>
             <h1 id="streamHeading">摄像头连接</h1>
             <p class="panel-description">RTSP 地址仅在当前服务运行期间保留</p>
           </div>
@@ -67,7 +69,6 @@
         <section class="settings-panel recognition-panel" aria-labelledby="recognitionHeading">
           <div class="panel-heading compact-heading">
             <div>
-              <p class="eyebrow">RECOGNITION</p>
               <h2 id="recognitionHeading">识别灵敏度</h2>
             </div>
             <output id="confidenceValue" class="confidence-value" for="gestureConfidenceRange">60%</output>
@@ -81,7 +82,6 @@
         <section class="settings-panel controller-panel" aria-labelledby="controllerHeading">
           <div class="panel-heading compact-heading">
             <div>
-              <p class="eyebrow">CONTROLLER</p>
               <h2 id="controllerHeading">主控状态</h2>
             </div>
             <span class="track-total">人体轨迹 <strong id="trackCount">0</strong></span>
@@ -100,7 +100,6 @@
         <section class="settings-panel mapping-panel" aria-labelledby="mappingHeading">
           <div class="panel-heading compact-heading">
             <div>
-              <p class="eyebrow">GESTURE ACTIONS</p>
               <h2 id="mappingHeading">手势映射</h2>
             </div>
             <button id="saveMappings" class="button button-primary" type="button">保存</button>
@@ -112,7 +111,6 @@
         <section class="settings-panel events-panel" aria-labelledby="eventsHeading">
           <div class="panel-heading compact-heading">
             <div>
-              <p class="eyebrow">RECENT ACTIVITY</p>
               <h2 id="eventsHeading">手势事件</h2>
             </div>
             <button id="clearEvents" class="text-button" type="button">清空</button>

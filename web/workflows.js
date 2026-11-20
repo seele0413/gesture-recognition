@@ -40,6 +40,8 @@ const ui = {
   edgeLayer: document.getElementById("edgeLayer"),
   canvasNodes: document.getElementById("canvasNodes"),
   triggerBadge: document.getElementById("triggerBadge"),
+  workflowInspector: document.getElementById("workflowInspector"),
+  inspectorClose: document.getElementById("inspectorClose"),
   inspectorContent: document.getElementById("inspectorContent"),
   duplicateNode: document.getElementById("duplicateNode"),
   deleteNode: document.getElementById("deleteNode"),
@@ -730,6 +732,7 @@ async function loadWorkflow(workflowId) {
   const response = await api("/api/workflows/" + encodeURIComponent(workflowId));
   workflow = response.workflow;
   selectedNodeId = null;
+  closeInspector();
   linkSourceId = null;
   nodeStatuses.clear();
   activeRunId = null;
@@ -746,8 +749,10 @@ async function loadVersions() {
   const response = await api("/api/workflows/" + encodeURIComponent(workflow.id) + "/versions");
   ui.workflowVersion.replaceChildren();
   for (const item of response.versions) {
-    const option = make("option", "", "v" + item.version);
+    const isCurrent = Number(item.version) === Number(workflow.version);
+    const option = make("option", "", "v" + item.version + (isCurrent ? "（当前）" : "（历史）"));
     option.value = String(item.version);
+    option.title = isCurrent ? "当前工作流版本" : "历史版本；选择后可回看旧配置，保存修改会生成新版本";
     ui.workflowVersion.append(option);
   }
   ui.workflowVersion.value = String(workflow.version);
@@ -970,6 +975,7 @@ function renderCanvas() {
     card.dataset.selected = String(node.id === selectedNodeId);
     card.dataset.linkSource = String(node.id === linkSourceId);
     card.dataset.status = nodeStatuses.get(node.id) || "idle";
+    card.title = "左键选择节点 · 右键打开参数设置";
     card.style.left = node.position.x + "px";
     card.style.top = node.position.y + "px";
     card.draggable = true;
@@ -981,6 +987,10 @@ function renderCanvas() {
     if (node.type === "action" && node.on_error === "branch") body.append(make("span", "canvas-node-detail", "失败时走 error 分支"));
     card.append(body);
     card.addEventListener("click", () => selectOrLink(node.id));
+    card.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      openInspector(node.id);
+    });
     card.addEventListener("dragstart", (event) => {
       const worldPoint = clientToWorld(event.clientX, event.clientY);
       mouseDragOffset = {
@@ -1134,13 +1144,28 @@ function bindNodeValue(control, update) {
   control.addEventListener("change", handler);
 }
 
+function openInspector(nodeId) {
+  if (!findNode(nodeId)) return;
+  selectedNodeId = nodeId;
+  updateNodeSelectionState();
+  renderInspector();
+  ui.workflowInspector.hidden = false;
+  ui.workflowInspector.setAttribute("aria-hidden", "false");
+}
+
+function closeInspector() {
+  if (!ui.workflowInspector) return;
+  ui.workflowInspector.hidden = true;
+  ui.workflowInspector.setAttribute("aria-hidden", "true");
+}
+
 function renderInspector() {
   ui.inspectorContent.replaceChildren();
   const node = currentNode();
   ui.duplicateNode.disabled = !node || node.type === "condition" || node.type === "end";
   ui.deleteNode.disabled = !node;
   if (!node) {
-    ui.inspectorContent.append(make("p", "muted", "选择画布节点"));
+    ui.inspectorContent.append(make("p", "muted", "右键点击画布节点，打开参数设置"));
     return;
   }
   const idInput = inputControl(node.id, "text", { maxlength: 64, readonly: true });
@@ -1382,6 +1407,7 @@ async function deleteWorkflow() {
   await reloadWorkflowList();
   if (workflows.length) await loadWorkflow(workflows[0].id);
   else {
+    closeInspector();
     refreshHeader();
     renderCanvas();
     renderInspector();
@@ -1521,6 +1547,7 @@ function deleteNode() {
   selectedNodeId = null;
   renderCanvas();
   renderInspector();
+  closeInspector();
   setMessage("节点已移除；请连接剩余节点并校验", "error");
 }
 
@@ -1611,11 +1638,12 @@ ui.workflowVersion.addEventListener("change", async () => {
   workflow = structuredClone(item.definition);
   workflow.enabled = enabled;
   selectedNodeId = null;
+  closeInspector();
   refreshHeader();
   renderTrigger();
   renderCanvas();
   renderInspector();
-  setMessage("已载入 v" + item.version + "，保存后将创建新版本");
+  setMessage("已载入历史版本 v" + item.version + "；修改并保存后会创建新版本");
 });
 
 document.querySelectorAll(".library-node[data-node-type]").forEach((button) => {
@@ -1639,6 +1667,10 @@ ui.zoomIn.addEventListener("click", () => { zoom = Math.min(1.5, zoom + 0.1); up
 ui.zoomOut.addEventListener("click", () => { zoom = Math.max(0.6, zoom - 0.1); updateZoom(); });
 ui.duplicateNode.addEventListener("click", duplicateNode);
 ui.deleteNode.addEventListener("click", deleteNode);
+ui.inspectorClose.addEventListener("click", closeInspector);
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !ui.workflowInspector.hidden) closeInspector();
+});
 ui.pointerMode.addEventListener("click", () => togglePointerMode());
 ui.pointerMirror.addEventListener("click", () => setPointerMirrorUi(!pointerMirrorX));
 ui.pointerCalibrate.addEventListener("click", startPointerCalibration);

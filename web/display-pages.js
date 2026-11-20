@@ -144,7 +144,7 @@ function renderPageNode(page, childrenByParent, visited = new Set()) {
     actions.append(makeButton("编辑", () => openEditor(page)));
   }
   if (page.enabled && page.page_id !== defaultPageId) {
-    actions.append(makeButton("设为默认", () => setDefault(page.page_id), "page-action-primary"));
+    actions.append(makeButton("设为默认", () => setDefault(page.page_id)));
   }
   if (page.page_type === "external") {
     actions.append(makeButton(page.enabled ? "停用" : "启用", () => toggleEnabled(page), ""));
