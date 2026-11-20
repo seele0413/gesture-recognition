@@ -938,23 +938,28 @@ class WorkflowGenerator:
         except (json.JSONDecodeError, TypeError):
             payload = None
 
+        def structured_detail(value: Any) -> str:
+            if not isinstance(value, dict):
+                return str(value).strip() if value not in (None, "") else ""
+            code = value.get("code") or value.get("type")
+            detail = ""
+            for field in ("message", "detail", "msg", "description", "reason"):
+                candidate = value.get(field)
+                if candidate not in (None, ""):
+                    detail = str(candidate).strip()
+                    break
+            if code and detail and str(code) not in detail:
+                return f"{code}: {detail}"
+            return detail or str(code or "").strip()
+
         if isinstance(payload, dict):
             error_value = payload.get("error")
             if isinstance(error_value, dict):
-                for field in ("message", "detail", "msg", "description", "reason", "code", "type"):
-                    value = error_value.get(field)
-                    if value not in (None, ""):
-                        message = str(value)
-                        break
+                message = structured_detail(error_value)
             elif error_value not in (None, ""):
                 message = str(error_value)
-
             if not message:
-                for field in ("message", "detail", "msg", "error_description", "description", "reason", "code"):
-                    value = payload.get(field)
-                    if value not in (None, ""):
-                        message = str(value)
-                        break
+                message = structured_detail(payload)
         elif isinstance(payload, str):
             message = payload.strip()
 
