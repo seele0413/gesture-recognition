@@ -202,7 +202,7 @@ Write-Host "Checking installed dependency consistency..."
 Invoke-NativeCommand -Executable $VenvPython -Arguments @("-m", "pip", "check") -Step "Check dependency consistency"
 
 Write-Host "Checking required package imports..."
-$ImportCheck = 'import av, cv2, fastapi, mediapipe, numpy, uvicorn; print(mediapipe.__version__, av.__version__, cv2.__version__, numpy.__version__)'
+$ImportCheck = 'import av, cv2, fastapi, mediapipe, multipart, numpy, pypdf, uvicorn; print(mediapipe.__version__, av.__version__, cv2.__version__, numpy.__version__, pypdf.__version__)'
 Invoke-NativeCommand -Executable $VenvPython -Arguments @("-c", $ImportCheck) -Step "Verify required package imports"
 
 Write-Host "Downloading and verifying vision models..."
@@ -216,6 +216,12 @@ foreach ($Model in @("gesture_recognizer.task", "pose_landmarker_lite.task")) {
 }
 
 Write-Host ""
+$EnvPath = Join-Path $ProjectRoot ".env"
+$EnvExamplePath = Join-Path $ProjectRoot ".env.example"
+if (-not (Test-Path -LiteralPath $EnvPath -PathType Leaf) -and (Test-Path -LiteralPath $EnvExamplePath -PathType Leaf)) {
+    Copy-Item -LiteralPath $EnvExamplePath -Destination $EnvPath
+    Write-Host "Created .env from .env.example. Add your OPENAI_API_KEY to enable AI workflow generation." -ForegroundColor Yellow
+}
 Write-Host "SETUP COMPLETE. Dependencies and model files were verified." -ForegroundColor Green
 Write-Host "Run .\run.ps1 to start the website."
 Write-Host "Setup log: $LogPath"

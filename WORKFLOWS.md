@@ -201,3 +201,16 @@ PRESENTATION_DECKS = {
 ## 离线工作流编排
 
 工作流的创建、编辑、鼠标拖拽、参数设置、保存、校验和 dry-run 不依赖摄像头。摄像头只用于真实手势触发工作流，以及开启“手势拖拽”指针模式。编辑器会在尝试开启手势拖拽时检查视频流状态；未启动摄像头时给出提示，但不影响鼠标和键盘编辑。
+
+## AI 文档生成器
+
+编辑器中的“AI 生成”入口把文档理解与工作流运行时分开：文档解析器提取 PDF、DOCX、TXT 或 Markdown 文本，WorkflowGenerator 使用项目当前的 ActionRegistry Schema、动作白名单和启用的展示页面目录调用 OpenAI Responses API Structured Outputs。模型只能返回受约束的流程计划；compile_workflow_plan 将模型节点 ID 转换为本项目节点 ID，生成画布位置，并为未明确的条件分支/普通后继添加安全结束路径。最终仍以 WorkflowEngine.validate 和展示页面兼容性校验为准，模型生成的 JSON 不会直接执行。
+
+- 上传限制：单文件 5 MB，抽取文本最多 32,000 字符，PDF 最多 80 页；DOCX 会提取段落和表格，扫描版 PDF 第一版不做 OCR。
+- 节点/连线限制：最多 30 个节点、60 条边；只允许当前注册动作与当前启用的展示页面 ID，不允许任意 URL、路径或代码。
+- 页面边界：外部网页只支持整页导航，不能在外部页面之后执行本地 DOM 控制动作；需要先通过 web.return_home 回到本地展示主页。
+- 人工审核：生成 API 只返回 enabled=false 的未保存草稿。前端“应用到画布”只更新当前编辑状态；用户手动保存后才会创建数据库记录，手动启用后才可响应手势。
+- API Key：项目根目录 .env 中配置 OPENAI_API_KEY、OPENAI_MODEL 和可选 OPENAI_BASE_URL。.env 已加入 .gitignore；.env.example 仅提供占位值。API 调用单独计费，不属于 ChatGPT 订阅。
+- 隐私：文档正文会发送到用户配置的 OpenAI API 服务，不会保存在项目磁盘或 SQLite；不要上传未获授权的涉密文档。
+- 接口：GET /api/workflow-generator/status、POST /api/workflows/generate。生成接口使用 multipart/form-data，字段为 file、instructions 和 preferred_trigger。
+- 自动化测试：tests/test_workflow_generator.py 覆盖文档解析、上传限制、严格 Schema、流程图编译、循环图布局、外部页面边界和生成 API 的未保存草稿语义。

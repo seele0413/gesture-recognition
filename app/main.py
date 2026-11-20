@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, root_validator
@@ -24,6 +24,17 @@ from app.stream import StreamManager
 from app.video_actions import register_video_actions
 from app.web_actions import BrowserCommandAdapter, register_web_actions
 from app.workflow import new_workflow
+from app.workflow_generator import (
+    MAX_UPLOAD_BYTES,
+    DocumentParseError,
+    ModelNotConfiguredError,
+    ModelRequestError,
+    WorkflowGenerationError,
+    WorkflowGenerator,
+    build_generated_workflow,
+    external_page_control_issues,
+    extract_document_text,
+)
 
 
 class StreamStartRequest(BaseModel):
@@ -139,6 +150,7 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
     presentation_adapter = PresentationAdapter(store)
     register_ppt_actions(action_registry, store, presentation_adapter)
     workflow_engine = WorkflowEngine(store, action_registry, hub.publish_from_thread)
+    workflow_generator = WorkflowGenerator()
     display_channel.on_state_change = workflow_engine.set_display_connected
     display_channel.on_ready_change = workflow_engine.set_display_ready
     hub.add_listener(workflow_engine.on_event)
@@ -159,6 +171,18 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
     app.state.display_channel = display_channel
     app.state.action_registry = action_registry
     app.state.workflow_engine = workflow_engine
+    app.state.workflow_generator = workflow_generator
+
+    def validate_workflow_definition(definition: dict) -> list[str]:
+        errors = workflow_engine.validate(definition)
+        errors.extend(
+            external_page_control_issues(
+                definition,
+                store.get_display_pages(),
+                store.get_default_display_page_id(),
+            )
+        )
+        return errors
     app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
 
     @app.middleware("http")
@@ -386,6 +410,54 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
     async def get_actions() -> dict:
         return {"actions": action_registry.describe()}
 
+    @app.get("/api/workflow-generator/status")
+    async def workflow_generator_status() -> dict:
+        return workflow_generator.status()
+
+    @app.post("/api/workflows/generate")
+    async def generate_workflow_from_document(
+        file: UploadFile = File(...),
+        instructions: str = Form(""),
+        preferred_trigger: str = Form("Open_Palm"),
+    ) -> dict:
+        try:
+            document_bytes = await file.read(MAX_UPLOAD_BYTES + 1)
+            extracted = extract_document_text(file.filename, document_bytes)
+            action_schemas = action_registry.schema_map()
+            pages = store.get_display_pages()
+            plan = await asyncio.to_thread(
+                workflow_generator.generate_plan,
+                extracted["text"],
+                instructions,
+                preferred_trigger,
+                action_schemas,
+                pages,
+            )
+            generated, warnings, questions, summary = build_generated_workflow(plan, action_schemas)
+            validation_errors = validate_workflow_definition(generated)
+            return {
+                "workflow": generated,
+                "valid": not validation_errors,
+                "validation_errors": validation_errors,
+                "warnings": warnings,
+                "questions": questions,
+                "summary": summary,
+                "source": {
+                    "filename": extracted["filename"],
+                    "character_count": extracted["character_count"],
+                },
+            }
+        except DocumentParseError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        except ModelNotConfiguredError as error:
+            raise HTTPException(status_code=503, detail=str(error)) from error
+        except ModelRequestError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from error
+        except WorkflowGenerationError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        finally:
+            await file.close()
+
     @app.get("/api/pointer/settings")
     async def get_pointer_settings() -> dict:
         return manager.get_pointer_settings()
@@ -422,7 +494,7 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
 
     @app.post("/api/workflows/validate")
     async def validate_workflow_draft(payload: dict) -> dict:
-        errors = workflow_engine.validate(payload)
+        errors = validate_workflow_definition(payload)
         return {"valid": not errors, "errors": errors}
 
     @app.get("/api/workflows")
@@ -431,7 +503,7 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
 
     @app.post("/api/workflows", status_code=201)
     async def create_workflow(payload: dict) -> dict:
-        errors = workflow_engine.validate(payload)
+        errors = validate_workflow_definition(payload)
         if errors:
             raise HTTPException(status_code=400, detail=errors)
         try:
@@ -452,7 +524,7 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
         if payload.get("id") != workflow_id or not current:
             raise HTTPException(status_code=404, detail="工作流不存在或 ID 不匹配")
         payload["enabled"] = current["enabled"]
-        errors = workflow_engine.validate(payload)
+        errors = validate_workflow_definition(payload)
         if errors:
             raise HTTPException(status_code=400, detail=errors)
         try:
@@ -476,7 +548,7 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
         copied = new_workflow(source["name"] + " 副本")
         copied.update({key: source[key] for key in ("description", "trigger", "nodes", "edges")})
         copied["enabled"] = False
-        errors = workflow_engine.validate(copied)
+        errors = validate_workflow_definition(copied)
         if errors:
             raise HTTPException(status_code=400, detail=errors)
         return {"workflow": store.save_workflow(copied)}
@@ -492,7 +564,7 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
         workflow = store.get_workflow(workflow_id)
         if not workflow:
             raise HTTPException(status_code=404, detail="工作流不存在")
-        errors = workflow_engine.validate(workflow)
+        errors = validate_workflow_definition(workflow)
         return {"valid": not errors, "errors": errors}
 
     @app.post("/api/workflows/{workflow_id}/dry-run")
@@ -500,6 +572,9 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
         workflow = store.get_workflow(workflow_id)
         if not workflow:
             raise HTTPException(status_code=404, detail="工作流不存在")
+        errors = validate_workflow_definition(workflow)
+        if errors:
+            raise HTTPException(status_code=400, detail=errors)
         try:
             run = await workflow_engine.dry_run(workflow, payload.context if payload else {})
         except ValueError as error:
@@ -511,7 +586,7 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
         if not workflow:
             raise HTTPException(status_code=404, detail="工作流不存在")
         workflow["enabled"] = enabled
-        errors = workflow_engine.validate(workflow)
+        errors = validate_workflow_definition(workflow)
         if errors:
             raise HTTPException(status_code=400, detail=errors)
         if enabled:
