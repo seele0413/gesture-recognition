@@ -5,6 +5,7 @@ import json
 import os
 import re
 import tempfile
+import time
 import urllib.error
 import urllib.request
 import zipfile
@@ -12,6 +13,7 @@ import xml.etree.ElementTree as ET
 from collections import defaultdict, deque
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from app.control import GESTURES
@@ -45,7 +47,10 @@ class ModelNotConfiguredError(WorkflowGenerationError):
 
 
 class ModelRequestError(WorkflowGenerationError):
-    pass
+    def __init__(self, message: str, status_code: int | None = None, detail: str = "") -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.detail = detail or message
 
 
 _ACTION_DESCRIPTIONS = {
@@ -722,6 +727,14 @@ def external_page_control_issues(
 
 
 class WorkflowGenerator:
+    SUPPORTED_PROTOCOLS = ("auto", "responses", "chat_completions")
+    CONFIG_KEYS = (
+        "OPENAI_API_KEY",
+        "OPENAI_BASE_URL",
+        "OPENAI_MODEL",
+        "OPENAI_API_PROTOCOL",
+    )
+
     def __init__(
         self,
         env_file: Path | None = None,
@@ -730,32 +743,87 @@ class WorkflowGenerator:
         self.env_file = env_file or ROOT_DIR / ".env"
         self.opener = opener or urllib.request.urlopen
 
+    @staticmethod
+    def _normalize_base_url(value: str) -> str:
+        normalized = value.strip().rstrip("/") if isinstance(value, str) else ""
+        if not normalized or len(normalized) > 512:
+            raise ValueError("请填写有效的 API Base URL，长度不能超过 512 个字符")
+        try:
+            parsed = urlsplit(normalized)
+            hostname = parsed.hostname
+            _ = parsed.port
+        except ValueError as error:
+            raise ValueError("API Base URL 格式无效，请检查域名和端口") from error
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc or not hostname:
+            raise ValueError("API Base URL 必须以 http:// 或 https:// 开头")
+        if parsed.username or parsed.password:
+            raise ValueError("API Base URL 不能包含账号或密码")
+        if parsed.query or parsed.fragment:
+            raise ValueError("API Base URL 不应包含查询参数或 # 片段")
+        if parsed.path.rstrip("/").endswith(("/responses", "/chat/completions")):
+            raise ValueError("请填写 API 根地址（通常以 /v1 结尾），不要填写具体接口路径")
+        if any(character.isspace() for character in normalized) or "\x00" in normalized:
+            raise ValueError("API Base URL 不能包含空格或控制字符")
+        return normalized
+
+    @staticmethod
+    def _normalize_model(value: str) -> str:
+        normalized = value.strip() if isinstance(value, str) else ""
+        if not normalized or len(normalized) > 128 or any(character.isspace() for character in normalized):
+            raise ValueError("请填写有效的模型名称，不能包含空格且不超过 128 个字符")
+        return normalized
+
     def _configuration(self) -> dict[str, str]:
         file_values = _read_env_file(self.env_file)
         return {
             "api_key": _config_value("OPENAI_API_KEY", file_values),
             "model": _config_value("OPENAI_MODEL", file_values) or "gpt-4o-mini",
             "base_url": (_config_value("OPENAI_BASE_URL", file_values) or "https://api.openai.com/v1").rstrip("/"),
+            "protocol": (_config_value("OPENAI_API_PROTOCOL", file_values) or "auto").lower(),
         }
+
+    @staticmethod
+    def _provider_label(base_url: str) -> str:
+        try:
+            hostname = (urlsplit(base_url).hostname or "").lower()
+        except ValueError:
+            hostname = ""
+        if hostname == "api.openai.com":
+            return "OpenAI 官方"
+        return "自定义中转站 / OpenAI 兼容服务"
 
     def status(self) -> dict[str, Any]:
         config = self._configuration()
+        try:
+            base_url = self._normalize_base_url(config["base_url"])
+            base_url_valid = True
+        except ValueError:
+            base_url = config["base_url"]
+            base_url_valid = False
+        protocol = config["protocol"] if config["protocol"] in self.SUPPORTED_PROTOCOLS else "auto"
+        model_valid = bool(config["model"]) and len(config["model"]) <= 128
         return {
-            "configured": _api_key_is_configured(config["api_key"]),
-            "provider": "OpenAI Responses API",
+            "configured": (
+                _api_key_is_configured(config["api_key"])
+                and base_url_valid
+                and model_valid
+                and protocol == config["protocol"]
+            ),
+            "provider": self._provider_label(base_url),
             "model": config["model"],
+            "base_url": base_url,
+            "protocol": protocol,
+            "protocol_label": {
+                "auto": "自动兼容",
+                "responses": "Responses API",
+                "chat_completions": "Chat Completions",
+            }[protocol],
             "extensions": list(ALLOWED_EXTENSIONS),
             "max_upload_bytes": MAX_UPLOAD_BYTES,
             "max_extracted_chars": MAX_EXTRACTED_CHARS,
         }
 
-    def configure_api_key(self, api_key: str) -> dict[str, Any]:
-        normalized = api_key.strip() if isinstance(api_key, str) else ""
-        if not _api_key_is_configured(normalized):
-            raise ValueError("请输入真实的 OpenAI API Key，不要使用示例占位符")
-        if len(normalized) > 512 or any(character.isspace() for character in normalized) or "\x00" in normalized:
-            raise ValueError("API Key 格式无效，请检查是否包含空格或换行")
-
+    def _write_config(self, values: dict[str, str]) -> None:
         self.env_file.parent.mkdir(parents=True, exist_ok=True)
         try:
             existing_lines = self.env_file.read_text(encoding="utf-8-sig").splitlines()
@@ -765,22 +833,23 @@ class WorkflowGenerator:
             raise ValueError("无法读取本机 .env 配置文件，请检查项目目录权限") from error
 
         updated_lines: list[str] = []
-        key_written = False
+        written: set[str] = set()
         for line in existing_lines:
             stripped = line.strip()
             key_name = stripped.split("=", 1)[0].strip() if "=" in stripped else ""
-            if key_name == "OPENAI_API_KEY":
-                if not key_written:
-                    updated_lines.append("OPENAI_API_KEY=" + normalized)
-                    key_written = True
+            if key_name in values:
+                if key_name not in written:
+                    updated_lines.append(key_name + "=" + values[key_name])
+                    written.add(key_name)
                 continue
             updated_lines.append(line)
-        if not key_written:
-            if updated_lines and updated_lines[-1].strip():
-                updated_lines.append("")
-            updated_lines.append("OPENAI_API_KEY=" + normalized)
+        for key_name, value in values.items():
+            if key_name not in written:
+                if updated_lines and updated_lines[-1].strip():
+                    updated_lines.append("")
+                updated_lines.append(key_name + "=" + value)
 
-        content = "\n".join(updated_lines).rstrip() + "\n"
+        file_content = "\n".join(updated_lines).rstrip() + "\n"
         temporary_path: Path | None = None
         try:
             with tempfile.NamedTemporaryFile(
@@ -792,7 +861,7 @@ class WorkflowGenerator:
                 suffix=".tmp",
                 delete=False,
             ) as temporary:
-                temporary.write(content)
+                temporary.write(file_content)
                 temporary_path = Path(temporary.name)
             os.chmod(temporary_path, 0o600)
             os.replace(temporary_path, self.env_file)
@@ -800,11 +869,327 @@ class WorkflowGenerator:
         except OSError as error:
             if temporary_path is not None:
                 temporary_path.unlink(missing_ok=True)
-            raise ValueError("无法保存 API Key，请检查项目目录写入权限") from error
+            raise ValueError("无法保存模型配置，请检查项目目录写入权限") from error
 
-        # Make the newly saved key available immediately; the .env file keeps it across restarts.
-        os.environ["OPENAI_API_KEY"] = normalized
+    def configure(
+        self,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        model: str | None = None,
+        protocol: str | None = None,
+    ) -> dict[str, Any]:
+        current = self._configuration()
+        next_values = {
+            "OPENAI_API_KEY": current["api_key"],
+            "OPENAI_BASE_URL": self._normalize_base_url(current["base_url"]),
+            "OPENAI_MODEL": self._normalize_model(current["model"]),
+            "OPENAI_API_PROTOCOL": current["protocol"],
+        }
+
+        if api_key is not None:
+            normalized_key = api_key.strip() if isinstance(api_key, str) else ""
+            if not _api_key_is_configured(normalized_key):
+                raise ValueError("请输入有效的 API Key；留空表示保留当前密钥")
+            if len(normalized_key) > 512 or any(character.isspace() for character in normalized_key) or "\x00" in normalized_key:
+                raise ValueError("API Key 格式无效，请检查是否包含空格或换行")
+            next_values["OPENAI_API_KEY"] = normalized_key
+
+        if base_url is not None:
+            next_values["OPENAI_BASE_URL"] = self._normalize_base_url(base_url)
+        if model is not None:
+            next_values["OPENAI_MODEL"] = self._normalize_model(model)
+        if protocol is not None:
+            normalized_protocol = protocol.strip().lower() if isinstance(protocol, str) else ""
+            if normalized_protocol not in self.SUPPORTED_PROTOCOLS:
+                raise ValueError("接口协议只能选择自动兼容、Responses API 或 Chat Completions")
+            next_values["OPENAI_API_PROTOCOL"] = normalized_protocol
+
+        self._write_config(next_values)
+        # Environment variables take precedence over .env; update all values so
+        # changes take effect immediately and remain consistent after restart.
+        os.environ.update(next_values)
         return self.status()
+
+    def configure_api_key(self, api_key: str) -> dict[str, Any]:
+        """Backward-compatible wrapper for older clients and tests."""
+        return self.configure(api_key=api_key)
+
+    @staticmethod
+    def _schema_format_error(error: ModelRequestError) -> bool:
+        if error.status_code not in {400, 422}:
+            return False
+        detail = error.detail.lower()
+        markers = (
+            "json_schema", "json schema", "response_format", "text.format",
+            "structured output", "strict", "schema is not supported",
+            "unsupported parameter", "not support schema",
+        )
+        return not detail or any(marker in detail for marker in markers)
+
+    @staticmethod
+    def _responses_endpoint_unsupported(error: ModelRequestError) -> bool:
+        if error.status_code in {404, 405, 415, 501}:
+            return True
+        detail = error.detail.lower()
+        markers = (
+            "responses api", "responses endpoint", "unknown endpoint",
+            "unrecognized request url", "no route", "unsupported path",
+            "endpoint not found", "not implemented", "method not allowed",
+        )
+        return any(marker in detail for marker in markers)
+
+    def _post_json(
+        self,
+        config: dict[str, str],
+        endpoint: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        request = urllib.request.Request(
+            config["base_url"] + endpoint,
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={
+                "Authorization": "Bearer " + config["api_key"],
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with self.opener(request, timeout=75) as response:
+                raw = response.read(2 * 1024 * 1024)
+        except urllib.error.HTTPError as error:
+            try:
+                body = json.loads(error.read(64 * 1024).decode("utf-8", errors="replace"))
+                error_object = body.get("error", {}) if isinstance(body, dict) else {}
+                message = error_object.get("message", "") if isinstance(error_object, dict) else ""
+            except Exception:
+                message = ""
+            detail = str(message or "模型服务返回错误")
+            secret = config.get("api_key", "")
+            if secret:
+                detail = detail.replace(secret, "[密钥已隐藏]")
+            detail = re.sub(r"(?i)sk-[A-Za-z0-9_-]{8,}", "[密钥已隐藏]", detail)[:240]
+            raise ModelRequestError(
+                f"模型服务请求失败（HTTP {error.code}）：{detail}",
+                status_code=error.code,
+                detail=detail,
+            ) from error
+        except (urllib.error.URLError, TimeoutError, OSError) as error:
+            raise ModelRequestError(
+                "无法连接模型服务，请检查网络和 API Base URL"
+            ) from error
+
+        try:
+            response_data = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ModelRequestError("模型服务返回了无法解析的响应") from error
+        if not isinstance(response_data, dict):
+            raise ModelRequestError("模型服务返回的响应结构无效")
+        if isinstance(response_data.get("error"), dict):
+            message = str(response_data["error"].get("message") or "模型服务返回错误")
+            secret = config.get("api_key", "")
+            if secret:
+                message = message.replace(secret, "[密钥已隐藏]")
+            raise ModelRequestError("模型服务返回错误：" + message[:240], detail=message[:240])
+        return response_data
+
+    @staticmethod
+    def _extract_chat_completion_text(response: dict[str, Any]) -> str:
+        choices = response.get("choices")
+        if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+            raise ModelRequestError("Chat Completions 响应中没有 choices")
+        choice = choices[0]
+        if choice.get("finish_reason") == "length":
+            raise ModelRequestError("模型输出不完整，请缩短文档或减少流程复杂度后重试")
+        message = choice.get("message")
+        if not isinstance(message, dict):
+            raise ModelRequestError("Chat Completions 响应中没有 message")
+        if message.get("refusal"):
+            raise ModelRequestError("模型拒绝处理该文档，请检查文档内容和补充要求")
+        content = message.get("content")
+        if isinstance(content, str) and content.strip():
+            return content
+        if isinstance(content, list):
+            pieces = [
+                item.get("text", "")
+                for item in content
+                if isinstance(item, dict) and isinstance(item.get("text"), str)
+            ]
+            if pieces:
+                return "\n".join(pieces)
+        raise ModelRequestError("Chat Completions 没有返回可解析的工作流内容")
+
+    @staticmethod
+    def _json_mode_instruction(system_prompt: str, schema: dict[str, Any]) -> str:
+        return (
+            system_prompt
+            + "\n\n请只返回一个合法 JSON 对象，不要使用 Markdown 代码围栏。"
+            + "返回对象必须符合以下 JSON Schema：\n"
+            + json.dumps(schema, ensure_ascii=False)
+        )
+
+    def _request_responses(
+        self,
+        config: dict[str, str],
+        system_prompt: str,
+        user_prompt: str,
+        schema: dict[str, Any],
+        max_tokens: int,
+        json_mode: bool = False,
+    ) -> str:
+        text_format = (
+            {"type": "json_object"}
+            if json_mode
+            else {
+                "type": "json_schema",
+                "name": "gesture_workflow_plan",
+                "strict": True,
+                "schema": schema,
+            }
+        )
+        effective_system = self._json_mode_instruction(system_prompt, schema) if json_mode else system_prompt
+        payload = {
+            "model": config["model"],
+            "input": [
+                {"role": "system", "content": [{"type": "input_text", "text": effective_system}]},
+                {"role": "user", "content": [{"type": "input_text", "text": user_prompt}]},
+            ],
+            "text": {"format": text_format},
+            "max_output_tokens": max_tokens,
+        }
+        response_data = self._post_json(config, "/responses", payload)
+        if response_data.get("status") == "incomplete":
+            raise ModelRequestError("模型输出不完整，请缩短文档或减少流程复杂度后重试")
+        return _extract_response_text(response_data)
+
+    def _request_chat_completions(
+        self,
+        config: dict[str, str],
+        system_prompt: str,
+        user_prompt: str,
+        schema: dict[str, Any],
+        max_tokens: int,
+        json_mode: bool = False,
+    ) -> str:
+        response_format = (
+            {"type": "json_object"}
+            if json_mode
+            else {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "gesture_workflow_plan",
+                    "strict": True,
+                    "schema": schema,
+                },
+            }
+        )
+        effective_system = self._json_mode_instruction(system_prompt, schema) if json_mode else system_prompt
+        payload = {
+            "model": config["model"],
+            "messages": [
+                {"role": "system", "content": effective_system},
+                {"role": "user", "content": user_prompt},
+            ],
+            "response_format": response_format,
+            "max_tokens": max_tokens,
+        }
+        response_data = self._post_json(config, "/chat/completions", payload)
+        return self._extract_chat_completion_text(response_data)
+
+    def _request_protocol(
+        self,
+        protocol: str,
+        config: dict[str, str],
+        system_prompt: str,
+        user_prompt: str,
+        schema: dict[str, Any],
+        max_tokens: int,
+    ) -> str:
+        request_method = self._request_responses if protocol == "responses" else self._request_chat_completions
+        try:
+            return request_method(config, system_prompt, user_prompt, schema, max_tokens, False)
+        except ModelRequestError as error:
+            if not self._schema_format_error(error):
+                raise
+            # Many OpenAI-compatible gateways implement the endpoint but not
+            # strict JSON Schema. JSON mode plus an explicit schema prompt is the
+            # next compatibility level; the application still validates output.
+            return request_method(config, system_prompt, user_prompt, schema, max_tokens, True)
+
+    def _request_compatible(
+        self,
+        config: dict[str, str],
+        system_prompt: str,
+        user_prompt: str,
+        schema: dict[str, Any],
+        max_tokens: int,
+    ) -> tuple[str, str]:
+        selected = config["protocol"]
+        protocols = ("responses", "chat_completions") if selected == "auto" else (selected,)
+        last_error: ModelRequestError | None = None
+        for protocol in protocols:
+            try:
+                return (
+                    self._request_protocol(protocol, config, system_prompt, user_prompt, schema, max_tokens),
+                    protocol,
+                )
+            except ModelRequestError as error:
+                last_error = error
+                if (
+                    selected == "auto"
+                    and protocol == "responses"
+                    and self._responses_endpoint_unsupported(error)
+                ):
+                    continue
+                raise
+        if last_error is not None:
+            raise last_error
+        raise ModelRequestError("没有可用的模型接口协议")
+
+    def _require_configuration(self) -> dict[str, str]:
+        config = self._configuration()
+        if not _api_key_is_configured(config["api_key"]):
+            raise ModelNotConfiguredError("尚未配置 API Key，请在 AI 工作流生成窗口中填写并保存")
+        try:
+            config["base_url"] = self._normalize_base_url(config["base_url"])
+            config["model"] = self._normalize_model(config["model"])
+        except ValueError as error:
+            raise ModelNotConfiguredError(str(error)) from error
+        if config["protocol"] not in self.SUPPORTED_PROTOCOLS:
+            raise ModelNotConfiguredError("接口协议配置无效，请重新选择接口协议并保存")
+        return config
+
+    def test_connection(self) -> dict[str, Any]:
+        config = self._require_configuration()
+        schema = {
+            "type": "object",
+            "properties": {"ok": {"type": "boolean"}},
+            "required": ["ok"],
+            "additionalProperties": False,
+        }
+        started = time.monotonic()
+        text, protocol_used = self._request_compatible(
+            config,
+            "你正在进行模型连接测试。只返回 JSON 对象，字段 ok 为 true。",
+            "请返回 {\"ok\": true}。",
+            schema,
+            128,
+        )
+        try:
+            result = json.loads(text)
+        except json.JSONDecodeError as error:
+            raise ModelRequestError("接口已响应，但模型没有按 JSON 格式返回连接测试结果") from error
+        if not isinstance(result, dict) or result.get("ok") is not True:
+            raise ModelRequestError("接口已响应，但模型连接测试结果不符合预期")
+        return {
+            "ok": True,
+            "provider": self._provider_label(config["base_url"]),
+            "model": config["model"],
+            "base_url": config["base_url"],
+            "configured_protocol": config["protocol"],
+            "protocol_used": protocol_used,
+            "latency_ms": round((time.monotonic() - started) * 1000),
+            "message": "模型连接成功，可以开始生成工作流",
+        }
 
     def generate_plan(
         self,
@@ -814,11 +1199,7 @@ class WorkflowGenerator:
         action_schemas: dict[str, dict[str, Any]],
         pages: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        config = self._configuration()
-        if not _api_key_is_configured(config["api_key"]):
-            raise ModelNotConfiguredError(
-                "尚未配置 OPENAI_API_KEY。请在 AI 工作流生成窗口的 API Key 配置栏中填写并保存"
-            )
+        config = self._require_configuration()
         if not document_text.strip():
             raise WorkflowGenerationError("文档正文为空")
         if len(instructions) > 2000:
@@ -866,54 +1247,13 @@ class WorkflowGenerator:
             + "\n----- END DOCUMENT CONTENT -----\n\n"
             "请给出流程名称、简要说明、流程摘要、触发器、nodes、edges、warnings 和 questions。"
         )
-        payload = {
-            "model": config["model"],
-            "input": [
-                {"role": "system", "content": [{"type": "input_text", "text": system_prompt}]},
-                {"role": "user", "content": [{"type": "input_text", "text": user_prompt}]},
-            ],
-            "text": {
-                "format": {
-                    "type": "json_schema",
-                    "name": "gesture_workflow_plan",
-                    "strict": True,
-                    "schema": schema,
-                }
-            },
-            "max_output_tokens": 8000,
-        }
-        request = urllib.request.Request(
-            config["base_url"] + "/responses",
-            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-            headers={
-                "Authorization": "Bearer " + config["api_key"],
-                "Content-Type": "application/json",
-            },
-            method="POST",
+        output_text, _protocol_used = self._request_compatible(
+            config,
+            system_prompt,
+            user_prompt,
+            schema,
+            8000,
         )
-        try:
-            with self.opener(request, timeout=75) as response:
-                raw = response.read(2 * 1024 * 1024)
-        except urllib.error.HTTPError as error:
-            try:
-                body = json.loads(error.read(64 * 1024).decode("utf-8", errors="replace"))
-                message = body.get("error", {}).get("message", "")
-            except Exception:
-                message = ""
-            detail = str(message)[:240] if message else "模型服务返回错误"
-            raise ModelRequestError(f"模型服务请求失败（HTTP {error.code}）：{detail}") from error
-        except (urllib.error.URLError, TimeoutError, OSError) as error:
-            raise ModelRequestError("无法连接模型服务，请检查网络、API Key 和 OPENAI_BASE_URL") from error
-
-        try:
-            response_data = json.loads(raw.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise ModelRequestError("模型服务返回了无法解析的响应") from error
-        if not isinstance(response_data, dict):
-            raise ModelRequestError("模型服务返回的响应结构无效")
-        if response_data.get("status") == "incomplete":
-            raise ModelRequestError("模型输出不完整，请缩短文档或减少流程复杂度后重试")
-        output_text = _extract_response_text(response_data)
         try:
             plan = json.loads(output_text)
         except json.JSONDecodeError as error:
