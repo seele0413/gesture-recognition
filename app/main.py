@@ -510,7 +510,7 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
 
     @app.post("/api/workflows", status_code=201)
     async def create_workflow(payload: dict) -> dict:
-        errors = workflow_engine.validate(payload)
+        errors = validate_workflow_definition(payload)
         if errors:
             raise HTTPException(status_code=400, detail=errors)
         try:
@@ -531,7 +531,7 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
         if payload.get("id") != workflow_id or not current:
             raise HTTPException(status_code=404, detail="工作流不存在或 ID 不匹配")
         payload["enabled"] = current["enabled"]
-        errors = workflow_engine.validate(payload)
+        errors = validate_workflow_definition(payload)
         if errors:
             raise HTTPException(status_code=400, detail=errors)
         try:
@@ -579,6 +579,9 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
         workflow = store.get_workflow(workflow_id)
         if not workflow:
             raise HTTPException(status_code=404, detail="工作流不存在")
+        errors = validate_workflow_definition(workflow)
+        if errors:
+            raise HTTPException(status_code=400, detail=errors)
         try:
             run = await workflow_engine.dry_run(workflow, payload.context if payload else {})
         except ValueError as error:
@@ -590,7 +593,7 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
         if not workflow:
             raise HTTPException(status_code=404, detail="工作流不存在")
         workflow["enabled"] = enabled
-        errors = workflow_engine.validate(workflow)
+        errors = validate_workflow_definition(workflow)
         if errors:
             raise HTTPException(status_code=400, detail=errors)
         if enabled:
