@@ -2,6 +2,7 @@ import io
 import json
 import tempfile
 import unittest
+import urllib.error
 import zipfile
 from pathlib import Path
 from unittest.mock import patch
@@ -13,6 +14,7 @@ from app.workflow import new_workflow
 from app.workflow_generator import (
     DocumentParseError,
     ModelNotConfiguredError,
+    ModelRequestError,
     WorkflowGenerationError,
     WorkflowGenerator,
     build_generated_workflow,
@@ -294,6 +296,194 @@ class WorkflowGeneratorConfigurationTests(unittest.TestCase):
                 with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                     generator.configure_api_key(invalid)
 
+    def test_full_model_configuration_is_saved_and_preserves_unrelated_env_values(self):
+        with tempfile.TemporaryDirectory() as directory:
+            env_file = Path(directory) / ".env"
+            env_file.write_text("OTHER_SETTING=keep-me\nOPENAI_API_KEY=old-key\n", encoding="utf-8")
+            with patch.dict("os.environ", {
+                "OPENAI_API_KEY": "", "OPENAI_MODEL": "", "OPENAI_BASE_URL": "", "OPENAI_API_PROTOCOL": "",
+            }):
+                generator = WorkflowGenerator(env_file=env_file)
+                status = generator.configure(
+                    api_key="relay-secret-key",
+                    base_url="https://relay.example.test/v1",
+                    model="deepseek-chat",
+                    protocol="chat_completions",
+                )
+            saved = env_file.read_text(encoding="utf-8")
+        self.assertTrue(status["configured"])
+        self.assertEqual(status["provider"], "自定义中转站 / OpenAI 兼容服务")
+        self.assertEqual(status["base_url"], "https://relay.example.test/v1")
+        self.assertEqual(status["model"], "deepseek-chat")
+        self.assertEqual(status["protocol"], "chat_completions")
+        self.assertNotIn("api_key", status)
+        self.assertNotIn("relay-secret-key", str(status))
+        self.assertIn("OTHER_SETTING=keep-me", saved)
+        self.assertIn("OPENAI_API_KEY=relay-secret-key", saved)
+        self.assertIn("OPENAI_BASE_URL=https://relay.example.test/v1", saved)
+        self.assertIn("OPENAI_MODEL=deepseek-chat", saved)
+        self.assertIn("OPENAI_API_PROTOCOL=chat_completions", saved)
+
+    def test_model_configuration_rejects_endpoint_paths_and_unknown_protocols(self):
+        with tempfile.TemporaryDirectory() as directory:
+            generator = WorkflowGenerator(env_file=Path(directory) / ".env")
+            for invalid_url in ("ftp://relay.example.test/v1", "https://relay.example.test/v1/chat/completions"):
+                with self.subTest(invalid_url=invalid_url), self.assertRaises(ValueError):
+                    generator.configure(base_url=invalid_url)
+            with self.assertRaises(ValueError):
+                generator.configure(protocol="legacy")
+
+    def test_chat_completions_protocol_sends_json_schema_and_parses_result(self):
+        with tempfile.TemporaryDirectory() as directory:
+            env_file = Path(directory) / ".env"
+            env_file.write_text(
+                "OPENAI_API_KEY=sk-test-key\nOPENAI_MODEL=deepseek-chat\n"
+                "OPENAI_BASE_URL=https://relay.example.test/v1\nOPENAI_API_PROTOCOL=chat_completions\n",
+                encoding="utf-8",
+            )
+            captured = {}
+
+            def opener(request, timeout):
+                captured["url"] = request.full_url
+                captured["payload"] = json.loads(request.data.decode("utf-8"))
+                return FakeResponse({"choices": [{
+                    "message": {"role": "assistant", "content": json.dumps(sample_plan(), ensure_ascii=False)},
+                    "finish_reason": "stop",
+                }]})
+
+            with patch.dict("os.environ", {
+                "OPENAI_API_KEY": "", "OPENAI_MODEL": "", "OPENAI_BASE_URL": "", "OPENAI_API_PROTOCOL": "",
+            }):
+                generator = WorkflowGenerator(env_file=env_file, opener=opener)
+                plan = generator.generate_plan(
+                    "播放企业宣传片", "", "Open_Palm",
+                    {"video.play": {"properties": {}, "required": [], "idempotent": True}},
+                    [],
+                )
+        self.assertEqual(plan["name"], "访客展厅讲解")
+        self.assertEqual(captured["url"], "https://relay.example.test/v1/chat/completions")
+        self.assertEqual(captured["payload"]["model"], "deepseek-chat")
+        self.assertEqual(captured["payload"]["response_format"]["type"], "json_schema")
+        self.assertTrue(captured["payload"]["response_format"]["json_schema"]["strict"])
+
+    def test_auto_protocol_falls_back_to_chat_completions_when_responses_is_missing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            env_file = Path(directory) / ".env"
+            env_file.write_text(
+                "OPENAI_API_KEY=sk-test-key\nOPENAI_MODEL=relay-model\n"
+                "OPENAI_BASE_URL=https://relay.example.test/v1\nOPENAI_API_PROTOCOL=auto\n",
+                encoding="utf-8",
+            )
+            calls = []
+
+            def opener(request, timeout):
+                calls.append(request.full_url)
+                if request.full_url.endswith("/responses"):
+                    body = json.dumps({"error": {"message": "Not Found"}}).encode("utf-8")
+                    raise urllib.error.HTTPError(request.full_url, 404, "Not Found", {}, io.BytesIO(body))
+                return FakeResponse({"choices": [{
+                    "message": {"role": "assistant", "content": json.dumps(sample_plan(), ensure_ascii=False)},
+                    "finish_reason": "stop",
+                }]})
+
+            with patch.dict("os.environ", {
+                "OPENAI_API_KEY": "", "OPENAI_MODEL": "", "OPENAI_BASE_URL": "", "OPENAI_API_PROTOCOL": "",
+            }):
+                generator = WorkflowGenerator(env_file=env_file, opener=opener)
+                plan = generator.generate_plan(
+                    "播放企业宣传片", "", "Open_Palm",
+                    {"video.play": {"properties": {}, "required": [], "idempotent": True}},
+                    [],
+                )
+        self.assertEqual(plan["name"], "访客展厅讲解")
+        self.assertEqual(calls, [
+            "https://relay.example.test/v1/responses",
+            "https://relay.example.test/v1/chat/completions",
+        ])
+
+    def test_chat_completions_falls_back_to_json_mode_when_json_schema_is_unsupported(self):
+        with tempfile.TemporaryDirectory() as directory:
+            env_file = Path(directory) / ".env"
+            env_file.write_text(
+                "OPENAI_API_KEY=sk-test-key\nOPENAI_MODEL=relay-model\n"
+                "OPENAI_BASE_URL=https://relay.example.test/v1\nOPENAI_API_PROTOCOL=chat_completions\n",
+                encoding="utf-8",
+            )
+            formats = []
+
+            def opener(request, timeout):
+                payload = json.loads(request.data.decode("utf-8"))
+                formats.append(payload["response_format"]["type"])
+                if payload["response_format"]["type"] == "json_schema":
+                    body = json.dumps({
+                        "error": {"message": "response_format json_schema is not supported"}
+                    }).encode("utf-8")
+                    raise urllib.error.HTTPError(request.full_url, 400, "Bad Request", {}, io.BytesIO(body))
+                return FakeResponse({"choices": [{
+                    "message": {"role": "assistant", "content": json.dumps(sample_plan(), ensure_ascii=False)},
+                    "finish_reason": "stop",
+                }]})
+
+            with patch.dict("os.environ", {
+                "OPENAI_API_KEY": "", "OPENAI_MODEL": "", "OPENAI_BASE_URL": "", "OPENAI_API_PROTOCOL": "",
+            }):
+                generator = WorkflowGenerator(env_file=env_file, opener=opener)
+                plan = generator.generate_plan(
+                    "播放企业宣传片", "", "Open_Palm",
+                    {"video.play": {"properties": {}, "required": [], "idempotent": True}},
+                    [],
+                )
+        self.assertEqual(plan["name"], "访客展厅讲解")
+        self.assertEqual(formats, ["json_schema", "json_object"])
+
+    def test_connection_test_reports_actual_protocol_without_returning_api_key(self):
+        with tempfile.TemporaryDirectory() as directory:
+            env_file = Path(directory) / ".env"
+            env_file.write_text(
+                "OPENAI_API_KEY=relay-secret-key\nOPENAI_MODEL=relay-model\n"
+                "OPENAI_BASE_URL=https://relay.example.test/v1\nOPENAI_API_PROTOCOL=chat_completions\n",
+                encoding="utf-8",
+            )
+
+            def opener(request, timeout):
+                return FakeResponse({"choices": [{
+                    "message": {"role": "assistant", "content": "{\"ok\": true}"},
+                    "finish_reason": "stop",
+                }]})
+
+            with patch.dict("os.environ", {
+                "OPENAI_API_KEY": "", "OPENAI_MODEL": "", "OPENAI_BASE_URL": "", "OPENAI_API_PROTOCOL": "",
+            }):
+                result = WorkflowGenerator(env_file=env_file, opener=opener).test_connection()
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["protocol_used"], "chat_completions")
+        self.assertEqual(result["model"], "relay-model")
+        self.assertNotIn("api_key", result)
+        self.assertNotIn("relay-secret-key", str(result))
+
+    def test_http_error_never_echoes_the_full_api_key(self):
+        secret = "sk-super-secret-test-value"
+        with tempfile.TemporaryDirectory() as directory:
+            env_file = Path(directory) / ".env"
+            env_file.write_text(
+                f"OPENAI_API_KEY={secret}\nOPENAI_MODEL=relay-model\n"
+                "OPENAI_BASE_URL=https://relay.example.test/v1\nOPENAI_API_PROTOCOL=chat_completions\n",
+                encoding="utf-8",
+            )
+
+            def opener(request, timeout):
+                body = json.dumps({"error": {"message": "invalid key " + secret}}).encode("utf-8")
+                raise urllib.error.HTTPError(request.full_url, 401, "Unauthorized", {}, io.BytesIO(body))
+
+            with patch.dict("os.environ", {
+                "OPENAI_API_KEY": "", "OPENAI_MODEL": "", "OPENAI_BASE_URL": "", "OPENAI_API_PROTOCOL": "",
+            }):
+                generator = WorkflowGenerator(env_file=env_file, opener=opener)
+                with self.assertRaises(ModelRequestError) as caught:
+                    generator.test_connection()
+        self.assertNotIn(secret, str(caught.exception))
+        self.assertIn("[密钥已隐藏]", str(caught.exception))
+
     def test_responses_api_request_uses_strict_schema_and_parses_output(self):
         with tempfile.TemporaryDirectory() as directory:
             env_file = Path(directory) / ".env"
@@ -354,30 +544,63 @@ class WorkflowGeneratorClientTests(unittest.TestCase):
         self.client.close()
         self.temp_dir.cleanup()
 
-    def test_frontend_api_key_endpoint_saves_without_returning_secret(self):
+    def test_model_configuration_endpoint_saves_provider_settings_without_secret(self):
         expected_status = {
             "configured": True,
-            "provider": "OpenAI Responses API",
-            "model": "gpt-4o-mini",
+            "provider": "自定义中转站 / OpenAI 兼容服务",
+            "model": "deepseek-chat",
+            "base_url": "https://relay.example.test/v1",
+            "protocol": "chat_completions",
+            "protocol_label": "Chat Completions",
             "extensions": [".pdf", ".docx", ".txt", ".md"],
             "max_upload_bytes": 5 * 1024 * 1024,
             "max_extracted_chars": 32000,
         }
-        with patch.object(WorkflowGenerator, "configure_api_key", return_value=expected_status) as configure:
+        with patch.object(WorkflowGenerator, "configure", return_value=expected_status) as configure:
             response = self.client.put(
                 "/api/workflow-generator/config",
-                json={"api_key": "sk-local-test-key"},
+                json={
+                    "api_key": "relay-test-key",
+                    "base_url": "https://relay.example.test/v1",
+                    "model": "deepseek-chat",
+                    "protocol": "chat_completions",
+                },
             )
         self.assertEqual(response.status_code, 200, response.text)
         self.assertTrue(response.json()["configured"])
         self.assertNotIn("api_key", response.json())
-        configure.assert_called_once_with("sk-local-test-key")
+        self.assertNotIn("relay-test-key", response.text)
+        configure.assert_called_once_with(
+            api_key="relay-test-key",
+            base_url="https://relay.example.test/v1",
+            model="deepseek-chat",
+            protocol="chat_completions",
+        )
+
+    def test_model_connection_test_endpoint_reports_provider_result(self):
+        expected = {
+            "ok": True,
+            "provider": "自定义中转站 / OpenAI 兼容服务",
+            "model": "deepseek-chat",
+            "base_url": "https://relay.example.test/v1",
+            "configured_protocol": "auto",
+            "protocol_used": "chat_completions",
+            "latency_ms": 123,
+            "message": "模型连接成功，可以开始生成工作流",
+        }
+        with patch.object(WorkflowGenerator, "test_connection", return_value=expected):
+            response = self.client.post("/api/workflow-generator/test")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()["ok"])
+        self.assertEqual(response.json()["protocol_used"], "chat_completions")
 
     def test_generator_status_endpoint_is_available(self):
         response = self.client.get("/api/workflow-generator/status")
         self.assertEqual(response.status_code, 200)
         self.assertIn("configured", response.json())
-        self.assertEqual(response.json()["provider"], "OpenAI Responses API")
+        self.assertEqual(response.json()["provider"], "OpenAI 官方")
+        self.assertEqual(response.json()["protocol"], "auto")
+        self.assertEqual(response.json()["base_url"], "https://api.openai.com/v1")
         self.assertIn(".docx", response.json()["extensions"])
 
     def test_rejects_unsupported_file_before_calling_model(self):
