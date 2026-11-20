@@ -26,7 +26,7 @@ MAX_PDF_PAGES = 80
 MAX_GENERATED_NODES = 30
 MAX_GENERATED_EDGES = 60
 ALLOWED_EXTENSIONS = (".pdf", ".docx", ".txt", ".md")
-ALLOWED_TRIGGER_GESTURES = tuple(gesture for gesture in GESTURES if gesture != "Victory")
+ALLOWED_TRIGGER_GESTURES = tuple(GESTURES)
 _ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 _WORD_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 
