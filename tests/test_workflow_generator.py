@@ -290,7 +290,7 @@ class WorkflowGeneratorConfigurationTests(unittest.TestCase):
     def test_frontend_api_key_configuration_rejects_whitespace_and_line_breaks(self):
         with tempfile.TemporaryDirectory() as directory:
             generator = WorkflowGenerator(env_file=Path(directory) / ".env")
-            for invalid in ("", "sk-invalid key", "sk-invalid\\nOPENAI_MODEL=bad"):
+            for invalid in ("", "sk-invalid key", "sk-invalid" + chr(10) + "OPENAI_MODEL=bad", "sk-your-api-key"):
                 with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                     generator.configure_api_key(invalid)
 
