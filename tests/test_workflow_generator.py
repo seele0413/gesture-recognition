@@ -223,6 +223,21 @@ class WorkflowPlanCompilerTests(unittest.TestCase):
         self.assertEqual(external_page_control_issues(workflow, pages, "promo"), [])
 
 
+class WorkflowGeneratorConfigurationTests(unittest.TestCase):
+    def test_example_api_key_placeholder_is_not_treated_as_configured(self):
+        with tempfile.TemporaryDirectory() as directory:
+            env_file = Path(directory) / ".env"
+            env_file.write_text("OPENAI_API_KEY=sk-your-api-key\n", encoding="utf-8")
+            with patch.dict("os.environ", {"OPENAI_API_KEY": ""}):
+                generator = WorkflowGenerator(env_file=env_file)
+                self.assertFalse(generator.status()["configured"])
+                with self.assertRaises(ModelNotConfiguredError):
+                    generator.generate_plan("播放宣传片", "", "Open_Palm", {}, [])
+
+                env_file.write_text("OPENAI_API_KEY=sk-real-example-value\n", encoding="utf-8")
+                self.assertTrue(generator.status()["configured"])
+
+
 class WorkflowGeneratorClientTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
