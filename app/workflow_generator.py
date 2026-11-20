@@ -980,6 +980,10 @@ class WorkflowGenerator:
             headers={
                 "Authorization": "Bearer " + config["api_key"],
                 "Content-Type": "application/json",
+                "Accept": "application/json",
+                # Identify this legitimate API client explicitly. Cloudflare Error
+                # 1010 can block urllib's default Python-urllib User-Agent.
+                "User-Agent": "gesture-recognition/1.0 (+https://github.com/seele0413/gesture-recognition)",
             },
             method="POST",
         )
