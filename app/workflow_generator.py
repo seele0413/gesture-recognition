@@ -100,6 +100,17 @@ def _config_value(name: str, file_values: dict[str, str]) -> str:
     return os.environ.get(name, "").strip() or file_values.get(name, "").strip()
 
 
+def _api_key_is_configured(value: str) -> bool:
+    normalized = value.strip().lower()
+    return bool(normalized) and normalized not in {
+        "sk-your-api-key",
+        "your_api_key",
+        "your-openai-api-key",
+        "replace-me",
+        "changeme",
+    }
+
+
 def _safe_filename(filename: str | None) -> tuple[str, str]:
     raw = (filename or "").replace("\\", "/")
     name = raw.rsplit("/", 1)[-1].strip()
@@ -698,7 +709,7 @@ class WorkflowGenerator:
     def status(self) -> dict[str, Any]:
         config = self._configuration()
         return {
-            "configured": bool(config["api_key"]),
+            "configured": _api_key_is_configured(config["api_key"]),
             "provider": "OpenAI Responses API",
             "model": config["model"],
             "extensions": list(ALLOWED_EXTENSIONS),
@@ -715,7 +726,7 @@ class WorkflowGenerator:
         pages: list[dict[str, Any]],
     ) -> dict[str, Any]:
         config = self._configuration()
-        if not config["api_key"]:
+        if not _api_key_is_configured(config["api_key"]):
             raise ModelNotConfiguredError(
                 "尚未配置 OPENAI_API_KEY。请在项目根目录创建 .env，并按 .env.example 填写 API Key"
             )
