@@ -142,6 +142,24 @@ class ApiTests(unittest.TestCase):
         self.assertIn("page_id: pageId", registered_script)
         self.assertIn('type: "display:ready"', registered_script)
 
+    def test_video_workflow_actions_include_incremental_volume_controls(self):
+        actions = {
+            item["name"]: item
+            for item in self.client.get("/api/actions").json()["actions"]
+        }
+        self.assertIn("video.volume_up", actions)
+        self.assertIn("video.volume_down", actions)
+        self.assertFalse(actions["video.volume_up"]["idempotent"])
+        self.assertFalse(actions["video.volume_down"]["idempotent"])
+        self.assertEqual(actions["video.volume_up"]["schema"]["properties"], {})
+        self.assertEqual(actions["video.volume_down"]["schema"]["properties"], {})
+
+        player = self.client.get("/static/player.js").text
+        self.assertIn('case "video.volume_up":', player)
+        self.assertIn('case "video.volume_down":', player)
+        self.assertIn("video.volume + 0.1", player)
+        self.assertIn("video.volume - 0.1", player)
+
     def test_display_channel_requires_page_ready_before_workflow_control(self):
         initial = self.client.get("/api/workflow-status")
         self.assertEqual(initial.status_code, 200)

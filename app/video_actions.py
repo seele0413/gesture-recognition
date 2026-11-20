@@ -14,6 +14,10 @@ def register_video_actions(registry: ActionRegistry, store: ControlStore, adapte
         ("video.pause", no_params, [], True),
         ("video.seek", {"position_ms": {"type": "integer", "title": "位置（毫秒）", "minimum": 0, "maximum": 86400000}}, ["position_ms"], True),
         ("video.set_volume", {"volume": {"type": "number", "title": "音量", "minimum": 0, "maximum": 1}}, ["volume"], True),
+        # Relative controls are intentionally non-idempotent: each gesture moves
+        # the current volume by one step rather than setting a fixed value.
+        ("video.volume_up", no_params, [], False),
+        ("video.volume_down", no_params, [], False),
         ("video.mute", no_params, [], True),
         ("video.unmute", no_params, [], True),
         ("video.set_loop", {"enabled": {"type": "boolean", "title": "循环播放"}}, ["enabled"], True),

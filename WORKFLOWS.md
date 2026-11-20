@@ -90,7 +90,7 @@ flowchart LR
 
 定义必须有唯一起点、唯一 ID、可达节点和结束节点。循环不允许。条件节点必须各有一条 `true`、`false` 边；动作错误分支 `on_error: "branch"` 必须各有一条普通边和 `when: "error"` 边。自动重试最多 2 次，并且只对注册表标记为幂等的动作开放。`web.navigate_route` 必须直接连接到结束节点，因为离开外层展示控制中心后执行客户端会断开。`web.navigate_page` 只切换登记的展示 iframe，不会断开外层执行通道，可继续连接后续动作节点。
 
-工作流编辑器左侧的“手势工作流映射”面板汇总已保存工作流的启动手势、启用状态和目标页面。要用多个手势控制同一个登记页面，分别创建多个工作流并为它们分配不同的启动手势，再在动作节点中选择同一个页面或同一组页面动作。每个普通手势只能绑定一个已启用的工作流；重复触发器会在启用时被拒绝。设置页不再维护独立的全局手势映射表；旧版映射数据保留用于兼容回退。
+工作流编辑器左侧的“手势工作流映射”面板汇总已保存工作流的启动手势、启用状态和目标页面。要用多个手势控制同一个登记页面，分别创建多个工作流并为它们分配不同的启动手势，再在动作节点中选择同一个页面或同一组页面动作。例如，宣传片控制应拆为三个工作流：张开手掌 → 播放视频；竖拇指 → 音量增加；拇指向下 → 音量降低。每个普通手势只能绑定一个已启用的工作流；重复触发器会在启用时被拒绝。设置页不再维护独立的全局手势映射表；旧版映射数据保留用于兼容回退。
 
 AI 文档生成器的 API Key 可直接在 /workflows 的 AI 生成窗口填写。密钥由本机服务端写入项目根目录 .env（该文件已被 .gitignore 忽略），接口只返回是否已配置，不回传密钥。
 
@@ -128,7 +128,7 @@ AI 文档生成器的 API Key 可直接在 /workflows 的 AI 生成窗口填写�
 | `web.set_text` | `field`: headline / subhead / notice；`text` 最长 160 字符，使用 textContent 写入 |
 | `web.return_home` | 无 |
 
-视频动作：`video.load` 接收 `media_id`；`video.play`、`video.pause`、`video.mute`、`video.unmute` 无参数；`video.seek` 接收 0～86400000 的 `position_ms`；`video.set_volume` 接收 0～1 的 volume；`video.set_loop` 接收 boolean `enabled`。`video.load` 会先验证素材登记和文件存在，再向浏览器发送命令。默认素材 ID `company-promo` 兼容原宣传片。
+视频动作：`video.load` 接收 `media_id`；`video.play`、`video.pause`、`video.mute`、`video.unmute`、`video.volume_up`、`video.volume_down` 无参数；`video.seek` 接收 0～86400000 的 `position_ms`；`video.set_volume` 接收 0～1 的 volume；`video.set_loop` 接收 boolean `enabled`。`video.volume_up` / `video.volume_down` 每次将当前音量增加 / 降低 10 个百分点，范围限制在 0～100%；两者是非幂等动作，不支持自动重试。`video.load` 会先验证素材登记和文件存在，再向浏览器发送命令。默认素材 ID `company-promo` 兼容原宣传片。
 
 PPT 动作：`ppt.open_deck`、`ppt.start_slideshow`、`ppt.next_slide`、`ppt.previous_slide`、`ppt.goto_slide`、`ppt.end_slideshow`。每个动作都要求登记的 `deck_id`；跳转另需 `slide_number` 1～10000。所有 COM 调用在专用 STA 线程中执行。
 
