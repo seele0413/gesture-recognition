@@ -56,31 +56,36 @@ Python Launcher 找不到兼容解释器时，可指定已安装的解释器：
 
 ## AI 自动生成工作流
 
-工作流编辑器提供“AI 生成”入口，可上传业务流程文档并自动生成节点与连线。首次运行 `.\setup.ps1` 时，安装脚本会在项目根目录不存在 `.env` 的情况下，从 `.env.example` 创建本地配置文件。打开 `.env`，填写自己的 OpenAI API Key：
+工作流编辑器提供“AI 生成”入口，可上传业务流程文档并自动生成节点与连线。首次运行 `.\\setup.ps1` 时，安装脚本会在项目根目录不存在 `.env` 的情况下，从 `.env.example` 创建本地配置文件。也可以直接在 `/workflows` 的 AI 生成弹窗中配置模型服务：填写 API Key、API Base URL、模型名称，选择自动兼容、Chat Completions 或 Responses 协议，并先测试连接。
+
+默认 OpenAI 配置示例：
 
 ```dotenv
 OPENAI_API_KEY=你的_API_Key
-OPENAI_MODEL=gpt-4o-mini
 OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_MODEL=gpt-4o-mini
+OPENAI_API_PROTOCOL=auto
 ```
 
-保存后刷新 `/workflows` 页面即可使用。API Key 只保存在本机被 Git 忽略的 `.env` 文件中；不要把密钥提交到仓库。OpenAI API 按 API 账户用量单独计费，不包含在 ChatGPT 订阅中。
+使用中转站时，将 `OPENAI_BASE_URL` 替换为中转站提供的兼容接口根地址，将 `OPENAI_MODEL` 改为中转站支持的模型 ID。自动兼容模式优先使用 Chat Completions；若服务商不支持该接口路径，则尝试 Responses。若不支持 JSON Schema，会降级为 JSON Object 或普通 JSON 提示。API Key 只保存在本机被 Git 忽略的 `.env` 文件中；不要把密钥提交到仓库。API 调用费用按所选服务商账户用量计费，不包含在 ChatGPT 订阅中。
 
 使用步骤：
 
 1. 打开 `/workflows`，点击“AI 生成”。
 2. 上传 PDF、DOCX、TXT 或 Markdown 文档（单个文件不超过 5 MB）；扫描版 PDF 暂不支持 OCR。
 3. 选择默认启动手势，并填写补充要求，例如“播放宣传片结束后跳转到公司简介，再等待访客选择产品”。
-4. 点击“解析并生成草稿”。系统提取正文后，结合当前已注册动作、动作参数规则和 SQLite 中已登记的展示页面，调用 OpenAI Responses API 的 JSON Schema Structured Outputs 生成工作流结构。
+4. 点击“解析并生成草稿”。系统提取正文后，结合当前已注册动作、动作参数规则和 SQLite 中已登记的展示页面，通过已配置的 OpenAI 兼容模型服务生成工作流结构。
 5. 查看摘要、校验错误、生成假设和待确认问题。点击“应用到画布”后，生成结果只进入当前页面的未保存草稿；检查参数、连线和页面跳转，运行校验与模拟，最后手动点击“保存”。
 6. 只有在保存后，才会创建工作流记录。生成过程不会自动保存、启用或执行工作流。
 
 生成器只允许引用项目已注册动作和已登记页面 ID，不会接收模型生成的任意 URL、文件路径或代码。生成结果还会经过现有 WorkflowEngine 校验；本地页面控制动作不能接在外部网页导航之后，除非先返回本地展示主页。节点数量上限为 30，连线数量上限为 60。模型配置缺失、文件格式错误、文档过大和模型服务错误都会返回可读提示。
 
-**文档隐私：** 上传文档正文会发送到你配置的 OpenAI API 服务进行分析；文件本身不会写入项目磁盘或数据库。不要上传未经授权的商业秘密、个人信息或涉密资料。API Key 由用户自行提供和管理。
+**文档隐私：** 上传文档正文会发送到你配置的模型服务商进行分析；文件本身不会写入项目磁盘或数据库。不要上传未经授权的商业秘密、个人信息或涉密资料。API Key 由用户自行提供和管理。
 
 本机接口：
-- `GET /api/workflow-generator/status`：检查模型配置和上传限制。
+- `GET /api/workflow-generator/status`：检查模型配置和上传限制，不返回 API Key。
+- `PUT /api/workflow-generator/config`：保存 API Key、Base URL、模型名称和接口协议。
+- `POST /api/workflow-generator/test`：测试当前表单中的模型连接，不会自动保存配置。
 - `POST /api/workflows/generate`：以 multipart/form-data 上传 `file`，可选 `instructions` 和 `preferred_trigger`；返回未保存工作流草稿、校验结果、警告和待确认问题。
 
 ## 增加展示主页
