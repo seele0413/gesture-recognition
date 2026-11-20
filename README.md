@@ -56,19 +56,19 @@ Python Launcher 找不到兼容解释器时，可指定已安装的解释器：
 
 ## AI 自动生成工作流
 
-工作流编辑器提供“AI 生成”入口，可上传业务流程文档并自动生成节点与连线。首次运行 \`.\setup.ps1\` 时，安装脚本会在项目根目录不存在 \`.env\` 的情况下，从 \`.env.example\` 创建本地配置文件。打开 \`.env\`，填写自己的 OpenAI API Key：
+工作流编辑器提供“AI 生成”入口，可上传业务流程文档并自动生成节点与连线。首次运行 `.\setup.ps1` 时，安装脚本会在项目根目录不存在 `.env` 的情况下，从 `.env.example` 创建本地配置文件。打开 `.env`，填写自己的 OpenAI API Key：
 
-\`\`\`dotenv
+```dotenv
 OPENAI_API_KEY=你的_API_Key
 OPENAI_MODEL=gpt-4o-mini
 OPENAI_BASE_URL=https://api.openai.com/v1
-\`\`\`
+```
 
-保存后刷新 \`/workflows\` 页面即可使用。API Key 只保存在本机被 Git 忽略的 \`.env\` 文件中；不要把密钥提交到仓库。OpenAI API 按 API 账户用量单独计费，不包含在 ChatGPT 订阅中。
+保存后刷新 `/workflows` 页面即可使用。API Key 只保存在本机被 Git 忽略的 `.env` 文件中；不要把密钥提交到仓库。OpenAI API 按 API 账户用量单独计费，不包含在 ChatGPT 订阅中。
 
 使用步骤：
 
-1. 打开 \`/workflows\`，点击“AI 生成”。
+1. 打开 `/workflows`，点击“AI 生成”。
 2. 上传 PDF、DOCX、TXT 或 Markdown 文档（单个文件不超过 5 MB）；扫描版 PDF 暂不支持 OCR。
 3. 选择默认启动手势，并填写补充要求，例如“播放宣传片结束后跳转到公司简介，再等待访客选择产品”。
 4. 点击“解析并生成草稿”。系统提取正文后，结合当前已注册动作、动作参数规则和 SQLite 中已登记的展示页面，调用 OpenAI Responses API 的 JSON Schema Structured Outputs 生成工作流结构。
@@ -80,8 +80,8 @@ OPENAI_BASE_URL=https://api.openai.com/v1
 **文档隐私：** 上传文档正文会发送到你配置的 OpenAI API 服务进行分析；文件本身不会写入项目磁盘或数据库。不要上传未经授权的商业秘密、个人信息或涉密资料。API Key 由用户自行提供和管理。
 
 本机接口：
-- \`GET /api/workflow-generator/status\`：检查模型配置和上传限制。
-- \`POST /api/workflows/generate\`：以 multipart/form-data 上传 \`file\`，可选 \`instructions\` 和 \`preferred_trigger\`；返回未保存工作流草稿、校验结果、警告和待确认问题。
+- `GET /api/workflow-generator/status`：检查模型配置和上传限制。
+- `POST /api/workflows/generate`：以 multipart/form-data 上传 `file`，可选 `instructions` 和 `preferred_trigger`；返回未保存工作流草稿、校验结果、警告和待确认问题。
 
 ## 增加展示主页
 
