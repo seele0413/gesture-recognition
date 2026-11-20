@@ -515,10 +515,11 @@
   background: #f7faf7;
 }
 .workflow-generator-config-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.workflow-generator-config-heading label { color: #465247; font-size: 11px; font-weight: 650; }
+.workflow-generator-config-heading strong,
+.workflow-generator-config > label { color: #465247; font-size: 11px; font-weight: 650; }
 .workflow-generator-key-state { color: #8a7660; font-size: 10px; }
-.workflow-generator-key-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 7px; }
-.workflow-generator-key-row input {
+.workflow-generator-config > input {
+  width: 100%;
   min-width: 0;
   min-height: 34px;
   padding: 7px 9px;
@@ -526,12 +527,26 @@
   border-radius: 3px;
   color: #29312b;
   background: #fff;
+  font: inherit;
   font-size: 12px;
 }
-.workflow-generator-key-row input:focus { outline: 2px solid rgba(70, 108, 85, .2); border-color: #6b8d72; }
+.workflow-generator-config > input:focus,
+.workflow-generator-config > select:focus { outline: 2px solid rgba(70, 108, 85, .2); border-color: #6b8d72; }
+.workflow-generator-config > select {
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 9px;
+  border: 1px solid #cbd5cb;
+  border-radius: 3px;
+  color: #29312b;
+  background: #fff;
+  font: inherit;
+  font-size: 12px;
+}
 .workflow-generator-config > small { color: #79837b; font-size: 10px; line-height: 1.5; }
+.workflow-generator-config-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
 
 @media (max-width: 540px) {
-  .workflow-generator-key-row { grid-template-columns: minmax(0, 1fr); }
-  .workflow-generator-key-row .tool-button { width: 100%; }
+  .workflow-generator-config-actions { display: grid; grid-template-columns: 1fr; }
+  .workflow-generator-config-actions .tool-button { width: 100%; }
 }
