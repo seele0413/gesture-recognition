@@ -431,6 +431,8 @@ class WorkflowGeneratorConfigurationTests(unittest.TestCase):
             def opener(request, timeout):
                 captured["url"] = request.full_url
                 captured["payload"] = json.loads(request.data.decode("utf-8"))
+                captured["user_agent"] = request.get_header("User-agent")
+                captured["accept"] = request.get_header("Accept")
                 return FakeResponse({
                     "choices": [{"message": {"content": "connection_ok"}}],
                 })
@@ -452,6 +454,11 @@ class WorkflowGeneratorConfigurationTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["protocol"], "chat_completions")
         self.assertEqual(captured["url"], "https://gateway.example/v1/chat/completions")
+        self.assertEqual(
+            captured["user_agent"],
+            "gesture-recognition/1.0 (+https://github.com/seele0413/gesture-recognition)",
+        )
+        self.assertEqual(captured["accept"], "application/json")
         self.assertFalse(env_file.exists())
 
     def test_configure_saves_provider_settings_and_preserves_unrelated_values(self):
