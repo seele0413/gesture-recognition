@@ -70,7 +70,7 @@ def sample_plan():
 
 class DocumentExtractionTests(unittest.TestCase):
     def test_extracts_utf8_text_and_normalizes_whitespace(self):
-        result = extract_document_text("需求.md", b"\xef\xbb\xbf# 展厅流程\r\n\r\n播放宣传片  \r\n")
+        result = extract_document_text("需求.md", "\ufeff# 展厅流程\r\n\r\n播放宣传片  \r\n".encode("utf-8"))
         self.assertEqual(result["filename"], "需求.md")
         self.assertEqual(result["extension"], ".md")
         self.assertIn("# 展厅流程", result["text"])
