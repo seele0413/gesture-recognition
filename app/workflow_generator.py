@@ -551,8 +551,14 @@ def compile_workflow_plan(plan: dict[str, Any]) -> tuple[dict[str, Any], list[st
             item["when"] = edge["when"]
         edges.append(item)
 
-    warnings = [str(item)[:500] for item in plan.get("warnings", []) if isinstance(item, str)][:20]
-    questions = [str(item)[:500] for item in plan.get("questions", []) if isinstance(item, str)][:20]
+    raw_warnings = plan.get("warnings", [])
+    raw_questions = plan.get("questions", [])
+    if not isinstance(raw_warnings, list):
+        raw_warnings = []
+    if not isinstance(raw_questions, list):
+        raw_questions = []
+    warnings = [item[:500] for item in raw_warnings if isinstance(item, str)][:20]
+    questions = [item[:500] for item in raw_questions if isinstance(item, str)][:20]
 
     end_nodes = [node for node in nodes if node["type"] == "end"]
     if end_nodes:
@@ -660,13 +666,26 @@ def external_page_control_issues(
         if isinstance(page, dict) and page.get("enabled", True)
     }
     default_type = page_types.get(default_page_id)
-    nodes = {node["id"]: node for node in workflow.get("nodes", []) if isinstance(node, dict) and isinstance(node.get("id"), str)}
+    raw_nodes = workflow.get("nodes")
+    if not isinstance(raw_nodes, list):
+        raw_nodes = []
+    nodes = {
+        node["id"]: node
+        for node in raw_nodes
+        if isinstance(node, dict) and isinstance(node.get("id"), str)
+    }
     adjacency: dict[str, list[str]] = defaultdict(list)
     incoming: set[str] = set()
-    for edge in workflow.get("edges", []):
-        if edge.get("source") in nodes and edge.get("target") in nodes:
-            adjacency[edge["source"]].append(edge["target"])
-            incoming.add(edge["target"])
+    raw_edges = workflow.get("edges")
+    if not isinstance(raw_edges, list):
+        raw_edges = []
+    for edge in raw_edges:
+        if not isinstance(edge, dict):
+            continue
+        source, target = edge.get("source"), edge.get("target")
+        if isinstance(source, str) and isinstance(target, str) and source in nodes and target in nodes:
+            adjacency[source].append(target)
+            incoming.add(target)
     roots = [node_id for node_id in nodes if node_id not in incoming]
     queue = deque((root, default_type) for root in roots)
     visited: set[tuple[str, str | None]] = set()
@@ -683,6 +702,8 @@ def external_page_control_issues(
         if node.get("type") == "action":
             action = node.get("action")
             params = node.get("params", {})
+            if not isinstance(params, dict):
+                params = {}
             if action == "web.navigate_page":
                 next_page_type = page_types.get(params.get("page_id"))
             elif action == "web.return_home":
@@ -830,6 +851,8 @@ class WorkflowGenerator:
             response_data = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
             raise ModelRequestError("模型服务返回了无法解析的响应") from error
+        if not isinstance(response_data, dict):
+            raise ModelRequestError("模型服务返回的响应结构无效")
         if response_data.get("status") == "incomplete":
             raise ModelRequestError("模型输出不完整，请缩短文档或减少流程复杂度后重试")
         output_text = _extract_response_text(response_data)
