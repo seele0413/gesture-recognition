@@ -608,7 +608,7 @@ class VisionProcessor:
             self.gate.reset()
             for hand in hands:
                 if hand["track_id"] == track_id:
-                    hand["action_reason"] = "手势指针模式已启用，普通手势映射暂时暂停"
+                    hand["action_reason"] = "手势指针模式已启用，普通手势工作流触发暂时暂停"
                     hand["reason_code"] = "pointer_mode"
             return []
 
