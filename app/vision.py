@@ -651,6 +651,7 @@ class VisionProcessor:
                     {"x": float(point.x), "y": float(point.y), "z": float(point.z)}
                     for point in hand["landmarks"]
                 ],
+                workflow_triggered=True,
             )
             if self.session_id:
                 self.store.record_gesture(self.session_id, event)
