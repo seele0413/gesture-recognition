@@ -962,7 +962,7 @@ class WorkflowGenerator:
             # Some relays/CDNs return plain text or an HTML access-denied page
             # instead of an OpenAI-compatible JSON error object.
             message = re.sub(r"<[^>]*>", " ", raw_text)
-            message = html.unescape(re.sub(r"\\s+", " ", message)).strip()
+            message = html.unescape(re.sub(r"\s+", " ", message)).strip()
         if not message:
             message = "上游返回了无法识别的错误响应"
 
