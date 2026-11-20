@@ -14,6 +14,7 @@ from app.workflow import new_workflow
 from app.workflow_generator import (
     DocumentParseError,
     ModelNotConfiguredError,
+    ModelRequestError,
     WorkflowGenerationError,
     WorkflowGenerator,
     build_generated_workflow,
@@ -480,6 +481,42 @@ class WorkflowGeneratorConfigurationTests(unittest.TestCase):
         self.assertIn("OPENAI_MODEL=qwen-plus", saved)
         self.assertIn("OPENAI_API_PROTOCOL=chat_completions", saved)
         self.assertIn("OTHER_SETTING=keep", saved)
+
+    def test_provider_error_messages_redact_the_configured_api_key(self):
+        secret = "sk-secret-test-value-123456"
+        with tempfile.TemporaryDirectory() as directory:
+            env_file = Path(directory) / ".env"
+            env_file.write_text(
+                f"OPENAI_API_KEY={secret}\nOPENAI_MODEL=relay-model\n"
+                "OPENAI_BASE_URL=https://relay.example.test/v1\n"
+                "OPENAI_API_PROTOCOL=chat_completions\n",
+                encoding="utf-8",
+            )
+
+            def opener(request, timeout):
+                body = json.dumps({
+                    "error": {"message": "Incorrect API key provided: " + secret}
+                }).encode("utf-8")
+                raise urllib.error.HTTPError(
+                    request.full_url,
+                    401,
+                    "Unauthorized",
+                    {},
+                    io.BytesIO(body),
+                )
+
+            with patch.dict("os.environ", {
+                "OPENAI_API_KEY": "",
+                "OPENAI_MODEL": "",
+                "OPENAI_BASE_URL": "",
+                "OPENAI_API_PROTOCOL": "",
+            }):
+                generator = WorkflowGenerator(env_file=env_file, opener=opener)
+                with self.assertRaises(ModelRequestError) as caught:
+                    generator.test_connection()
+
+        self.assertNotIn(secret, str(caught.exception))
+        self.assertIn("[密钥已隐藏]", str(caught.exception))
 
     def test_responses_api_request_uses_strict_schema_and_parses_output(self):
         with tempfile.TemporaryDirectory() as directory:
