@@ -31,6 +31,7 @@ class WorkflowValidatorTests(unittest.TestCase):
 
     def test_page_scope_accepts_registered_pages_and_rejects_unknown_pages(self):
         workflow = new_workflow()
+        workflow["nodes"][0].update({"action": "test.record", "params": {"value": 0}})
         workflow["trigger"]["page_scope"] = "promo"
         self.assertEqual(
             validate_workflow(workflow, self.registry.schema_map(), set(DISPLAY_PAGE_IDS)),
