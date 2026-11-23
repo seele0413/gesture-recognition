@@ -92,6 +92,7 @@ const NODE_LABELS = { action: "动作", condition: "条件", delay: "延迟", wa
 const NODE_TYPES = ["action", "condition", "delay", "wait_event", "end"];
 
 let workflows = [];
+let displayPages = [];
 let workflow = null;
 let workflowIsDraft = false;
 let generatedWorkflowPreview = null;
@@ -761,11 +762,62 @@ function workflowTriggerLabel(trigger) {
   return "主控锁定";
 }
 
+function displayPageLabel(pageId) {
+  const pagesById = new Map(displayPages.map((page) => [page.page_id, page]));
+  const names = [];
+  const visited = new Set();
+  let page = pagesById.get(pageId);
+  while (page && !visited.has(page.page_id)) {
+    visited.add(page.page_id);
+    names.unshift(page.title || page.page_id);
+    page = page.parent_id ? pagesById.get(page.parent_id) : null;
+  }
+  return names.join(" / ") || pageId || "未知主页";
+}
+
+function workflowPageScopeLabel(trigger) {
+  const scope = trigger?.page_scope || "global";
+  return scope === "global" ? "全局" : displayPageLabel(scope);
+}
+
+function pageScopeControl(trigger) {
+  const label = make("label", "trigger-page-scope-control");
+  label.append(make("span", "", "适用主页"));
+  const select = make("select", "trigger-page-scope-select");
+  select.setAttribute("aria-label", "选择手势工作流适用主页");
+
+  const globalOption = make("option", "", "全局（所有展示主页）");
+  globalOption.value = "global";
+  select.append(globalOption);
+
+  for (const page of displayPages) {
+    const suffix = page.enabled ? "" : "（已停用）";
+    const option = make("option", "", displayPageLabel(page.page_id) + suffix);
+    option.value = page.page_id;
+    select.append(option);
+  }
+
+  const currentScope = trigger.page_scope || "global";
+  if (currentScope !== "global" && !displayPages.some((page) => page.page_id === currentScope)) {
+    const missing = make("option", "", "未登记主页：" + currentScope);
+    missing.value = currentScope;
+    select.append(missing);
+  }
+  select.value = currentScope;
+  select.addEventListener("change", () => {
+    trigger.page_scope = select.value;
+    renderCanvas();
+    renderGestureWorkflowMap();
+  });
+  label.append(select);
+  return label;
+}
+
 function workflowTargetLabel(definition) {
   const nodes = Array.isArray(definition.nodes) ? definition.nodes : [];
   const navigation = nodes.find((node) => node.type === "action" && node.action === "web.navigate_page");
   const pageId = navigation?.params?.page_id;
-  if (pageId) return "目标页面 · " + pageId;
+  if (pageId) return "目标页面 · " + displayPageLabel(pageId);
   if (nodes.some((node) => node.type === "action" && String(node.action || "").startsWith("web."))) {
     return "当前展示页面";
   }
@@ -785,7 +837,11 @@ function renderGestureWorkflowMap() {
     row.type = "button";
     row.dataset.active = String(item.id === workflow?.id);
     row.title = "打开工作流：" + item.name;
-    const trigger = make("span", "gesture-map-trigger", workflowTriggerLabel(item.trigger));
+    const trigger = make(
+      "span",
+      "gesture-map-trigger",
+      workflowPageScopeLabel(item.trigger) + " · " + workflowTriggerLabel(item.trigger),
+    );
     const name = make("span", "gesture-map-name", item.name);
     const state = make(
       "span",
@@ -802,9 +858,14 @@ function renderGestureWorkflowMap() {
 }
 
 async function reloadWorkflowList() {
-  const response = await api("/api/workflows");
+  const [response, pageResponse] = await Promise.all([
+    api("/api/workflows"),
+    api("/api/display/pages?include_disabled=true"),
+  ]);
   workflows = response.workflows;
+  displayPages = Array.isArray(pageResponse.pages) ? pageResponse.pages : [];
   renderWorkflowOptions();
+  if (workflow && !workflowIsDraft) renderTrigger();
 }
 
 async function loadWorkflow(workflowId) {
@@ -1002,7 +1063,7 @@ function renderTrigger() {
   if (trigger.type === "gesture_trigger") {
     const select = gestureSelect(trigger.gesture);
     select.addEventListener("change", () => { trigger.gesture = select.value; renderCanvas(); });
-    ui.triggerFields.append(select);
+    ui.triggerFields.append(pageScopeControl(trigger), select);
   } else if (trigger.type === "gesture_sequence_trigger") {
     const input = make("input");
     input.type = "text";
@@ -1018,13 +1079,16 @@ function renderTrigger() {
     windowInput.value = String(trigger.sequence_window_ms || 5000);
     windowInput.setAttribute("aria-label", "序列时间窗口毫秒");
     windowInput.addEventListener("change", () => { trigger.sequence_window_ms = Number(windowInput.value); });
-    ui.triggerFields.append(input, windowInput);
+    ui.triggerFields.append(pageScopeControl(trigger), input, windowInput);
   }
-  ui.triggerBadge.textContent = trigger.type === "gesture_trigger"
+  const triggerLabel = trigger.type === "gesture_trigger"
     ? "手势 · " + (GESTURE_LABELS[trigger.gesture] || trigger.gesture)
     : trigger.type === "gesture_sequence_trigger"
       ? trigger.gestures.map((gesture) => GESTURE_LABELS[gesture] || gesture).join(" → ")
       : "主控锁定";
+  ui.triggerBadge.textContent = trigger.type === "controller_locked"
+    ? triggerLabel
+    : triggerLabel + " · " + workflowPageScopeLabel(trigger);
 }
 
 function gestureSelect(value) {
@@ -1458,7 +1522,7 @@ async function createWorkflow() {
   const now = new Date().toISOString();
   const starter = {
     schema_version: 1, id, name: "新建工作流", description: "", enabled: false,
-    trigger: { type: "gesture_trigger", gesture: "Open_Palm" },
+    trigger: { type: "gesture_trigger", gesture: "Open_Palm", page_scope: "global" },
     nodes: [
       { id: "play", type: "action", action: "video.play", params: {}, timeout_ms: 3000, on_error: "stop", position: { x: 170, y: 80 } },
       { id: "end", type: "end", params: {}, position: { x: 470, y: 80 } },
@@ -1871,9 +1935,10 @@ async function initialize() {
 
   // Load the action catalogue and saved workflows independently. A failure in
   // one optional panel must not leave the whole editor in its static loading state.
-  const [actionResult, workflowResult] = await Promise.allSettled([
+  const [actionResult, workflowResult, pageResult] = await Promise.allSettled([
     api("/api/actions"),
     api("/api/workflows"),
+    api("/api/display/pages?include_disabled=true"),
   ]);
 
   if (actionResult.status === "fulfilled" && Array.isArray(actionResult.value.actions)) {
@@ -1884,6 +1949,13 @@ async function initialize() {
     renderActionLibrary();
     ui.actionLibrary.append(make("p", "muted", "动作加载失败；请检查服务连接后刷新"));
     errors.push("动作列表加载失败：" + (actionResult.reason?.message || "响应格式无效"));
+  }
+
+  if (pageResult.status === "fulfilled" && Array.isArray(pageResult.value.pages)) {
+    displayPages = pageResult.value.pages;
+  } else {
+    displayPages = [];
+    errors.push("展示主页列表加载失败：" + (pageResult.reason?.message || "响应格式无效"));
   }
 
   if (workflowResult.status === "fulfilled" && Array.isArray(workflowResult.value.workflows)) {
@@ -1967,8 +2039,8 @@ ui.workflowDescription.addEventListener("input", updateHeaderData);
 ui.triggerType.addEventListener("change", () => {
   if (!workflow) return;
   const type = ui.triggerType.value;
-  workflow.trigger = type === "gesture_trigger" ? { type, gesture: "Open_Palm" }
-    : type === "gesture_sequence_trigger" ? { type, gestures: ["Open_Palm", "Victory"], sequence_window_ms: 5000 }
+  workflow.trigger = type === "gesture_trigger" ? { type, gesture: "Open_Palm", page_scope: "global" }
+    : type === "gesture_sequence_trigger" ? { type, gestures: ["Open_Palm", "Victory"], sequence_window_ms: 5000, page_scope: "global" }
       : { type };
   renderTrigger();
   renderCanvas();
