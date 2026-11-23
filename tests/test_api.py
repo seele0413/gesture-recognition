@@ -536,6 +536,54 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.client.post(f"/api/workflows/{workflow_id}/disable").status_code, 200)
         self.assertEqual(self.client.delete(f"/api/workflows/{workflow_id}").status_code, 200)
 
+    def test_page_scoped_gesture_workflows_can_share_gestures_across_pages(self):
+        global_workflow = new_workflow("全局张开手掌")
+        global_workflow["trigger"] = {
+            "type": "gesture_trigger", "gesture": "Open_Palm", "page_scope": "global",
+        }
+        global_created = self.client.post("/api/workflows", json=global_workflow)
+        self.assertEqual(global_created.status_code, 201, global_created.text)
+        global_id = global_created.json()["workflow"]["id"]
+        self.assertEqual(self.client.post(f"/api/workflows/{global_id}/enable").status_code, 200)
+
+        promo_workflow = new_workflow("宣传片张开手掌")
+        promo_workflow["trigger"] = {
+            "type": "gesture_trigger", "gesture": "Open_Palm", "page_scope": "promo",
+        }
+        promo_created = self.client.post("/api/workflows", json=promo_workflow)
+        self.assertEqual(promo_created.status_code, 201, promo_created.text)
+        promo_id = promo_created.json()["workflow"]["id"]
+        self.assertEqual(self.client.post(f"/api/workflows/{promo_id}/enable").status_code, 200)
+
+        factory_workflow = new_workflow("工厂张开手掌")
+        factory_workflow["trigger"] = {
+            "type": "gesture_trigger", "gesture": "Open_Palm", "page_scope": "factory",
+        }
+        factory_created = self.client.post("/api/workflows", json=factory_workflow)
+        self.assertEqual(factory_created.status_code, 201, factory_created.text)
+        factory_id = factory_created.json()["workflow"]["id"]
+        self.assertEqual(self.client.post(f"/api/workflows/{factory_id}/enable").status_code, 200)
+
+        duplicate = new_workflow("重复宣传片手势")
+        duplicate["trigger"] = {
+            "type": "gesture_trigger", "gesture": "Open_Palm", "page_scope": "promo",
+        }
+        duplicate_created = self.client.post("/api/workflows", json=duplicate)
+        self.assertEqual(duplicate_created.status_code, 201, duplicate_created.text)
+        duplicate_id = duplicate_created.json()["workflow"]["id"]
+        self.assertEqual(self.client.post(f"/api/workflows/{duplicate_id}/enable").status_code, 409)
+
+        factory_saved = self.client.get(f"/api/workflows/{factory_id}").json()["workflow"]
+        factory_saved["trigger"]["page_scope"] = "promo"
+        conflict_update = self.client.put(f"/api/workflows/{factory_id}", json=factory_saved)
+        self.assertEqual(conflict_update.status_code, 409)
+
+        invalid_scope = new_workflow("未登记主页")
+        invalid_scope["trigger"]["page_scope"] = "not-registered"
+        invalid_response = self.client.post("/api/workflows", json=invalid_scope)
+        self.assertEqual(invalid_response.status_code, 400)
+        self.assertIn("适用主页未登记", invalid_response.text)
+
     def test_workflow_api_rejects_unregistered_actions_and_media_paths(self):
         workflow = new_workflow("无效动作")
         workflow["nodes"][0].update({"action": "video.load", "params": {"media_id": "..\\secret.mp4"}})
