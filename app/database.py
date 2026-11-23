@@ -747,6 +747,9 @@ class ControlStore:
                     definition = json.loads(item["definition_json"])
                 except (TypeError, json.JSONDecodeError):
                     continue
+                trigger = definition.get("trigger") if isinstance(definition, dict) else None
+                if isinstance(trigger, dict) and trigger.get("page_scope") == page_id:
+                    raise ValueError("该页面仍被手势工作流适用范围引用，请先修改或删除相关工作流")
                 for node in definition.get("nodes", []) if isinstance(definition, dict) else []:
                     params = node.get("params") if isinstance(node, dict) else None
                     if isinstance(params, dict) and params.get("page_id") == page_id:
