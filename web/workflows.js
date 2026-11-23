@@ -780,6 +780,15 @@ function workflowPageScopeLabel(trigger) {
   return scope === "global" ? "全局" : displayPageLabel(scope);
 }
 
+function workflowTriggerBadgeLabel(trigger) {
+  const label = trigger.type === "gesture_trigger"
+    ? "手势 · " + (GESTURE_LABELS[trigger.gesture] || trigger.gesture)
+    : trigger.type === "gesture_sequence_trigger"
+      ? trigger.gestures.map((gesture) => GESTURE_LABELS[gesture] || gesture).join(" → ")
+      : "主控锁定";
+  return trigger.type === "controller_locked" ? label : label + " · " + workflowPageScopeLabel(trigger);
+}
+
 function pageScopeControl(trigger) {
   const label = make("label", "trigger-page-scope-control");
   label.append(make("span", "", "适用主页"));
@@ -806,6 +815,7 @@ function pageScopeControl(trigger) {
   select.value = currentScope;
   select.addEventListener("change", () => {
     trigger.page_scope = select.value;
+    ui.triggerBadge.textContent = workflowTriggerBadgeLabel(trigger);
     renderCanvas();
     renderGestureWorkflowMap();
   });
@@ -1081,14 +1091,7 @@ function renderTrigger() {
     windowInput.addEventListener("change", () => { trigger.sequence_window_ms = Number(windowInput.value); });
     ui.triggerFields.append(pageScopeControl(trigger), input, windowInput);
   }
-  const triggerLabel = trigger.type === "gesture_trigger"
-    ? "手势 · " + (GESTURE_LABELS[trigger.gesture] || trigger.gesture)
-    : trigger.type === "gesture_sequence_trigger"
-      ? trigger.gestures.map((gesture) => GESTURE_LABELS[gesture] || gesture).join(" → ")
-      : "主控锁定";
-  ui.triggerBadge.textContent = trigger.type === "controller_locked"
-    ? triggerLabel
-    : triggerLabel + " · " + workflowPageScopeLabel(trigger);
+  ui.triggerBadge.textContent = workflowTriggerBadgeLabel(trigger);
 }
 
 function gestureSelect(value) {
