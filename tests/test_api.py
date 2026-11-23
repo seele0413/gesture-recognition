@@ -654,7 +654,8 @@ class ApiTests(unittest.TestCase):
         self.assertIn('id="gestureWorkflowMap"', workflow_page)
         self.assertIn('id="workflowGeneratorApiKey"', workflow_page)
         self.assertIn("/static/pointer-event-buffer.js?v=20261118-workflow-fix-1", workflow_page)
-        self.assertIn("/static/workflows.js?v=20261120-multiprovider-ai-1", workflow_page)
+        self.assertIn("/static/workflows.js?v=20261123-page-scope-1", workflow_page)
+        self.assertIn("/static/workflows.css?v=20261123-page-scope-1", workflow_page)
         self.assertIn("/api/workflows", self.client.get("/static/workflows.js").text)
         self.assertEqual(
             self.client.get("/api/media-assets").json()["media_assets"][0]["id"],
