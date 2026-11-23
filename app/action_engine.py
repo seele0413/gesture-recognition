@@ -183,7 +183,7 @@ class WorkflowEngine:
         for definition in self.store.get_workflows(enabled_only=True):
             trigger = definition["trigger"]
             trigger_type = trigger.get("type")
-            if trigger_type not in {"gesture_trigger", "gesture_sequence_trigger"}:
+            if trigger_type not in ("gesture_trigger", "gesture_sequence_trigger"):
                 continue
             page_scope = trigger.get("page_scope", "global")
             if page_scope != "global" and page_scope != self._display_page_id:
