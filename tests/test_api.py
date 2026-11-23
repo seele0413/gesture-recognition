@@ -584,6 +584,24 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(invalid_response.status_code, 400)
         self.assertIn("适用主页未登记", invalid_response.text)
 
+    def test_display_page_cannot_be_deleted_while_a_gesture_scope_references_it(self):
+        created = self.client.post("/api/display/pages", json={
+            "page_id": "gesture_scope_page",
+            "title": "手势作用域测试页",
+            "url": "https://www.zhcomking.com/gesture-scope/",
+            "parent_id": "company_website",
+        })
+        self.assertEqual(created.status_code, 201, created.text)
+
+        workflow = new_workflow("页面作用域引用")
+        workflow["trigger"]["page_scope"] = "gesture_scope_page"
+        saved = self.client.post("/api/workflows", json=workflow)
+        self.assertEqual(saved.status_code, 201, saved.text)
+
+        blocked = self.client.delete("/api/display/pages/gesture_scope_page")
+        self.assertEqual(blocked.status_code, 409)
+        self.assertIn("手势工作流适用范围", blocked.text)
+
     def test_workflow_api_rejects_unregistered_actions_and_media_paths(self):
         workflow = new_workflow("无效动作")
         workflow["nodes"][0].update({"action": "video.load", "params": {"media_id": "..\\secret.mp4"}})
