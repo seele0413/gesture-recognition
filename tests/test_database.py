@@ -2,6 +2,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 
 from app.control import DEFAULT_MAPPINGS, LEGACY_DEFAULT_MAPPINGS
@@ -32,7 +33,7 @@ class ControlStoreTests(unittest.TestCase):
 
     def test_seed_version_backfills_official_website_children_once_without_overwriting_edits(self):
         self.store.update_display_page("company_website", {"title": "自定义官网标题"})
-        with sqlite3.connect(self.path) as connection:
+        with closing(sqlite3.connect(self.path)) as connection, connection:
             connection.execute("DELETE FROM display_pages WHERE page_id = ?", ("company_storage",))
             connection.execute(
                 "UPDATE settings SET value = ? WHERE key = ?",
@@ -47,7 +48,7 @@ class ControlStoreTests(unittest.TestCase):
             "自定义官网标题 / 产品中心 / 储能系列产品",
         )
 
-        with sqlite3.connect(self.path) as connection:
+        with closing(sqlite3.connect(self.path)) as connection, connection:
             connection.execute("DELETE FROM display_pages WHERE page_id = ?", ("company_storage",))
         reopened = ControlStore(self.path)
         self.assertIsNone(reopened.get_display_page("company_storage"))
@@ -56,7 +57,7 @@ class ControlStoreTests(unittest.TestCase):
         legacy_path = Path(self.temp_dir.name) / "legacy.sqlite3"
         legacy_mappings = dict(DEFAULT_MAPPINGS)
         legacy_mappings["ILoveYou"] = "play_pause"
-        with sqlite3.connect(legacy_path) as connection:
+        with closing(sqlite3.connect(legacy_path)) as connection, connection:
             connection.execute(
                 "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
             )
@@ -185,7 +186,7 @@ class ControlStoreTests(unittest.TestCase):
             self.store.set_pointer_settings({"press_threshold": 0.7, "release_threshold": 0.6})
 
     def test_corrupt_pointer_settings_are_reset_to_safe_defaults(self):
-        with sqlite3.connect(self.path) as connection:
+        with closing(sqlite3.connect(self.path)) as connection, connection:
             connection.execute(
                 "UPDATE settings SET value = ? WHERE key = ?",
                 (json.dumps({"min_cutoff": float("nan")}), "pointer_settings"),
@@ -197,7 +198,7 @@ class ControlStoreTests(unittest.TestCase):
         self.store.begin_session("session-recovery", 100)
         self.store.update_controller("session-recovery", "suspect", "person-1", 200)
         self.store.update_controller("session-recovery", "reacquiring", "person-1", 900)
-        with sqlite3.connect(self.store.path) as connection:
+        with closing(sqlite3.connect(self.store.path)) as connection, connection:
             row = connection.execute(
                 "SELECT state, track_id FROM controller_sessions WHERE session_id = ?",
                 ("session-recovery",),

@@ -112,16 +112,11 @@ function renderCamera() {
     return;
   }
 
-  if (controller.state === "locked") {
-    elements.cameraStatusLabel.textContent = "主控已锁定";
-    elements.cameraStatus.dataset.state = "locked";
-  } else if (controller.state === "lost") {
-    elements.cameraStatusLabel.textContent = "主控暂时丢失 · 控制暂停";
-    elements.cameraStatus.dataset.state = "lost";
-  } else {
-    elements.cameraStatusLabel.textContent = "等待 OK 手势锁定";
-    elements.cameraStatus.dataset.state = "running";
-  }
+  const view = window.UsageFlow.controllerView(controller);
+  elements.cameraStatusLabel.textContent = controller.state === "unlocked"
+    ? view.detail : view.label;
+  elements.cameraStatus.dataset.state = view.kind === "ready" ? "locked"
+    : controller.state === "unlocked" ? "running" : "lost";
 }
 
 function syncCameraFeed() {
@@ -196,7 +191,7 @@ function handleEvent(event) {
     return;
   }
   if (event.type !== "gesture") return;
-  console.log("[gesture-control]", event);
+  if (window.parent === window) console.log("[gesture-control]", event);
   if (event.action_triggered && !event.workflow_handled) applyAction(event.action);
 }
 

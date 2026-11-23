@@ -5,16 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#145da8">
     <title>康晋电气手势控制平台 · 设置</title>
-    <link rel="icon" href="https://img.kompass.com/sys-master-images/h29/h63/9109303525406/comking%E6%96%B0logo-jpg" type="image/jpeg">
+    <link rel="icon" href="/static/assets/comking-logo.jpg" type="image/jpeg">
     <link rel="stylesheet" href="/static/styles.css?v=20261119-system-font-1">
     <link rel="stylesheet" href="/static/industrial-ui.css?v=20261119-system-font-1">
     <link rel="stylesheet" href="/static/comking-glass.css?v=20261119-ui-polish-1">
-    <script src="/static/app.js?v=20261120-workflow-gesture-map-1" defer></script>
+    <link rel="stylesheet" href="/static/usage-flow.css?v=20261123-layout-2">
+    <script src="/static/usage-flow.js?v=20261123-usage-flow-1" defer></script>
+    <script src="/static/admin.js?v=20261123-layout-2" defer></script>
+    <script src="/static/app.js?v=20261123-usage-flow-1" defer></script>
   </head>
   <body class="settings-page">
     <header class="settings-header">
-      <a class="settings-brand" href="/" aria-label="返回宣传片主页">
-        <span class="comking-logo-shell"><img class="comking-logo" src="https://img.kompass.com/sys-master-images/h29/h63/9109303525406/comking%E6%96%B0logo-jpg" alt="COMKING" loading="eager"></span>
+      <a class="settings-brand" href="/" data-open-display aria-label="打开大屏">
+        <span class="comking-logo-shell"><img class="comking-logo" src="/static/assets/comking-logo.jpg" alt="COMKING" loading="eager"></span>
         <span><strong>康晋电气</strong><small>手势控制平台 · 设置</small></span>
       </a>
       <div class="settings-header-tools">
@@ -25,7 +28,7 @@
         <a class="back-link" href="/workflows">工作流</a>
         <a class="back-link" href="/display-pages">网页管理</a>
         <a class="back-link" href="/settings" aria-current="page">设置</a>
-        <a class="back-link" href="/">返回大屏</a>
+        <a class="back-link" href="/" data-open-display>打开大屏 ↗</a>
       </div>
     </header>
 

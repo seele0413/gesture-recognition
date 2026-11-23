@@ -21,7 +21,8 @@ test("all management pages load the Comking glass theme after their existing sty
     const sharedStyleIndex = html.indexOf(sharedStyle);
     const glassStyleIndex = html.indexOf("/static/comking-glass.css");
     assert.notEqual(pageStyleIndex, -1, file + " should keep its original page stylesheet");
-    assert.ok(sharedStyleIndex > pageStyleIndex, file + " should keep the shared industrial compatibility stylesheet");
+    if (file === "web/workflows.html") assert.ok(pageStyleIndex > glassStyleIndex, "workflow component stylesheet owns its final layout");
+    else assert.ok(sharedStyleIndex > pageStyleIndex, file + " should keep the shared industrial compatibility stylesheet");
     assert.ok(glassStyleIndex > sharedStyleIndex, file + " should load the Comking glass theme last");
     assert.match(html, /<meta name="theme-color" content="#145da8">/);
   }
@@ -31,7 +32,7 @@ test("management pages use the Comking logo and Chinese-first headings", () => {
   for (const file of ["web/workflows.html", "web/settings.html", "web/display-pages.html"]) {
     const html = read(file);
     assert.match(html, /class="comking-logo-shell"/, file + " should render the logo surface");
-    assert.match(html, /class="comking-logo"[^>]+src="https:\/\/img\.kompass\.com\//, file + " should use the found COMKING logo asset");
+    assert.match(html, /class="comking-logo"[^>]+src="\/static\/assets\/comking-logo\.jpg"/, file + " should use the bundled COMKING logo offline");
     assert.doesNotMatch(html, /class="settings-brand-mark">康<\/span>/, file + " should not render the placeholder 康 tile");
     assert.doesNotMatch(html, /<p class="eyebrow">[A-Z][A-Z ]+<\/p>/, file + " should not use decorative English eyebrow labels");
   }
@@ -95,7 +96,7 @@ test("settings and page manager keep their existing application scripts", () => 
   assert.match(read("web/display-pages.html"), /\/static\/display-pages\.js/);
 });
 
-test("workflow header separates system navigation from workflow actions and explains versions", () => {
+test("workflow workspace separates navigation and editing and removes version controls", () => {
   const html = read("web/workflows.html");
   const js = read("web/workflows.js");
   const navStart = html.indexOf('<nav class="workflow-primary-nav"');
@@ -103,16 +104,16 @@ test("workflow header separates system navigation from workflow actions and expl
   const actionsStart = html.indexOf('<div class="workflow-actions"');
 
   assert.match(html, /<title>康晋电气手势控制平台 · 工作流<\/title>/);
-  assert.match(html, /<link rel="icon" href="https:\/\/img\.kompass\.com\//);
+  assert.match(html, /<link rel="icon" href="\/static\/assets\/comking-logo\.jpg"/);
   assert.ok(navStart >= 0 && navEnd > navStart && navEnd < actionsStart, "system navigation should be in its own top header row");
   assert.match(html, /<small>手势控制平台<\/small>/);
-  assert.match(html, /<span>版本 <small>历史记录<\/small><\/span>/);
-  assert.match(html, /id="workflowVersion" aria-label="工作流保存版本"/);
-  assert.match(js, /"v" \+ item\.version \+ \(isCurrent \? "（当前）" : "（历史）"\)/);
-  assert.match(js, /历史版本 v" \+ item\.version/);
+  assert.match(html, /id="workflowsTab"/);
+  assert.match(html, /id="nodesTab"/);
+  assert.doesNotMatch(html, /workflowVersion|workflowSelect|gestureWorkflowMap/);
+  assert.doesNotMatch(js, /loadVersions|workflowVersion|workflowSelect/);
 });
 
-test("right-clicking a workflow node opens a closable floating parameter inspector", () => {
+test("workflow parameters retain a closable floating inspector", () => {
   const html = read("web/workflows.html");
   const js = read("web/workflows.js");
   const glass = read("web/comking-glass.css");
@@ -123,8 +124,8 @@ test("right-clicking a workflow node opens a closable floating parameter inspect
   assert.match(js, /function openInspector\(nodeId\)/);
   assert.match(js, /function closeInspector\(\)/);
   assert.match(js, /ui\.inspectorClose\.addEventListener\("click", closeInspector\)/);
-  assert.ok(glass.includes(".workflow-inspector[hidden]"), "inspector should stay hidden until requested");
-  assert.ok(glass.includes("position: absolute;"), "inspector should float above the canvas rather than reserve a column");
+  assert.match(read("web/workflows.css"), /\[hidden\].*display:\s*none !important/);
+  assert.match(read("web/workflows.css"), /\.workflow-inspector\s*\{[\s\S]*?position:\s*absolute/);
 });
 
 test("display page default action uses the same neutral button style as edit and disable", () => {
@@ -170,15 +171,14 @@ test("all frontend pages use native platform system typography", () => {
   assert.doesNotMatch(glass, /"SF Pro Display"/, "do not bundle or force a font restricted to Apple-platform mockups");
 });
 
-test("workflow library fills the empty brand-side strip and action toolbar aligns to the trailing edge", () => {
+test("workflow component owns the two-pane layout without old sidebar offsets", () => {
+  const css = read("web/workflows.css");
   const html = read("web/workflows.html");
-  const glass = read("web/comking-glass.css");
-  assert.match(html, /<small>手势控制平台<\/small>/);
-  assert.match(glass, /\.workflow-library\s*\{[\s\S]*?top:\s*-96px;/);
-  assert.match(glass, /\.workflow-editor\s*\{[\s\S]*?grid-column:\s*2;/);
-  assert.match(glass, /\.workflow-meta\s*\{[\s\S]*?width:\s*calc\(100% - 260px\);/);
-  assert.match(glass, /\.workflow-actions\s*\{[\s\S]*?width:\s*max-content;[\s\S]*?margin-left:\s*auto;[\s\S]*?margin-right:\s*0;/);
-  assert.match(glass, /@media \(max-width: 980px\)[\s\S]*?\.workflow-library\s*\{[\s\S]*?position:\s*static;/);
+  assert.match(css, /\.workflow-workspace\s*\{[\s\S]*?grid-template-columns:\s*260px minmax\(0, 1fr\)/);
+  assert.match(html, /id="workflowRuns" class="workflow-runs"/);
+  assert.doesNotMatch(html, /id="workflowRuns"[^>]*\bopen\b/);
+  assert.doesNotMatch(glassTheme, /top:\s*-96px/);
+  assert.doesNotMatch(read("web/admin.js"), /usage-status|usage-readiness|setInterval|\/api\/status|\/api\/workflow-status/);
 });
 
 test("glass polish makes management surfaces lighter but leaves the workflow canvas material alone", () => {
@@ -186,7 +186,6 @@ test("glass polish makes management surfaces lighter but leaves the workflow can
   const start = glass.indexOf("2026-11-19 polish: platform naming");
   assert.ok(start >= 0, "latest polish section should exist");
   const polish = glass.slice(start);
-  assert.match(polish, /\.workflow-library,[\s\S]*?background:[\s\S]*?rgba\(255,255,255,\.045\)/);
   assert.match(polish, /\.settings-panel,[\s\S]*?background:[\s\S]*?rgba\(255,255,255,\.045\)/);
   assert.doesNotMatch(polish, /\.canvas-viewport\s*\{/);
   assert.doesNotMatch(polish, /\.canvas-node\s*\{/);

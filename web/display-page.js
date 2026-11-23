@@ -67,10 +67,7 @@ window.addEventListener("message", (event) => {
   if (message.type === "display:event") {
     const eventData = message.event;
     if (eventData?.type === "controller" && status) {
-      const state = eventData.state || "unlocked";
-      status.textContent = state === "locked" ? "主控已锁定"
-        : state === "suspect" ? "主控暂时丢失 · 正在确认"
-          : state === "reacquiring" ? "正在重新关联主控" : "等待主控";
+      status.textContent = window.UsageFlow.controllerView(eventData).label;
     }
     return;
   }
@@ -87,3 +84,6 @@ window.addEventListener("message", (event) => {
 });
 
 window.parent.postMessage({ type: "display:ready", page_id: pageId, generation }, window.location.origin);
+fetch("/api/status", { cache: "no-store" }).then((response) => response.json()).then((snapshot) => {
+  if (status) status.textContent = window.UsageFlow.controllerView(snapshot.controller).label;
+}).catch(() => {});

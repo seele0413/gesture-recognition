@@ -157,7 +157,9 @@ function Find-Python {
         }
         if ($IsCompatible) {
             $Compatible += [pscustomobject]@{
-                Path = [string]$Identity.path
+                # Keep the Unicode path resolved by PowerShell. Python stdout
+                # may use a different code page when an existing venv is probed.
+                Path = [string]$Resolved
                 Major = [int]$Identity.major
                 Minor = [int]$Identity.minor
             }

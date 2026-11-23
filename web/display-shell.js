@@ -24,10 +24,37 @@ let displaySocket = null;
 let eventSocket = null;
 let displayReconnectTimer = 0;
 let eventReconnectTimer = 0;
+let displayBlocked = false;
+let leaving = false;
 
 function setShellStatus(state, message) {
+  if (displayBlocked) {
+    state = "error";
+    message = "已有大屏窗口正在使用。请返回原窗口，或关闭原窗口后重试。";
+  }
   elements.dot.dataset.state = state;
   elements.label.textContent = message;
+}
+
+document.getElementById("openManagement").addEventListener("click", (event) => {
+  event.preventDefault();
+  try { window.UsageFlow.openWindow("admin", "/settings"); }
+  catch (error) { setShellStatus("error", error.message); }
+});
+document.getElementById("retryDisplay").addEventListener("click", () => {
+  displayBlocked = false;
+  document.getElementById("retryDisplay").hidden = true;
+  connectDisplayCommands();
+});
+
+async function refreshControllerLabel() {
+  try {
+    const response = await fetch("/api/status", { cache: "no-store" });
+    if (!response.ok) return;
+    const status = await response.json();
+    const view = window.UsageFlow.controllerView(status.controller);
+    document.getElementById("displayControllerLabel").textContent = " · " + view.label;
+  } catch (_error) { /* Connection state remains visible in the shell label. */ }
 }
 
 function sendDisplayState(type, payload = {}) {
@@ -333,11 +360,15 @@ function handleFrameMessage(event) {
 
 function connectDisplayCommands() {
   window.clearTimeout(displayReconnectTimer);
+  if (leaving || displayBlocked || displaySocket) return;
+  let accepted = false;
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const socket = new WebSocket(protocol + "//" + window.location.host + "/ws/display");
   displaySocket = socket;
   socket.addEventListener("open", () => {
     if (displaySocket !== socket) return;
+    accepted = true;
+    window.name = window.UsageFlow.WINDOW_NAMES.display;
     if (pageReadyWaiter) {
       sendDisplayState("display:loading", {
         page_id: pageReadyWaiter.pageId,
@@ -365,9 +396,26 @@ function connectDisplayCommands() {
       console.error("无法解析展示命令", error);
     }
   });
-  socket.addEventListener("close", () => {
+  socket.addEventListener("close", async (event) => {
     if (displaySocket === socket) {
       displaySocket = null;
+      if (leaving) return;
+      // A close before accept is HTTP 403 in browsers and appears as 1006.
+      // Check actual ownership instead of retrying a rejected second executor.
+      let occupied = event.code === 1013;
+      if (!accepted && !occupied) {
+        try {
+          const response = await fetch("/api/workflow-status", { cache: "no-store" });
+          occupied = response.ok && (await response.json()).display_connected;
+        } catch (_error) { /* A real server outage still reconnects. */ }
+      }
+      if (leaving || displaySocket) return;
+      if (occupied) {
+        displayBlocked = true;
+        document.getElementById("retryDisplay").hidden = false;
+        setShellStatus("error", "");
+        return;
+      }
       setShellStatus("connecting", "展示控制中心连接中断，正在重连");
       displayReconnectTimer = window.setTimeout(connectDisplayCommands, 1200);
     }
@@ -377,12 +425,17 @@ function connectDisplayCommands() {
 
 function connectEvents() {
   window.clearTimeout(eventReconnectTimer);
+  if (leaving || eventSocket) return;
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const socket = new WebSocket(protocol + "//" + window.location.host + "/ws/events");
   eventSocket = socket;
+  socket.addEventListener("open", refreshControllerLabel);
   socket.addEventListener("message", (message) => {
     try {
-      postToFrame({ type: "display:event", event: JSON.parse(message.data), generation: pageGeneration });
+      const event = JSON.parse(message.data);
+      if (event.type === "gesture") console.log("[gesture-control]", event);
+      if (event.type === "controller" || event.type === "stream") refreshControllerLabel();
+      postToFrame({ type: "display:event", event, generation: pageGeneration });
     } catch (error) {
       if (error?.message) console.debug("当前展示页尚未就绪", error.message);
     }
@@ -390,6 +443,7 @@ function connectEvents() {
   socket.addEventListener("close", () => {
     if (eventSocket === socket) {
       eventSocket = null;
+      if (leaving) return;
       eventReconnectTimer = window.setTimeout(connectEvents, 1500);
     }
   });
@@ -449,16 +503,20 @@ async function initializeDisplayShell() {
 }
 
 window.addEventListener("pagehide", () => {
+  leaving = true;
   window.clearTimeout(displayReconnectTimer);
   window.clearTimeout(eventReconnectTimer);
   rejectPageReadyWaiter("展示控制中心已离开页面");
   rejectPendingPageCommands("展示控制中心已离开页面");
   if (displaySocket) displaySocket.close();
   if (eventSocket) eventSocket.close();
+  displaySocket = null;
+  eventSocket = null;
 });
 
 window.addEventListener("pageshow", (event) => {
   if (!event.persisted) return;
+  leaving = false;
   connectDisplayCommands();
   connectEvents();
 });

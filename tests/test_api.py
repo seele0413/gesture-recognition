@@ -1,6 +1,7 @@
 import asyncio
 import tempfile
 import unittest
+import threading
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -8,6 +9,8 @@ from fastapi.testclient import TestClient
 from app.display_pages import DISPLAY_PAGE_IDS
 from app.main import create_app
 from app.workflow import new_workflow
+from app.controller import ControllerLock
+from app.vision import VisionProcessor
 
 
 class ApiTests(unittest.TestCase):
@@ -40,6 +43,28 @@ class ApiTests(unittest.TestCase):
     def test_identity_and_manual_target_endpoints_are_removed(self):
         self.assertEqual(self.client.get("/api/identities").status_code, 404)
         self.assertEqual(self.client.patch("/api/target", json={"identity_id": None}).status_code, 404)
+
+    def test_status_endpoints_share_the_live_suspect_identity_snapshot(self):
+        processor = VisionProcessor.__new__(VisionProcessor)
+        processor.lock = threading.RLock()
+        processor.controller = ControllerLock()
+        processor.controller.observe_lock_candidates(["person-1"], 0)
+        processor.controller.observe_lock_candidates(["person-1"], 50)
+        processor.controller.update_tracking(set(), 100)
+        manager = self.client.app.state.stream_manager
+        manager._processor = processor
+        try:
+            for confirmed in (True, False, True):
+                processor._suspect_identity_confirmed = confirmed
+                for endpoint in ("/api/status", "/api/workflow-status"):
+                    with self.subTest(confirmed=confirmed, endpoint=endpoint):
+                        controller = self.client.get(endpoint).json()["controller"]
+                        self.assertEqual(controller["state"], "suspect")
+                        self.assertIs(controller["identity_confirmed"], confirmed)
+            processor.controller.update_tracking(set(), 900)
+            self.assertIs(self.client.get("/api/status").json()["controller"]["identity_confirmed"], False)
+        finally:
+            manager._processor = None
 
     def test_controller_can_be_unlocked_and_mappings_remain_available(self):
         self.assertEqual(self.client.post("/api/controller/unlock").json()["controller"]["state"], "unlocked")
@@ -84,7 +109,9 @@ class ApiTests(unittest.TestCase):
         promo = self.client.get("/static/pages/promo.html").text
         self.assertIn("/media/promo.mp4", promo)
         self.assertIn("playsinline loop controls", promo)
-        self.assertIn('href="/settings" target="_top"', promo)
+        self.assertIn('href="/settings" target="gesture-control-admin"', homepage)
+        self.assertIn('id="openManagement"', homepage)
+        self.assertNotIn('href="/settings" target="_top"', promo)
         self.assertNotIn('target="_blank"', promo)
         self.assertIn('id="rtspUrl"', settings)
         self.assertNotIn('id="mappingGrid"', settings)
@@ -651,11 +678,11 @@ class ApiTests(unittest.TestCase):
         workflow_page = self.client.get("/workflows").text
         self.assertIn('id="pointerMode"', workflow_page)
         self.assertIn('id="pointerMirror"', workflow_page)
-        self.assertIn('id="gestureWorkflowMap"', workflow_page)
+        self.assertIn('id="workflowList"', workflow_page)
         self.assertIn('id="workflowGeneratorApiKey"', workflow_page)
         self.assertIn("/static/pointer-event-buffer.js?v=20261118-workflow-fix-1", workflow_page)
-        self.assertIn("/static/workflows.js?v=20261123-page-scope-1", workflow_page)
-        self.assertIn("/static/workflows.css?v=20261123-page-scope-1", workflow_page)
+        self.assertIn("/static/workflows.js?v=20261123-layout-2", workflow_page)
+        self.assertIn("/static/workflows.css?v=20261123-layout-2", workflow_page)
         self.assertIn("/api/workflows", self.client.get("/static/workflows.js").text)
         self.assertEqual(
             self.client.get("/api/media-assets").json()["media_assets"][0]["id"],

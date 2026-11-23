@@ -1,0 +1,12 @@
+.unsaved-dialog { max-width: 450px; width: calc(100vw - 40px); border: 1px solid #d5dde7; border-radius: 16px; padding: 24px; color: #18283d; background: #fff; }
+.unsaved-dialog::backdrop { background: #18283d55; backdrop-filter: blur(3px); }
+.unsaved-dialog h2 { margin: 0 0 12px; font-size: 20px; }
+.unsaved-dialog p { line-height: 1.7; color: #687b91; }
+.unsaved-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+.display-shell-toolbar { position: fixed; top: 20px; right: 76px; z-index: 50; display: flex; gap: 8px; }
+.display-shell-toolbar a, .display-shell-toolbar button {
+  padding: 9px 14px; border: 1px solid #ffffff44; border-radius: 999px; background: #101713cc;
+  color: #f2f4ef; backdrop-filter: blur(12px); font: 12px system-ui, "Microsoft YaHei", sans-serif; text-decoration: none; cursor: pointer;
+}
+.display-shell-toolbar button[hidden] { display: none; }
+.display-shell .display-shell-status { max-width: min(700px, calc(100vw - 28px)); }

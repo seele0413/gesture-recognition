@@ -1,8 +1,9 @@
 const ui = {
-  workflowSelect: document.getElementById("workflowSelect"),
   workflowName: document.getElementById("workflowName"),
   workflowDescription: document.getElementById("workflowDescription"),
-  workflowVersion: document.getElementById("workflowVersion"),
+  workflowSaveState: document.getElementById("workflowSaveState"),
+  gestureMapScope: document.getElementById("gestureMapScope"),
+  unsavedDialog: document.getElementById("unsavedDialog"),
   newWorkflow: document.getElementById("newWorkflow"),
   generateWorkflow: document.getElementById("generateWorkflow"),
   workflowGeneratorDialog: document.getElementById("workflowGeneratorDialog"),
@@ -33,7 +34,20 @@ const ui = {
   dryRunWorkflow: document.getElementById("dryRunWorkflow"),
   toggleWorkflow: document.getElementById("toggleWorkflow"),
   actionLibrary: document.getElementById("actionLibrary"),
-  gestureWorkflowMap: document.getElementById("gestureWorkflowMap"),
+  workflowList: document.getElementById("workflowList"),
+  workflowSearch: document.getElementById("workflowSearch"),
+  nodeSearch: document.getElementById("nodeSearch"),
+  workflowsTab: document.getElementById("workflowsTab"),
+  nodesTab: document.getElementById("nodesTab"),
+  workflowListPanel: document.getElementById("workflowListPanel"),
+  nodeLibraryPanel: document.getElementById("nodeLibraryPanel"),
+  addNodeTool: document.getElementById("addNodeTool"),
+  canvasEmpty: document.getElementById("canvasEmpty"),
+  workflowMore: document.getElementById("workflowMore"),
+  edgeWhenWrap: document.getElementById("edgeWhenWrap"),
+  pointerModeNotice: document.getElementById("pointerModeNotice"),
+  disablePointerMode: document.getElementById("disablePointerMode"),
+  runCount: document.getElementById("runCount"),
   triggerType: document.getElementById("triggerType"),
   triggerFields: document.getElementById("triggerFields"),
   edgeWhen: document.getElementById("edgeWhen"),
@@ -95,12 +109,18 @@ let workflows = [];
 let displayPages = [];
 let workflow = null;
 let workflowIsDraft = false;
+const draftState = new window.UsageFlow.DraftState();
+let transitioning = false;
+let savePromise = null;
+let allowUnload = false;
+let mapScope = new URLSearchParams(location.search).get("page_scope") || "all";
 let generatedWorkflowPreview = null;
 let actionDefinitions = [];
 let selectedNodeId = null;
 let linkSourceId = null;
 let zoom = 1;
 let activeRunId = null;
+let runListSignature = "";
 const nodeStatuses = new Map();
 const nodeCardsById = new Map();
 const nodeModelsById = new Map();
@@ -367,6 +387,7 @@ function setPointerModeUi(enabled) {
   ui.pointerMode.textContent = pointerModeEnabled ? "手势拖拽：开启" : "手势拖拽：关闭";
   ui.pointerMode.setAttribute("aria-pressed", String(pointerModeEnabled));
   ui.pointerMode.dataset.state = pointerModeEnabled ? "active" : "idle";
+  ui.pointerModeNotice.hidden = !pointerModeEnabled;
   if (!pointerModeEnabled && pointerCalibrationSession) cancelPointerCalibration(false);
   updatePointerCalibrationButton();
 }
@@ -720,8 +741,9 @@ function setEditingEnabled(enabled) {
   });
   ui.workflowName.disabled = !enabled;
   ui.workflowDescription.disabled = !enabled;
-  ui.workflowVersion.disabled = !enabled || workflowIsDraft;
   ui.triggerType.disabled = !enabled;
+  [ui.addNodeTool, ui.linkMode, ui.autoArrange].forEach((button) => { button.disabled = !enabled; });
+  ui.actionLibrary.querySelectorAll("button").forEach((button) => { button.disabled = !enabled; });
 }
 
 function refreshHeader() {
@@ -729,28 +751,85 @@ function refreshHeader() {
   setEditingEnabled(hasWorkflow);
   ui.workflowName.value = workflow?.name || "";
   ui.workflowDescription.value = workflow?.description || "";
-  ui.toggleWorkflow.textContent = workflow?.enabled ? "禁用" : "启用";
-  ui.workflowSelect.value = workflow?.id || "";
+  ui.toggleWorkflow.textContent = workflow?.enabled ? "停用" : "启用";
+  refreshSaveState();
 }
 
 function updateHeaderData() {
   if (!workflow) return;
   workflow.name = ui.workflowName.value;
   workflow.description = ui.workflowDescription.value;
+  refreshSaveState();
 }
 
-function renderWorkflowOptions() {
-  ui.workflowSelect.replaceChildren();
-  const empty = make("option", "", workflows.length ? "选择工作流" : "暂无工作流");
-  empty.value = "";
-  ui.workflowSelect.append(empty);
-  for (const item of workflows) {
-    const option = make("option", "", item.name + (item.enabled ? " · 已启用" : ""));
-    option.value = item.id;
-    ui.workflowSelect.append(option);
+function refreshSaveState() {
+  const dirty = draftState.dirty(workflow, workflowIsDraft);
+  ui.workflowSaveState.dataset.dirty = String(dirty);
+  ui.workflowSaveState.textContent = !workflow ? "请选择或新建工作流"
+    : dirty ? workflow.enabled ? "已启用 · 未保存" : "未保存"
+      : workflow.enabled ? "已启用" : "已保存 · 未启用";
+  ui.workflowSaveState.title = workflow?.enabled && dirty
+    ? "存在未保存修改，当前执行上次保存版本" : ui.workflowSaveState.textContent;
+  ui.toggleWorkflow.textContent = workflow?.enabled ? "停用" : dirty ? "保存并启用" : "启用";
+}
+
+function setEditorBusy(busy) {
+  for (const selector of [".workflow-toolbar", ".trigger-editor", ".workflow-canvas", ".workflow-sidebar"]) {
+    document.querySelector(selector).inert = busy;
   }
-  ui.workflowSelect.value = workflow?.id || "";
-  renderGestureWorkflowMap();
+}
+
+function chooseUnsavedAction() {
+  return new Promise((resolve) => {
+    ui.unsavedDialog.returnValue = "cancel";
+    ui.unsavedDialog.addEventListener("close", () => resolve(ui.unsavedDialog.returnValue), { once: true });
+    ui.unsavedDialog.showModal();
+  });
+}
+
+async function withUnsavedChanges(proceed) {
+  if (transitioning) return false;
+  transitioning = true;
+  try {
+    if (!await draftState.canLeave(workflow, workflowIsDraft, chooseUnsavedAction, saveWorkflow)) return false;
+    await proceed();
+    return true;
+  } catch (error) {
+    setMessage(error.message, "error");
+    if (ui.workflowGeneratorDialog.open) {
+      ui.workflowGeneratorStatus.textContent = error.message;
+      ui.workflowGeneratorStatus.dataset.state = "error";
+    }
+    return false;
+  } finally { transitioning = false; }
+}
+
+function renderScopeFilter() {
+  const options = [["all", "全部页面"], ["global", "仅全局"]];
+  for (const page of displayPages) options.push([page.page_id, displayPageLabel(page.page_id) + (page.enabled ? "" : "（已停用）")]);
+  if (!options.some(([value]) => value === mapScope)) mapScope = "all";
+  ui.gestureMapScope.replaceChildren(...options.map(([value, label]) => {
+    const option = make("option", "", label);
+    option.value = value;
+    return option;
+  }));
+  ui.gestureMapScope.value = mapScope;
+}
+
+function renderWorkflowSidebar() {
+  renderScopeFilter();
+  renderWorkflowList();
+}
+
+function setSidebarTab(tab, focus = false) {
+  const nodes = tab === "nodes";
+  ui.workflowsTab.setAttribute("aria-selected", String(!nodes));
+  ui.nodesTab.setAttribute("aria-selected", String(nodes));
+  ui.workflowsTab.tabIndex = nodes ? -1 : 0;
+  ui.nodesTab.tabIndex = nodes ? 0 : -1;
+  ui.workflowListPanel.hidden = nodes;
+  ui.nodeLibraryPanel.hidden = !nodes;
+  if (focus) (nodes ? ui.nodesTab : ui.workflowsTab).focus();
 }
 
 function workflowTriggerLabel(trigger) {
@@ -817,7 +896,7 @@ function pageScopeControl(trigger) {
     trigger.page_scope = select.value;
     ui.triggerBadge.textContent = workflowTriggerBadgeLabel(trigger);
     renderCanvas();
-    renderGestureWorkflowMap();
+    renderWorkflowList();
   });
   label.append(select);
   return label;
@@ -834,36 +913,38 @@ function workflowTargetLabel(definition) {
   return "由动作节点决定";
 }
 
-function renderGestureWorkflowMap() {
-  if (!ui.gestureWorkflowMap) return;
-  ui.gestureWorkflowMap.replaceChildren();
-  const entries = workflows.filter((item) => item.trigger?.type !== "controller_locked");
+function renderWorkflowList() {
+  ui.workflowList.replaceChildren();
+  const query = ui.workflowSearch.value.trim().toLocaleLowerCase();
+  const entries = workflows.filter((item) => {
+    const scope = item.trigger?.page_scope || "global";
+    const matchesScope = mapScope === "all" || scope === mapScope || (mapScope !== "global" && scope === "global");
+    const searchable = [item.name, item.description, workflowPageScopeLabel(item.trigger),
+      workflowTriggerLabel(item.trigger)].join(" ").toLocaleLowerCase();
+    return matchesScope && (!query || searchable.includes(query));
+  });
   if (!entries.length) {
-    ui.gestureWorkflowMap.append(make("p", "muted", "暂无手势工作流。新建工作流，在上方选择启动手势，再添加网页或视频动作节点。"));
-    return;
+    ui.workflowList.append(make("p", "sidebar-empty", workflows.length
+      ? "没有匹配的工作流，请调整搜索或页面筛选。" : "还没有工作流，点击上方新建或 AI 生成。"));
   }
   for (const item of entries) {
-    const row = make("button", "gesture-map-row");
+    const row = make("button", "workflow-list-item");
     row.type = "button";
+    row.dataset.workflowId = item.id;
     row.dataset.active = String(item.id === workflow?.id);
-    row.title = "打开工作流：" + item.name;
-    const trigger = make(
-      "span",
-      "gesture-map-trigger",
-      workflowPageScopeLabel(item.trigger) + " · " + workflowTriggerLabel(item.trigger),
-    );
-    const name = make("span", "gesture-map-name", item.name);
-    const state = make(
-      "span",
-      "gesture-map-meta",
-      (item.enabled ? "已启用" : "未启用") + " · " + workflowTargetLabel(item),
-    );
-    row.append(trigger, name, state);
+    row.setAttribute("aria-pressed", String(item.id === workflow?.id));
+    row.title = item.name + " · " + workflowTargetLabel(item);
+    const heading = make("span", "workflow-list-heading");
+    heading.append(make("strong", "workflow-list-name", item.name),
+      make("span", "workflow-list-state", item.enabled ? "已启用" : "未启用"));
+    const globalFallback = item.trigger?.type !== "controller_locked" && mapScope !== "all"
+      && mapScope !== "global" && (item.trigger?.page_scope || "global") === "global";
+    row.append(heading, make("span", "workflow-list-trigger", workflowTriggerLabel(item.trigger) + " · "
+      + workflowPageScopeLabel(item.trigger) + (globalFallback ? "（回退）" : "")));
     row.addEventListener("click", () => {
-      if (workflowIsDraft && !window.confirm("切换工作流会丢弃当前 AI 草稿，是否继续？")) return;
-      loadWorkflow(item.id).catch((error) => setMessage(error.message, "error"));
+      if (item.id !== workflow?.id) withUnsavedChanges(() => loadWorkflow(item.id));
     });
-    ui.gestureWorkflowMap.append(row);
+    ui.workflowList.append(row);
   }
 }
 
@@ -874,63 +955,78 @@ async function reloadWorkflowList() {
   ]);
   workflows = response.workflows;
   displayPages = Array.isArray(pageResponse.pages) ? pageResponse.pages : [];
-  renderWorkflowOptions();
+  renderWorkflowSidebar();
   if (workflow && !workflowIsDraft) renderTrigger();
 }
 
 async function loadWorkflow(workflowId) {
   if (!workflowId) return;
-  const response = await api("/api/workflows/" + encodeURIComponent(workflowId));
-  workflow = response.workflow;
-  workflowIsDraft = false;
-  selectedNodeId = null;
-  closeInspector();
-  linkSourceId = null;
-  nodeStatuses.clear();
-  activeRunId = null;
-  await loadVersions();
-  refreshHeader();
-  renderTrigger();
-  renderCanvas();
-  renderInspector();
-  await reloadWorkflowList();
-}
-
-async function loadVersions() {
-  if (!workflow) return;
-  const response = await api("/api/workflows/" + encodeURIComponent(workflow.id) + "/versions");
-  ui.workflowVersion.replaceChildren();
-  for (const item of response.versions) {
-    const isCurrent = Number(item.version) === Number(workflow.version);
-    const option = make("option", "", "v" + item.version + (isCurrent ? "（当前）" : "（历史）"));
-    option.value = String(item.version);
-    option.title = isCurrent ? "当前工作流版本" : "历史版本；选择后可回看旧配置，保存修改会生成新版本";
-    ui.workflowVersion.append(option);
-  }
-  ui.workflowVersion.value = String(workflow.version);
+  setEditorBusy(true);
+  try {
+    const response = await api("/api/workflows/" + encodeURIComponent(workflowId));
+    workflow = response.workflow;
+    workflowIsDraft = false;
+    clearMessage();
+    selectedNodeId = null;
+    closeInspector();
+    linkSourceId = null;
+    nodeStatuses.clear();
+    activeRunId = null;
+    refreshHeader();
+    renderTrigger();
+    renderCanvas();
+    renderInspector();
+    draftState.saved(workflow);
+    refreshSaveState();
+    await reloadWorkflowList();
+  } finally { setEditorBusy(false); }
 }
 
 function renderActionLibrary() {
-  ui.actionLibrary.replaceChildren(make("h2", "", "动作"));
-  const actions = [...actionDefinitions];
-  if (actions.length === 0) {
-    ui.actionLibrary.append(make("p", "muted", "暂无可用动作"));
-    return;
+  const query = ui.nodeSearch.value.trim().toLocaleLowerCase();
+  const groups = [
+    { label: "逻辑", open: true, nodes: ["condition", "delay", "wait_event", "end"].map((type) => ({ type, label: NODE_LABELS[type] })) },
+    { label: "网页", prefix: "web.", open: true },
+    { label: "视频", prefix: "video.", open: true },
+    { label: "PPT", prefix: "ppt.", open: false },
+  ];
+  ui.actionLibrary.replaceChildren();
+  let count = 0;
+  for (const group of groups) {
+    const nodes = group.nodes || actionDefinitions.filter((action) => action.name.startsWith(group.prefix))
+      .map((action) => ({ type: "action", action: action.name, label: ACTION_LABELS[action.name] || action.name }));
+    const matched = nodes.filter((node) => !query || [node.label, node.action || node.type].join(" ").toLocaleLowerCase().includes(query));
+    if (!matched.length) continue;
+    count += matched.length;
+    const details = make("details", "node-category");
+    details.open = Boolean(query || group.open);
+    details.append(make("summary", "", group.label + " · " + matched.length));
+    const items = make("div", "node-category-items");
+    for (const node of matched) {
+      const button = make("button", "library-node" + (node.action ? " action-library-item" : ""));
+      button.type = "button";
+      button.disabled = !workflow;
+      button.draggable = true;
+      if (node.action) button.dataset.action = node.action;
+      else button.dataset.nodeType = node.type;
+      button.title = node.label;
+      button.append(make("span", "node-mark " + (node.action ? "action-mark" : "mark-" + node.type),
+        node.action ? "→" : { condition: "?", delay: "Ⅱ", wait_event: "◷", end: "■" }[node.type]),
+        make("span", "", node.label));
+      button.addEventListener("click", () => {
+        addNode(defaultNode(node.type, node.action || ""));
+        if (selectedNodeId) openInspector(selectedNodeId);
+      });
+      button.addEventListener("dragstart", (event) => {
+        event.dataTransfer.setData("text/plain", node.action ? "action:" + node.action : "node-type:" + node.type);
+        event.dataTransfer.effectAllowed = "copy";
+      });
+      items.append(button);
+    }
+    details.append(items);
+    ui.actionLibrary.append(details);
   }
-  for (const action of actions) {
-    const button = make("button", "library-node action-library-item");
-    button.type = "button";
-    button.draggable = true;
-    button.dataset.action = action.name;
-    button.append(make("span", "node-mark action-mark", "→"), make("span", "", ACTION_LABELS[action.name] || action.name));
-    button.title = action.name;
-    button.addEventListener("click", () => addNode({ type: "action", action: action.name, params: {} }));
-    button.addEventListener("dragstart", (event) => {
-      event.dataTransfer.setData("text/plain", "action:" + action.name);
-      event.dataTransfer.effectAllowed = "copy";
-    });
-    ui.actionLibrary.append(button);
-  }
+  if (!count) ui.actionLibrary.append(make("p", "sidebar-empty", "没有匹配的节点或动作。"));
 }
 
 function defaultNode(type, action = "") {
@@ -940,6 +1036,22 @@ function defaultNode(type, action = "") {
   if (type === "delay") return { id, type, params: { delay_ms: 500 } };
   if (type === "wait_event") return { id, type, params: { event: "gesture", gesture: "Open_Palm" }, timeout_ms: 10000 };
   return { id, type: "end", params: {} };
+}
+
+function reserveNodePosition(node, requestedPosition) {
+  if (requestedPosition) return; // A drop position is chosen explicitly by the user.
+  const initialY = node.position.y;
+  for (let index = 0; index <= workflow.nodes.length; index++) {
+    node.position.y = (initialY + index * 160) % 4960;
+    const occupied = workflow.nodes.some((other) => {
+      if (!other.position) return false;
+      const height = nodeCardsById.get(other.id)?.offsetHeight || 130;
+      return Math.abs(other.position.x - node.position.x) < 260
+        && node.position.y < other.position.y + height + 20
+        && node.position.y + 130 + 20 > other.position.y;
+    });
+    if (!occupied) return;
+  }
 }
 
 function addNode(node) {
@@ -960,6 +1072,7 @@ function addNode(node) {
           return;
         }
         node.position = requestedPosition || { x: sourceNode.position.x + 300, y: sourceNode.position.y };
+        reserveNodePosition(node, requestedPosition);
         workflow.nodes.push(node);
         const newEdge = { source: sourceNode.id, target: node.id };
         if (when) newEdge.when = when;
@@ -982,6 +1095,7 @@ function addNode(node) {
       workflow.nodes = workflow.nodes.filter((item) => item.id !== target);
     }
     node.position = requestedPosition || { x: findNode(source)?.position?.x + 300 || 470, y: previousTarget?.position?.y || 180 };
+    reserveNodePosition(node, requestedPosition);
     workflow.nodes.push(node);
     if (source) {
       const ending = { source, target: node.id };
@@ -994,6 +1108,7 @@ function addNode(node) {
     return;
   }
   node.position = requestedPosition || { x: source ? (findNode(source)?.position?.x || 100) + 300 : 170, y: findNode(target)?.position?.y || 180 };
+  reserveNodePosition(node, requestedPosition);
   workflow.nodes.push(node);
   if (source) {
     const upstream = { source, target: node.id };
@@ -1109,6 +1224,8 @@ function gestureSelect(value) {
 function renderCanvas() {
   nodeCardsById.clear();
   nodeModelsById.clear();
+  ui.canvasWorld.hidden = !workflow;
+  ui.canvasEmpty.hidden = Boolean(workflow);
   if (!workflow) {
     ui.canvasNodes.replaceChildren();
     drawEdges();
@@ -1123,7 +1240,7 @@ function renderCanvas() {
     card.dataset.selected = String(node.id === selectedNodeId);
     card.dataset.linkSource = String(node.id === linkSourceId);
     card.dataset.status = nodeStatuses.get(node.id) || "idle";
-    card.title = "左键选择节点 · 右键打开参数设置";
+    card.title = "单击编辑参数，拖拽调整位置";
     card.style.left = node.position.x + "px";
     card.style.top = node.position.y + "px";
     card.draggable = true;
@@ -1153,6 +1270,7 @@ function renderCanvas() {
     ui.canvasNodes.append(card);
   }
   drawEdges();
+  refreshSaveState();
 }
 
 function nodeTitle(node) {
@@ -1257,15 +1375,15 @@ function selectOrLink(nodeId) {
       selectedNodeId = nodeId;
       linkSourceId = null;
       ui.linkMode.setAttribute("aria-pressed", "false");
+      ui.edgeWhenWrap.hidden = true;
+      ui.edgeWhen.value = "";
       setMessage("连线已更新，请校验工作流");
     }
     renderCanvas();
     renderInspector();
     return;
   }
-  selectedNodeId = nodeId;
-  renderCanvas();
-  renderInspector();
+  openInspector(nodeId);
 }
 
 function field(container, labelText, control) {
@@ -1462,6 +1580,7 @@ function moveNode(nodeId, clientX, clientY, grabOffset = null) {
   }
   drawEdgesForNode(nodeId);
   recordPointerDragUpdate(performance.now() - startedAt);
+  refreshSaveState();
 }
 
 function autoArrange() {
@@ -1497,21 +1616,33 @@ function updateZoom() {
 
 async function saveWorkflow() {
   if (!workflow) return;
+  if (savePromise) return savePromise;
   updateHeaderData();
+  if (!draftState.dirty(workflow, workflowIsDraft)) return;
+  setEditorBusy(true);
   const isNewDraft = workflowIsDraft;
   const endpoint = isNewDraft
     ? "/api/workflows"
     : "/api/workflows/" + encodeURIComponent(workflow.id);
-  const response = await api(endpoint, {
-    method: isNewDraft ? "POST" : "PUT",
-    body: JSON.stringify(workflow),
-  });
-  workflow = response.workflow;
-  workflowIsDraft = false;
-  await reloadWorkflowList();
-  await loadVersions();
-  refreshHeader();
-  setMessage(isNewDraft ? "AI 工作流草稿已保存为 v" + workflow.version : "已保存为版本 v" + workflow.version);
+  savePromise = (async () => {
+    const response = await api(endpoint, {
+      method: isNewDraft ? "POST" : "PUT",
+      body: JSON.stringify(workflow),
+    });
+    workflow = response.workflow;
+    workflowIsDraft = false;
+    renderCanvas();
+    draftState.saved(workflow);
+    await reloadWorkflowList();
+    refreshHeader();
+    setMessage(isNewDraft ? "AI 工作流已保存" : "已保存");
+  })();
+  try { await savePromise; }
+  finally {
+    savePromise = null;
+    setEditorBusy(false);
+    refreshSaveState();
+  }
 }
 
 async function validateCurrent() {
@@ -1525,7 +1656,7 @@ async function createWorkflow() {
   const now = new Date().toISOString();
   const starter = {
     schema_version: 1, id, name: "新建工作流", description: "", enabled: false,
-    trigger: { type: "gesture_trigger", gesture: "Open_Palm", page_scope: "global" },
+    trigger: { type: "gesture_trigger", gesture: "Open_Palm", page_scope: mapScope === "all" ? "global" : mapScope },
     nodes: [
       { id: "play", type: "action", action: "video.play", params: {}, timeout_ms: 3000, on_error: "stop", position: { x: 170, y: 80 } },
       { id: "end", type: "end", params: {}, position: { x: 470, y: 80 } },
@@ -1538,10 +1669,15 @@ async function createWorkflow() {
 }
 
 async function toggleWorkflow() {
-  await saveWorkflow();
+  if (!workflow) return;
+  if (!workflow.enabled) {
+    await saveWorkflow();
+    const validation = await api("/api/workflows/" + encodeURIComponent(workflow.id) + "/validate", { method: "POST" });
+    if (!validation.valid) throw new Error(validation.errors.join("；"));
+  }
   const operation = workflow.enabled ? "disable" : "enable";
   const response = await api(`/api/workflows/${encodeURIComponent(workflow.id)}/${operation}`, { method: "POST" });
-  workflow = response.workflow;
+  workflow.enabled = response.workflow.enabled;
   refreshHeader();
   await reloadWorkflowList();
   setMessage(workflow.enabled ? "工作流已启用" : "工作流已禁用");
@@ -1559,6 +1695,7 @@ async function deleteWorkflow() {
   await api("/api/workflows/" + encodeURIComponent(workflow.id), { method: "DELETE" });
   workflow = null;
   workflowIsDraft = false;
+  draftState.saved(null);
   selectedNodeId = null;
   await reloadWorkflowList();
   if (workflows.length) await loadWorkflow(workflows[0].id);
@@ -1584,6 +1721,10 @@ async function dryRun() {
 
 async function refreshRuns() {
   const response = await api("/api/workflow-runs?limit=30");
+  ui.runCount.textContent = String(response.runs.length);
+  const signature = JSON.stringify([response.runs, workflows.map((item) => [item.id, item.name])]);
+  if (signature === runListSignature) return;
+  runListSignature = signature;
   ui.runList.replaceChildren();
   if (!response.runs.length) {
     ui.runList.append(make("p", "muted", "暂无运行记录"));
@@ -1593,10 +1734,14 @@ async function refreshRuns() {
   for (const run of response.runs) {
     const entry = make("article", "run-entry");
     entry.dataset.status = run.status;
+    entry.dataset.runId = run.run_id;
     entry.append(make("span", "run-dot"));
     const text = make("div");
     text.append(make("div", "run-name", names.get(run.workflow_id) || run.workflow_id));
-    text.append(make("div", "run-detail", run.mode + " · " + run.status + " · " + new Date(run.created_at).toLocaleTimeString()));
+    const statusLabels = { pending: "等待执行", running: "执行中", success: "成功", failed: "失败",
+      timeout: "超时", cancelled: "已取消", simulated: "模拟通过" };
+    text.append(make("div", "run-detail", (run.mode === "dry_run" ? "模拟" : "手势触发")
+      + " · " + (statusLabels[run.status] || run.status) + " · " + new Date(run.created_at).toLocaleTimeString()));
     entry.append(text);
     const detailButton = make("button", "", "步骤");
     detailButton.type = "button";
@@ -1609,7 +1754,7 @@ async function refreshRuns() {
         for (const step of detail.run.steps) {
           const row = make("div", "run-step");
           row.append(make("span", "run-step-name", step.node_id));
-          row.append(make("span", "run-step-status", step.status));
+          row.append(make("span", "run-step-status", statusLabels[step.status] || step.status));
           if (step.error) row.append(make("span", "run-step-error", step.error));
           stepPanel.append(row);
         }
@@ -1630,17 +1775,16 @@ async function refreshRuns() {
 
 async function refreshDisplayStatus() {
   const response = await api("/api/workflow-status");
-  const online = response.display_connected;
-  ui.displayConnection.dataset.state = online ? "online" : "offline";
-  ui.displayConnection.textContent = online ? "展示页面已连接" : "展示页面未连接";
+  ui.displayConnection.dataset.state = response.display_ready ? "online" : "offline";
+  ui.displayConnection.textContent = !response.display_connected ? "大屏未打开"
+    : !response.display_ready ? "等待展示就绪"
+      : displayPageLabel(response.display_page_id) + " · 已就绪";
 }
 
 function connectWorkflowEvents() {
-  const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-  const socket = new WebSocket(protocol + "//" + location.host + "/ws/events");
-  socket.addEventListener("message", async (message) => {
+  document.addEventListener("usage-event", async (message) => {
     try {
-      const event = JSON.parse(message.data);
+      const event = message.detail;
       if (event.type === "pointer") {
         handleHandPointer(event);
         return;
@@ -1672,7 +1816,6 @@ function connectWorkflowEvents() {
       console.error("工作流事件解析失败", error);
     }
   });
-  socket.addEventListener("close", () => window.setTimeout(connectWorkflowEvents, 1500));
 }
 
 function duplicateNode() {
@@ -1835,7 +1978,8 @@ async function testWorkflowGeneratorConnection() {
 }
 
 function openWorkflowGenerator() {
-  if (workflow && !window.confirm("AI 生成结果将替换当前画布内容。当前未保存的修改会丢失，是否继续？")) return;
+  // Opening or generating a preview does not replace the editor.
+  // The shared unsaved guard runs only when applying the result.
   generatedWorkflowPreview = null;
   ui.workflowGeneratorApiKey.value = "";
   ui.workflowGeneratorResult.hidden = true;
@@ -1891,30 +2035,29 @@ async function submitWorkflowGenerator(event) {
   }
 }
 
-function applyGeneratedWorkflow() {
+async function applyGeneratedWorkflow() {
   if (!generatedWorkflowPreview?.workflow) return;
-  workflow = structuredClone(generatedWorkflowPreview.workflow);
-  workflow.enabled = false;
-  workflowIsDraft = true;
-  selectedNodeId = null;
-  linkSourceId = null;
-  nodeStatuses.clear();
-  activeRunId = null;
-  ui.workflowVersion.replaceChildren(make("option", "", "未保存草稿"));
-  ui.workflowVersion.value = "";
-  refreshHeader();
-  renderTrigger();
-  renderCanvas();
-  renderInspector();
-  const errors = generatedWorkflowPreview.validation_errors || [];
-  ui.workflowGeneratorDialog.close();
-
-  setMessage(
-    errors.length
-      ? "AI 草稿已载入画布，但有 " + errors.length + " 项校验错误。修正后再保存。"
-      : "AI 草稿已载入画布。请检查节点参数，执行校验和模拟后再保存。",
-    errors.length ? "error" : "ok",
-  );
+  await withUnsavedChanges(async () => {
+    workflow = structuredClone(generatedWorkflowPreview.workflow);
+    workflow.enabled = false;
+    workflowIsDraft = true;
+    selectedNodeId = null;
+    linkSourceId = null;
+    nodeStatuses.clear();
+    activeRunId = null;
+    refreshHeader();
+    renderTrigger();
+    renderCanvas();
+    renderInspector();
+    const errors = generatedWorkflowPreview.validation_errors || [];
+    ui.workflowGeneratorDialog.close();
+    setMessage(
+      errors.length
+        ? "AI 草稿已载入画布，但有 " + errors.length + " 项校验错误。修正后再保存。"
+        : "AI 草稿已载入画布。请检查节点参数，执行校验和模拟后再保存。",
+      errors.length ? "error" : "ok",
+    );
+  });
 }
 
 function resetWorkflowGeneratorPreview() {
@@ -1963,10 +2106,12 @@ async function initialize() {
 
   if (workflowResult.status === "fulfilled" && Array.isArray(workflowResult.value.workflows)) {
     workflows = workflowResult.value.workflows;
-    renderWorkflowOptions();
-    if (workflows.length) {
+    renderWorkflowSidebar();
+    const initialWorkflow = mapScope === "all" ? workflows[0]
+      : workflows.find((item) => (item.trigger?.page_scope || "global") === mapScope);
+    if (initialWorkflow) {
       try {
-        await loadWorkflow(workflows[0].id);
+        await loadWorkflow(initialWorkflow.id);
       } catch (error) {
         errors.push("工作流载入失败：" + error.message);
         setEditingEnabled(Boolean(workflow));
@@ -1978,7 +2123,7 @@ async function initialize() {
     }
   } else {
     workflows = [];
-    renderWorkflowOptions();
+    renderWorkflowSidebar();
     setEditingEnabled(false);
     renderCanvas();
     errors.push("工作流列表加载失败：" + (workflowResult.reason?.message || "响应格式无效"));
@@ -1992,6 +2137,8 @@ async function initialize() {
   if (displayResult.status === "rejected") errors.push("展示页面状态读取失败：" + displayResult.reason.message);
   if (!pointerAvailable) errors.push("手势指针模块未加载；鼠标和键盘编辑不受影响");
   if (errors.length) setMessage(errors.join("；"), "error");
+  ui.newWorkflow.disabled = false;
+  ui.generateWorkflow.disabled = false;
   refreshWorkflowGeneratorStatus().catch((error) => {
     ui.workflowGeneratorStatus.textContent = "模型配置检查失败：" + error.message;
     ui.workflowGeneratorStatus.dataset.state = "error";
@@ -2000,8 +2147,7 @@ async function initialize() {
 }
 
 ui.newWorkflow.addEventListener("click", () => {
-  if (workflowIsDraft && !window.confirm("新建工作流会丢弃当前 AI 草稿，是否继续？")) return;
-  createWorkflow().catch((error) => setMessage(error.message, "error"));
+  withUnsavedChanges(createWorkflow);
 });
 ui.generateWorkflow.addEventListener("click", openWorkflowGenerator);
 ui.saveWorkflowGeneratorConfig.addEventListener("click", saveWorkflowGeneratorConfig);
@@ -2024,18 +2170,19 @@ ui.regenerateWorkflow.addEventListener("click", () => {
 ui.closeWorkflowGenerator.addEventListener("click", () => ui.workflowGeneratorDialog.close());
 ui.cancelWorkflowGenerator.addEventListener("click", () => ui.workflowGeneratorDialog.close());
 ui.workflowGeneratorDialog.addEventListener("close", resetWorkflowGeneratorPreview);
-ui.copyWorkflow.addEventListener("click", () => duplicateWorkflow().catch((error) => setMessage(error.message, "error")));
+ui.copyWorkflow.addEventListener("click", () => withUnsavedChanges(duplicateWorkflow));
 ui.deleteWorkflow.addEventListener("click", () => deleteWorkflow().catch((error) => setMessage(error.message, "error")));
 ui.saveWorkflow.addEventListener("click", () => saveWorkflow().catch((error) => setMessage(error.message, "error")));
 ui.validateWorkflow.addEventListener("click", () => validateCurrent().catch((error) => setMessage(error.message, "error")));
 ui.dryRunWorkflow.addEventListener("click", () => dryRun().catch((error) => setMessage(error.message, "error")));
 ui.toggleWorkflow.addEventListener("click", () => toggleWorkflow().catch((error) => setMessage(error.message, "error")));
-ui.workflowSelect.addEventListener("change", () => {
-  if (workflowIsDraft && !window.confirm("切换工作流会丢弃当前 AI 草稿，是否继续？")) {
-    ui.workflowSelect.value = "";
-    return;
-  }
-  loadWorkflow(ui.workflowSelect.value).catch((error) => setMessage(error.message, "error"));
+ui.gestureMapScope.addEventListener("change", () => {
+  mapScope = ui.gestureMapScope.value;
+  const url = new URL(location.href);
+  if (mapScope === "all") url.searchParams.delete("page_scope");
+  else url.searchParams.set("page_scope", mapScope);
+  history.replaceState(null, "", url);
+  renderWorkflowList();
 });
 ui.workflowName.addEventListener("input", updateHeaderData);
 ui.workflowDescription.addEventListener("input", updateHeaderData);
@@ -2048,34 +2195,48 @@ ui.triggerType.addEventListener("change", () => {
   renderTrigger();
   renderCanvas();
 });
-ui.workflowVersion.addEventListener("change", async () => {
-  if (!workflow) return;
-  const response = await api("/api/workflows/" + encodeURIComponent(workflow.id) + "/versions");
-  const item = response.versions.find((version) => String(version.version) === ui.workflowVersion.value);
-  if (!item) return;
-  const enabled = workflow.enabled;
-  workflow = structuredClone(item.definition);
-  workflow.enabled = enabled;
-  selectedNodeId = null;
-  closeInspector();
-  refreshHeader();
-  renderTrigger();
-  renderCanvas();
-  renderInspector();
-  setMessage("已载入历史版本 v" + item.version + "；修改并保存后会创建新版本");
+document.addEventListener("click", (event) => {
+  const link = event.target.closest("a[href]");
+  if (!link || link.hasAttribute("data-open-display") || link.target
+      || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey
+      || event.defaultPrevented || !draftState.dirty(workflow, workflowIsDraft)) return;
+  const destination = new URL(link.href, location.href);
+  if (destination.origin !== location.origin) return;
+  event.preventDefault();
+  withUnsavedChanges(() => { allowUnload = true; location.assign(destination.href); });
+});
+window.addEventListener("beforeunload", (event) => {
+  if (allowUnload || !draftState.dirty(workflow, workflowIsDraft)) return;
+  event.preventDefault();
+  event.returnValue = "";
+});
+window.addEventListener("pageshow", () => { allowUnload = false; });
+for (const type of ["input", "change"]) document.addEventListener(type, () => queueMicrotask(refreshSaveState));
+document.addEventListener("usage-pointer-disabled", () => refreshPointerMode().catch(() => {}));
+
+ui.workflowsTab.addEventListener("click", () => setSidebarTab("workflows"));
+ui.nodesTab.addEventListener("click", () => setSidebarTab("nodes"));
+for (const tab of [ui.workflowsTab, ui.nodesTab]) tab.addEventListener("keydown", (event) => {
+  if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+  event.preventDefault();
+  const nodes = event.key === "End" || (event.key !== "Home" && ui.workflowsTab.getAttribute("aria-selected") === "true");
+  setSidebarTab(nodes ? "nodes" : "workflows", true);
+});
+ui.workflowSearch.addEventListener("input", renderWorkflowList);
+ui.nodeSearch.addEventListener("input", renderActionLibrary);
+ui.addNodeTool.addEventListener("click", () => { setSidebarTab("nodes"); ui.nodeSearch.focus(); });
+ui.workflowMore.addEventListener("click", (event) => {
+  if (event.target.closest("button")) queueMicrotask(() => { ui.workflowMore.open = false; });
+});
+ui.disablePointerMode.addEventListener("click", () => {
+  if (pointerModeEnabled) togglePointerMode();
 });
 
-document.querySelectorAll(".library-node[data-node-type]").forEach((button) => {
-  button.draggable = true;
-  button.addEventListener("click", () => addNode(defaultNode(button.dataset.nodeType)));
-  button.addEventListener("dragstart", (event) => {
-    event.dataTransfer.setData("text/plain", "node-type:" + button.dataset.nodeType);
-    event.dataTransfer.effectAllowed = "copy";
-  });
-});
 ui.linkMode.addEventListener("click", () => {
   const active = ui.linkMode.getAttribute("aria-pressed") !== "true";
   ui.linkMode.setAttribute("aria-pressed", String(active));
+  ui.edgeWhenWrap.hidden = !active;
+  if (!active) ui.edgeWhen.value = "";
   linkSourceId = null;
   if (active) setMessage("选择起点，再选择目标节点");
   else clearMessage();

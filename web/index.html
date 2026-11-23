@@ -7,14 +7,21 @@
     <title>康晋电气手势控制平台</title>
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="/static/styles.css?v=20261119-system-font-1">
-    <script src="/static/display-shell.js?v=20261118-display-ready-1" defer></script>
+    <link rel="stylesheet" href="/static/usage-flow.css?v=20261123-layout-2">
+    <script src="/static/usage-flow.js?v=20261123-usage-flow-1" defer></script>
+    <script src="/static/display-shell.js?v=20261123-usage-flow-1" defer></script>
   </head>
   <body class="display-shell">
     <main class="display-shell-stage">
       <iframe id="displayPageFrame" class="display-page-frame" title="康晋电气展示页面" allow="autoplay; fullscreen" referrerpolicy="same-origin"></iframe>
+      <nav class="display-shell-toolbar" aria-label="大屏管理">
+        <a href="/settings" target="gesture-control-admin" id="openManagement">管理后台 ↗</a>
+        <button type="button" id="retryDisplay" hidden>重新连接大屏</button>
+      </nav>
       <div class="display-shell-status" role="status" aria-live="polite">
         <span id="displayShellDot" class="display-shell-dot" data-state="connecting"></span>
         <span id="displayShellLabel">康晋电气手势控制平台正在连接</span>
+        <span id="displayControllerLabel"></span>
       </div>
     </main>
     <noscript>此展示控制中心需要启用 JavaScript。</noscript>

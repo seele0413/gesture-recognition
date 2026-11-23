@@ -360,7 +360,7 @@ class StreamManager:
         with self._lock:
             self._pointer_mode_enabled = bool(enabled)
             processor = self._processor
-            controller = processor.controller.snapshot() if processor else dict(self._controller)
+            controller = self._get_controller_snapshot()
         setter = getattr(processor, "set_pointer_mode", None) if processor else None
         if setter:
             setter(self._pointer_mode_enabled)
@@ -387,10 +387,20 @@ class StreamManager:
             setter(clean)
         return dict(clean)
 
+    def _get_controller_snapshot(self) -> dict[str, Any]:
+        processor = self._processor
+        snapshotter = getattr(processor, "get_controller_snapshot", None)
+        controller = dict(snapshotter() if snapshotter else (
+            processor.controller.snapshot() if processor else self._controller
+        ))
+        controller["identity_confirmed"] = controller["state"] == "locked" or (
+            controller["state"] == "suspect" and bool(controller.get("identity_confirmed", False))
+        )
+        return controller
+
     def get_status(self) -> dict[str, Any]:
         with self._lock:
-            processor = self._processor
-            controller = processor.controller.snapshot() if processor else dict(self._controller)
+            controller = self._get_controller_snapshot()
             now_ms = int(time.time() * 1000)
             frame_age_ms = (
                 max(0, now_ms - self._last_frame_at_ms)
@@ -735,7 +745,7 @@ class StreamManager:
     ) -> None:
         with self._lock:
             processor = self._processor
-            controller = processor.controller.snapshot() if processor else dict(self._controller)
+            controller = self._get_controller_snapshot()
             was_locked = controller["state"] != "unlocked"
             self._state = "reconnecting"
             self._error = message or "视频流中断，正在自动重连。请检查摄像头和网络；恢复后需要重新做比耶手势。"

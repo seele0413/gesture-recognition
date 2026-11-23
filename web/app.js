@@ -151,28 +151,20 @@ function renderTracks() {
   elements.controllerCard.dataset.state = controller.state;
   const recoveryStates = ["suspect", "reacquiring", "lost"];
   const isRecovering = recoveryStates.includes(controller.state);
-  const labels = {
-    unlocked: "未锁定",
-    locked: "已锁定",
-    suspect: "主控短暂丢失 · 控制暂停",
-    reacquiring: "正在重新寻找主控 · 控制暂停",
-    lost: "跟踪中断 · 控制暂停",
-  };
-  elements.controllerStatus.textContent = labels[controller.state] || "未锁定";
+  const view = window.UsageFlow.controllerView(controller);
+  elements.controllerStatus.textContent = view.label;
   elements.controllerTrackId.textContent = controller.track_id || "--";
   elements.targetLabel.textContent = controller.state === "locked"
     ? "主控会话：" + (controller.controller_id || controller.track_id)
     : isRecovering ? "正在保留原主控身份" : "主控未锁定";
   elements.unlockController.disabled = controller.state === "unlocked";
-  elements.controllerDetail.textContent = controller.state === "locked"
-    ? "主控轨迹有效"
-    : controller.state === "suspect"
-      ? "短暂漏检容错中；已暂停新操作，等待原轨迹恢复"
+  elements.controllerDetail.textContent = controller.state === "locked" || controller.state === "suspect"
+    ? view.detail
       : controller.state === "reacquiring" || controller.state === "lost"
         ? "正在重新关联原主控；不会接受其他人员接管"
         : appState.state === "running"
           ? tracks.length
-            ? "保持比耶手势 · " + (controller.lock_progress || 0) + "/" + (controller.lock_required_frames || 2) + "（最近 " + (controller.lock_window_frames || 5) + " 帧）"
+            ? window.UsageFlow.lockPrompt(controller)
             : "未检测到肩部轨迹；请让双肩进入画面并保持清晰"
           : appState.state === "reconnecting" ? "视频流恢复后需要重新做比耶手势锁定" : "视频流未启动";
 
@@ -215,7 +207,7 @@ function renderTracks() {
         ? "比耶已确认"
         : "比耶未确认：" + hand.lock_gesture_reason;
       return (hand.handedness || "手") + " · " + gestureName + " " + confidence + "% · 锁定 "
-        + (appState.controller?.lock_progress || 0) + "/3（5帧窗口） · "
+        + window.UsageFlow.lockPrompt(controller) + " · "
         + lockState + " · " + (hand.lock_track_id || hand.track_id || hand.lock_association_reason || hand.association_reason)
         + " · " + hand.action_reason;
     }).join("  /  ");
@@ -368,7 +360,6 @@ function handleEvent(event) {
     return;
   }
   if (event.type !== "gesture") return;
-  console.log("[gesture-control]", event);
   const row = document.createElement("li");
   row.className = "event-item";
   const primary = document.createElement("div");
@@ -391,16 +382,7 @@ function handleEvent(event) {
 }
 
 function connectEvents() {
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const socket = new WebSocket(protocol + "//" + window.location.host + "/ws/events");
-  socket.addEventListener("message", (message) => {
-    try {
-      handleEvent(JSON.parse(message.data));
-    } catch (error) {
-      console.error("无法解析手势事件", error);
-    }
-  });
-  socket.addEventListener("close", () => window.setTimeout(connectEvents, 1500));
+  document.addEventListener("usage-event", (event) => handleEvent(event.detail));
 }
 
 elements.streamForm.addEventListener("submit", connectStream);

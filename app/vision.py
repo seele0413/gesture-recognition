@@ -289,6 +289,7 @@ class VisionProcessor:
                 self.publish(pointer_event)
             control_ms = (time.perf_counter() - control_started) * 1000
             hand_diagnostics = [self._public_hand(hand) for hand in hands]
+            controller = self.get_controller_snapshot()
         diagnostics = {
             "hand_count": len(hands),
             "pose_inference_width": width,
@@ -528,6 +529,16 @@ class VisionProcessor:
             )
         self.publish(controller_event)
 
+    def get_controller_snapshot(self) -> dict[str, Any]:
+        """Expose the same hand identity decision used to authorize control."""
+        with self.lock:
+            snapshot = self.controller.snapshot()
+            snapshot["identity_confirmed"] = snapshot["state"] == "locked" or (
+                snapshot["state"] == "suspect"
+                and bool(getattr(self, "_suspect_identity_confirmed", False))
+            )
+            return snapshot
+
     def unlock_controller(self) -> dict[str, Any]:
         with self.lock:
             changed = self.controller.unlock()
@@ -539,7 +550,7 @@ class VisionProcessor:
                 self.publish(pointer_event)
             if changed:
                 self._publish_controller("unlocked", "manual", self.last_timestamp_ms)
-            return self.controller.snapshot()
+            return self.get_controller_snapshot()
 
     def set_confidence_threshold(self, threshold: float) -> float:
         with self.lock:

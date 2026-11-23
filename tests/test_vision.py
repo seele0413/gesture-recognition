@@ -34,6 +34,33 @@ class _GestureRecognizer:
 
 
 class VisionTimingTests(unittest.TestCase):
+    def test_controller_snapshot_tracks_identity_through_recovery(self):
+        processor = VisionProcessor.__new__(VisionProcessor)
+        processor.lock = threading.RLock()
+        processor.controller = ControllerLock()
+        processor._suspect_identity_confirmed = False
+        self.assertIs(processor.get_controller_snapshot()["identity_confirmed"], False)
+        processor.controller.observe_lock_candidates(["person-1"], 0)
+        processor.controller.observe_lock_candidates(["person-1"], 50)
+        locked = processor.get_controller_snapshot()
+        self.assertIs(locked["identity_confirmed"], True)
+        processor.controller.update_tracking(set(), 100)
+        self.assertIs(processor.get_controller_snapshot()["identity_confirmed"], False)
+        processor._suspect_identity_confirmed = True
+        suspect = processor.get_controller_snapshot()
+        self.assertEqual(suspect["controller_id"], locked["controller_id"])
+        self.assertIs(suspect["identity_confirmed"], True)
+        processor._suspect_identity_confirmed = False
+        self.assertIs(processor.get_controller_snapshot()["identity_confirmed"], False)
+        processor._suspect_identity_confirmed = True
+        processor.controller.update_tracking(set(), 900)
+        self.assertEqual(processor.get_controller_snapshot()["state"], "reacquiring")
+        self.assertIs(processor.get_controller_snapshot()["identity_confirmed"], False)
+        processor.controller.update_tracking({"person-1"}, 1000)
+        self.assertIs(processor.get_controller_snapshot()["identity_confirmed"], True)
+        processor.controller.unlock()
+        self.assertIs(processor.get_controller_snapshot()["identity_confirmed"], False)
+
     def test_process_uses_high_res_hand_search_before_lock_and_reports_timings(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             processor = VisionProcessor.__new__(VisionProcessor)
@@ -62,6 +89,7 @@ class VisionTimingTests(unittest.TestCase):
             result = processor.process(np.zeros((1080, 1920, 3), dtype=np.uint8), frame_resize_ms=0.25)
 
         self.assertEqual((result["frame_width"], result["frame_height"]), (960, 540))
+        self.assertIs(result["controller"]["identity_confirmed"], False)
         self.assertEqual(processor.pose_landmarker.last_image_shape, (540, 960, 3))
         self.assertEqual(processor.gesture_recognizer.last_image_shape, (900, 1600, 3))
         timings = result["vision"]["timings"]

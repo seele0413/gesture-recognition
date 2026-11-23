@@ -140,6 +140,11 @@ function renderPageNode(page, childrenByParent, visited = new Set()) {
 
   const actions = document.createElement("div");
   actions.className = "page-node-actions";
+  const configureGestures = document.createElement("a");
+  configureGestures.className = "page-action";
+  configureGestures.href = "/workflows?page_scope=" + encodeURIComponent(page.page_id);
+  configureGestures.textContent = "配置手势";
+  actions.append(configureGestures);
   if (page.page_type === "external") {
     actions.append(makeButton("编辑", () => openEditor(page)));
   }

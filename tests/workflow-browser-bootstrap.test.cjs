@@ -37,10 +37,11 @@ test("gesture mappings are presented inside workflows instead of the settings pa
   const workflows = fs.readFileSync(path.join(root, "web/workflows.html"), "utf8");
   const script = fs.readFileSync(path.join(root, "web/workflows.js"), "utf8");
   assert.doesNotMatch(settings, /mappingGrid|mappingHeading|saveMappings/);
-  assert.match(workflows, /id="gestureWorkflowMap"/);
-  assert.match(workflows, /适用主页.*同一主页、同一手势/);
+  assert.match(workflows, /id="workflowList"/);
+  assert.match(workflows, /id="gestureMapScope"/);
+  assert.doesNotMatch(workflows, /id="workflowSelect"|id="workflowVersion"|id="gestureWorkflowMap"/);
   assert.match(script, /page_scope/);
-  assert.match(script, /function renderGestureWorkflowMap\(\)/);
+  assert.match(script, /function renderWorkflowList\(\)/);
 });
 
 test("AI workflow dialog configures compatible model providers and tests connections without exposing secrets", () => {

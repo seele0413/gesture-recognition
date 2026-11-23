@@ -43,4 +43,7 @@ jobs:
           node --check web/player.js
           node --check web/workflows.js
           node --check web/display-pages.js
-          node --test tests/pointer-geometry.test.cjs tests/pointer-event-buffer.test.cjs tests/workflow-browser-bootstrap.test.cjs tests/display-pages-ui.test.cjs tests/industrial-ui-theme.test.cjs
+          node --check web/usage-flow.js
+          node --check web/admin.js
+          node --check web/app.js
+          node --test tests/*.test.cjs
