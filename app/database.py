@@ -587,11 +587,13 @@ class ControlStore:
             ).fetchone()
         return {**dict(row), "enabled": bool(row["enabled"])} if row else None
 
-    def get_display_page_ids(self) -> tuple[str, ...]:
+    def get_display_page_ids(self, include_disabled: bool = False) -> tuple[str, ...]:
+        query = "SELECT page_id FROM display_pages"
+        if not include_disabled:
+            query += " WHERE enabled = 1"
+        query += " ORDER BY sort_order, created_at, page_id"
         with self._lock, self._connection() as connection:
-            rows = connection.execute(
-                "SELECT page_id FROM display_pages WHERE enabled = 1 ORDER BY sort_order, created_at, page_id"
-            ).fetchall()
+            rows = connection.execute(query).fetchall()
         return tuple(row["page_id"] for row in rows)
 
     def get_display_page_labels(self) -> dict[str, str]:
