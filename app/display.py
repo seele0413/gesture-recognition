@@ -39,7 +39,7 @@ class DisplayCommandChannel:
 
     def _set_ready(self, ready: bool, page_id: str | None = None, generation: int | None = None) -> None:
         previous = self.ready
-        previous_page_id = self.ready_page_id
+        previous_page_id = self._ready_page_id
         if ready:
             self._ready_page_id = page_id
             self._ready_generation = generation
