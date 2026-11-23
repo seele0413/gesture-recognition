@@ -19,6 +19,7 @@ class DisplayCommandChannel:
         self._ready_generation: int | None = None
         self.on_state_change: Callable[[bool], None] | None = None
         self.on_ready_change: Callable[[bool], None] | None = None
+        self.on_page_change: Callable[[str | None], None] | None = None
 
     @property
     def connected(self) -> bool:
@@ -38,6 +39,7 @@ class DisplayCommandChannel:
 
     def _set_ready(self, ready: bool, page_id: str | None = None, generation: int | None = None) -> None:
         previous = self.ready
+        previous_page_id = self.ready_page_id
         if ready:
             self._ready_page_id = page_id
             self._ready_generation = generation
@@ -46,6 +48,7 @@ class DisplayCommandChannel:
             self._ready_generation = None
 
         current = self.ready
+        current_page_id = self.ready_page_id
         if current and not previous:
             for future in tuple(self._ready_waiters):
                 if not future.done():
@@ -54,6 +57,8 @@ class DisplayCommandChannel:
 
         if current != previous and self.on_ready_change:
             self.on_ready_change(current)
+        if current_page_id != previous_page_id and self.on_page_change:
+            self.on_page_change(current_page_id)
 
     async def connect(self, websocket: WebSocket) -> bool:
         async with self._lock:
