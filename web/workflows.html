@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#145da8">
+    <title>康晋电气手势控制平台 · 工作流</title>
+    <link rel="icon" href="https://img.kompass.com/sys-master-images/h29/h63/9109303525406/comking%E6%96%B0logo-jpg" type="image/jpeg">
+    <link rel="stylesheet" href="/static/styles.css?v=20261119-system-font-1">
+    <link rel="stylesheet" href="/static/workflows.css?v=20261123-page-scope-1">
+    <link rel="stylesheet" href="/static/industrial-ui.css?v=20261119-system-font-1">
+    <link rel="stylesheet" href="/static/comking-glass.css?v=20261119-ui-polish-1">
+    <script src="/static/pointer-geometry.js?v=20261118-workflow-fix-1" defer></script>
+    <script src="/static/pointer-event-buffer.js?v=20261118-workflow-fix-1" defer></script>
+    <script src="/static/workflows.js?v=20261123-page-scope-1" defer></script>
+  </head>
+  <body class="workflow-page">
+    <header class="workflow-header">
+      <div class="workflow-header-top">
+        <a class="workflow-brand" href="/" aria-label="返回康晋电气手势控制平台首页">
+          <span class="comking-logo-shell"><img class="comking-logo" src="https://img.kompass.com/sys-master-images/h29/h63/9109303525406/comking%E6%96%B0logo-jpg" alt="COMKING" loading="eager"></span>
+          <span><strong>康晋电气</strong><small>手势控制平台</small></span>
+        </a>
+        <nav class="workflow-primary-nav" aria-label="系统导航">
+          <a class="back-link" href="/workflows" aria-current="page">工作流</a>
+          <a class="back-link" href="/display-pages">网页管理</a>
+          <a class="back-link" href="/settings">设置</a>
+        </nav>
+      </div>
+
+      <div class="workflow-header-controls">
+        <div class="workflow-meta" aria-label="工作流信息">
+          <label class="workflow-meta-item" for="workflowSelect">
+            <span>选择工作流</span>
+            <select id="workflowSelect" aria-label="选择工作流"></select>
+          </label>
+          <label class="workflow-meta-item" for="workflowName">
+            <span>名称</span>
+            <input id="workflowName" maxlength="80" aria-label="工作流名称" placeholder="输入工作流名称">
+          </label>
+          <label class="workflow-meta-item" for="workflowDescription">
+            <span>描述</span>
+            <input id="workflowDescription" maxlength="500" aria-label="工作流描述" placeholder="为这个工作流添加说明">
+          </label>
+          <label class="workflow-meta-item workflow-version-item" for="workflowVersion" title="这里显示当前工作流的保存版本。选择历史版本可回看旧配置，修改并保存后会生成一个新版本。">
+            <span>版本 <small>历史记录</small></span>
+            <select id="workflowVersion" aria-label="工作流保存版本" title="选择历史版本可回看旧配置，修改并保存后会生成一个新版本。"></select>
+          </label>
+        </div>
+        <div class="workflow-actions" aria-label="工作流操作">
+          <button id="generateWorkflow" class="tool-button tool-primary" type="button">AI 生成</button>
+          <button id="newWorkflow" class="tool-button" type="button">新建</button>
+          <button id="copyWorkflow" class="tool-button" type="button" disabled>复制</button>
+          <button id="saveWorkflow" class="tool-button tool-primary" type="button" disabled>保存</button>
+          <button id="deleteWorkflow" class="tool-button tool-danger" type="button" disabled>删除</button>
+          <button id="validateWorkflow" class="tool-button" type="button" disabled>校验</button>
+          <button id="dryRunWorkflow" class="tool-button" type="button" disabled>模拟</button>
+          <button id="toggleWorkflow" class="tool-button" type="button" disabled>启用</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="workflow-layout">
+      <aside class="workflow-library" aria-labelledby="libraryHeading">
+        <div class="section-title"><h1 id="libraryHeading">节点库</h1></div>
+        <div class="node-library-group">
+          <h2>逻辑</h2>
+          <button class="library-node" data-node-type="condition" type="button"><span class="node-mark mark-condition">?</span><span>条件分支</span></button>
+          <button class="library-node" data-node-type="delay" type="button"><span class="node-mark mark-delay">Ⅱ</span><span>延迟</span></button>
+          <button class="library-node" data-node-type="wait_event" type="button"><span class="node-mark mark-wait">◷</span><span>等待事件</span></button>
+          <button class="library-node" data-node-type="end" type="button"><span class="node-mark mark-end">■</span><span>结束</span></button>
+        </div>
+        <div id="actionLibrary" class="node-library-group">
+          <h2>动作</h2>
+          <p class="muted">正在读取动作…</p>
+        </div>
+        <section class="gesture-workflow-panel" aria-labelledby="gestureWorkflowMapHeading">
+          <div class="section-title"><h2 id="gestureWorkflowMapHeading">手势工作流映射</h2></div>
+          <p class="muted">每个手势工作流都可以设置适用主页：全局或某个已登记页面。同一个手势可以在不同主页执行不同操作；同一主页、同一手势只能有一个已启用工作流。一个工作流内可以串联多个动作节点，例如：promo 页张开手掌播放视频，竖拇指增加音量，拇指向下减小音量；factory 页张开手掌则可以展示工厂介绍。</p>
+          <div id="gestureWorkflowMap" class="gesture-workflow-map" aria-live="polite">
+            <p class="muted">正在读取手势工作流…</p>
+          </div>
+        </section>
+      </aside>
+
+      <section class="workflow-editor" aria-label="工作流画布">
+        <div class="editor-toolbar">
+          <div class="trigger-editor">
+            <label for="triggerType">触发</label>
+            <select id="triggerType">
+              <option value="gesture_trigger">单个手势</option>
+              <option value="gesture_sequence_trigger">手势序列</option>
+              <option value="controller_locked">主控锁定</option>
+            </select>
+            <div id="triggerFields"></div>
+          </div>
+          <div class="canvas-tools">
+            <label class="edge-when-wrap" for="edgeWhen">连线条件
+              <select id="edgeWhen"><option value="">常规</option><option value="true">true</option><option value="false">false</option><option value="error">error</option></select>
+            </label>
+            <button id="linkMode" class="tool-button" type="button" aria-pressed="false">连线</button>
+            <button id="pointerMode" class="tool-button" type="button" aria-pressed="false" title="仅开启摄像头手势指针；鼠标和键盘始终可以编辑工作流">手势拖拽：关闭</button>
+            <span class="pointer-mode-hint">鼠标/键盘编辑无需摄像头；仅手势拖拽需要摄像头</span>
+            <button id="pointerMirror" class="tool-button" type="button" aria-pressed="false" title="切换摄像头横向镜像">镜像：关闭</button>
+            <button id="pointerCalibrate" class="tool-button" type="button" disabled title="依次对准画布四角并捏合采集，校正摄像头透视偏差">四角校准</button>
+            <button id="pointerDiagnostics" class="tool-button" type="button" aria-pressed="false" title="查看指针事件、帧处理和节点更新性能">指针诊断</button>
+            <button id="autoArrange" class="icon-tool" type="button" title="自动排列节点" aria-label="自动排列节点">↔</button>
+            <button id="zoomOut" class="icon-tool" type="button" title="缩小画布" aria-label="缩小画布">−</button>
+            <span id="zoomLabel" class="zoom-label">100%</span>
+            <button id="zoomIn" class="icon-tool" type="button" title="放大画布" aria-label="放大画布">+</button>
+          </div>
+        </div>
+        <div id="validationMessage" class="validation-message" role="status" aria-live="polite"></div>
+        <aside id="pointerDiagnosticsPanel" class="pointer-diagnostics-panel" hidden aria-label="手势指针性能诊断">
+          <div class="pointer-diagnostics-header">
+            <strong>手势指针诊断</strong>
+            <button id="pointerDiagnosticsClose" class="icon-tool" type="button" aria-label="关闭指针诊断">×</button>
+          </div>
+          <div class="pointer-diagnostics-grid">
+            <div><span>事件频率</span><strong id="pointerDiagRate">--</strong></div>
+            <div><span>事件间隔 P95</span><strong id="pointerDiagGap">--</strong></div>
+            <div><span>RAF 等待 P95</span><strong id="pointerDiagRaf">--</strong></div>
+            <div><span>事件处理最大值</span><strong id="pointerDiagProcess">--</strong></div>
+            <div><span>节点更新最大值</span><strong id="pointerDiagDrag">--</strong></div>
+            <div><span>合并移动样本</span><strong id="pointerDiagCoalesced">0</strong></div>
+          </div>
+          <p id="pointerDiagState" class="pointer-diagnostics-state">等待指针事件</p>
+          <div class="pointer-diagnostics-actions">
+            <button id="pointerDiagnosticsReset" class="tool-button" type="button">重置统计</button>
+            <button id="pointerDiagnosticsExport" class="tool-button" type="button">导出 JSON</button>
+          </div>
+        </aside>
+        <div id="canvasViewport" class="canvas-viewport">
+          <div id="canvasWorld" class="canvas-world">
+            <svg id="edgeLayer" class="edge-layer" aria-hidden="true">
+              <defs><marker id="edgeArrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z"></path></marker></defs>
+            </svg>
+            <div id="triggerBadge" class="trigger-badge">手势触发器</div>
+            <div id="canvasNodes" class="canvas-nodes"></div>
+          </div>
+        </div>
+      </section>
+
+      <aside id="workflowInspector" class="workflow-inspector" hidden aria-labelledby="inspectorHeading">
+        <div class="section-title">
+          <div class="inspector-heading">
+            <h2 id="inspectorHeading">节点参数</h2>
+            <p class="inspector-subtitle">右键点击节点可打开或切换参数</p>
+          </div>
+          <button id="inspectorClose" class="icon-tool inspector-close" type="button" aria-label="关闭节点参数">×</button>
+        </div>
+        <div id="inspectorContent" class="inspector-content"><p class="muted">右键点击画布节点，打开参数设置</p></div>
+        <div class="inspector-actions">
+          <button id="duplicateNode" class="tool-button" type="button" disabled>复制节点</button>
+          <button id="deleteNode" class="tool-button tool-danger" type="button" disabled>删除节点</button>
+        </div>
+      </aside>
+    </main>
+
+    <section class="workflow-runs" aria-labelledby="runsHeading">
+      <div class="runs-heading"><h2 id="runsHeading">运行记录</h2><span id="displayConnection" class="connection-pill" data-state="offline">展示页面未连接</span></div>
+      <div id="runList" class="run-list"><p class="muted">暂无运行记录</p></div>
+    </section>
+
+    <dialog id="workflowGeneratorDialog" class="workflow-generator-dialog" aria-labelledby="workflowGeneratorTitle">
+      <form id="workflowGeneratorForm" class="workflow-generator-form">
+        <div class="workflow-generator-heading">
+          <div>
+            <h2 id="workflowGeneratorTitle">AI 自动生成工作流</h2>
+            <p>上传业务流程文档，系统会将它转换为当前项目可用的工作流节点。</p>
+          </div>
+          <button id="closeWorkflowGenerator" class="icon-tool" type="button" aria-label="关闭">×</button>
+        </div>
+
+        <label for="workflowGeneratorFile">需求文档</label>
+        <input id="workflowGeneratorFile" name="file" type="file" accept=".pdf,.docx,.txt,.md" required>
+        <small>支持 PDF、DOCX、TXT、Markdown，单个文件最大 5 MB。扫描版 PDF 暂不支持 OCR。</small>
+
+        <label for="workflowGeneratorTrigger">默认启动手势</label>
+        <select id="workflowGeneratorTrigger" name="preferred_trigger">
+          <option value="Open_Palm" selected>张开手掌</option>
+          <option value="Closed_Fist">握拳</option>
+          <option value="Thumb_Up">竖拇指</option>
+          <option value="Thumb_Down">拇指向下</option>
+          <option value="Pointing_Up">食指向上</option>
+          <option value="ILoveYou">我爱你手势</option>
+        </select>
+        <small>如果文档明确指定了触发方式，AI 会优先遵循文档和补充要求。</small>
+
+        <section class="workflow-generator-config" aria-label="AI 模型服务配置">
+          <div class="workflow-generator-config-heading">
+            <strong>模型服务配置</strong>
+            <span id="workflowGeneratorKeyState" class="workflow-generator-key-state">未配置</span>
+          </div>
+          <label for="workflowGeneratorApiKey">API Key</label>
+          <input id="workflowGeneratorApiKey" type="password" maxlength="512" autocomplete="new-password" spellcheck="false" placeholder="粘贴中转站或官方服务商 API Key">
+          <small>留空表示继续使用本机已保存的密钥。</small>
+
+          <label for="workflowGeneratorBaseUrl">API Base URL</label>
+          <input id="workflowGeneratorBaseUrl" type="url" maxlength="2048" autocomplete="url" spellcheck="false" placeholder="https://api.example.com/v1" value="https://api.openai.com/v1">
+
+          <label for="workflowGeneratorModel">模型名称</label>
+          <input id="workflowGeneratorModel" type="text" maxlength="160" spellcheck="false" placeholder="例如 gpt-4o-mini" value="gpt-4o-mini">
+
+          <label for="workflowGeneratorProtocol">接口协议</label>
+          <select id="workflowGeneratorProtocol">
+            <option value="auto" selected>自动兼容（推荐，优先 Chat Completions）</option>
+            <option value="chat_completions">Chat Completions API</option>
+            <option value="responses">Responses API</option>
+          </select>
+          <small>自动兼容模式优先使用中转站普遍支持的 Chat Completions；遇到接口路径不支持时再尝试 Responses。结构化 JSON Schema 不受支持时，会降级为 JSON Object 或普通 JSON 提示。</small>
+
+          <div class="workflow-generator-config-actions">
+            <button id="saveWorkflowGeneratorConfig" class="tool-button" type="button">保存配置</button>
+            <button id="testWorkflowGeneratorConnection" class="tool-button" type="button">测试连接</button>
+          </div>
+          <small>配置保存在本机项目根目录的 .env 文件中。API Key 不会返回浏览器或显示在状态接口中。</small>
+        </section>
+
+        <label for="workflowGeneratorInstructions">补充要求</label>
+        <textarea id="workflowGeneratorInstructions" name="instructions" rows="4" maxlength="2000" placeholder="例如：访客进入后先播放宣传片；播放完成后进入公司简介；每个页面停留 10 秒；最后进入产品中心。"></textarea>
+
+        <p id="workflowGeneratorStatus" class="workflow-generator-status" role="status">正在检查模型配置…</p>
+        <p class="workflow-generator-privacy">文档正文会发送到你配置的模型服务商进行解析，不会保存在项目磁盘中。API Key 仅保存在本机 .env 文件，请勿在公共电脑配置或上传未经授权的涉密资料。生成结果仅为未启用草稿，需要你检查、校验和模拟后才能保存及启用。</p>
+
+        <section id="workflowGeneratorResult" class="workflow-generator-result" hidden aria-live="polite">
+          <h3>生成结果预览</h3>
+          <p id="workflowGeneratorSummary"></p>
+          <div id="workflowGeneratorReport"></div>
+          <div class="workflow-generator-actions">
+            <button id="applyGeneratedWorkflow" class="tool-button tool-primary" type="button" disabled>应用到画布</button>
+            <button id="regenerateWorkflow" class="tool-button" type="button">重新生成</button>
+          </div>
+        </section>
+
+        <div class="workflow-generator-actions">
+          <button id="workflowGeneratorSubmit" class="tool-button tool-primary" type="submit" disabled>解析并生成草稿</button>
+          <button class="tool-button" type="button" id="cancelWorkflowGenerator">取消</button>
+        </div>
+      </form>
+    </dialog>
+  </body>
+</html>

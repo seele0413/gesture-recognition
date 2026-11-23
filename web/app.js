@@ -1,13 +1,3 @@
-const GESTURES = [
-  ["Open_Palm", "张开手掌"],
-  ["Closed_Fist", "握拳"],
-  ["Thumb_Up", "竖拇指"],
-  ["Thumb_Down", "拇指向下"],
-  ["Pointing_Up", "食指向上"],
-  ["Victory", "V 字手势"],
-  ["ILoveYou", "我爱你手势"],
-];
-
 const ACTIONS = [
   ["none", "不执行"],
   ["play_pause", "播放 / 暂停"],
@@ -30,8 +20,8 @@ const elements = Object.fromEntries(
     "connectionStatus", "connectionLabel", "streamError", "streamForm", "rtspUrl", "toggleRtspVisibility",
     "startStream", "stopStream", "videoFrame", "videoFeed", "personOverlay", "videoPlaceholder",
     "resolutionLabel", "candidateCount", "targetLabel", "visionDiagnostics", "handDiagnostics", "trackCount", "controllerCard", "controllerStatus",
-    "controllerTrackId", "controllerDetail", "unlockController", "trackList", "mappingGrid", "saveMappings",
-    "mappingStatus", "eventList", "clearEvents",
+    "controllerTrackId", "controllerDetail", "unlockController", "trackList",
+    "eventList", "clearEvents", "pipelineDiagnostics", "gestureConfidenceRange", "confidenceValue", "confidenceStatus",
   ].map((id) => [id, document.getElementById(id)]),
 );
 
@@ -42,7 +32,8 @@ let appState = {
   frame_height: 0,
   controller: { state: "unlocked", track_id: null },
 };
-let mappings = {};
+let confidenceSaveTimer;
+let confidenceSaveQueue = Promise.resolve();
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -79,13 +70,21 @@ function drawTracks() {
   context.setTransform(ratio, 0, 0, ratio, 0, 0);
   context.clearRect(0, 0, width, height);
   if (!appState.frame_width || !appState.frame_height) return;
+  const frameGap = Math.abs((appState.preview_frame_sequence || 0) - (appState.vision_frame_sequence || 0));
+  const maxOverlayGap = Math.max(2, Math.round((appState.preview_fps || 20) * 0.25));
+  if (frameGap > maxOverlayGap) return;
   const controller = appState.controller || {};
   for (const track of appState.tracks || []) {
-    const [x, y, boxWidth, boxHeight] = track.box;
-    const left = (x / appState.frame_width) * width;
-    const top = (y / appState.frame_height) * height;
-    const drawWidth = (boxWidth / appState.frame_width) * width;
-    const drawHeight = (boxHeight / appState.frame_height) * height;
+    const [x, y, boxWidth, boxHeight] = track.box_norm || [
+      track.box[0] / appState.frame_width,
+      track.box[1] / appState.frame_height,
+      track.box[2] / appState.frame_width,
+      track.box[3] / appState.frame_height,
+    ];
+    const left = x * width;
+    const top = y * height;
+    const drawWidth = boxWidth * width;
+    const drawHeight = boxHeight * height;
     const isController = track.track_id && track.track_id === controller.track_id;
     context.strokeStyle = isController ? "#d0b56d" : track.ambiguous ? "#bd7165" : "#70a27a";
     context.lineWidth = isController ? 3 : 2;
@@ -102,7 +101,7 @@ function drawTracks() {
   for (const hand of appState.vision?.hands || []) {
     const points = hand.landmarks || [];
     if (points.length !== 21) continue;
-    const color = hand.is_ok ? "#d7bc74" : "#77c7cb";
+    const color = hand.is_lock_gesture ? "#d7bc74" : "#77c7cb";
     context.strokeStyle = color;
     context.fillStyle = color;
     context.lineWidth = 1.5;
@@ -122,7 +121,7 @@ function drawTracks() {
     const labelWidth = context.measureText(handLabel).width + 10;
     const labelX = points[0].x * width;
     const labelY = Math.max(0, points[0].y * height - 19);
-    context.fillStyle = hand.is_ok ? "#745e2f" : "#315e60";
+    context.fillStyle = hand.is_lock_gesture ? "#745e2f" : "#315e60";
     context.fillRect(labelX, labelY, labelWidth, 17);
     context.fillStyle = "#fff";
     context.fillText(handLabel, labelX + 5, labelY + 12);
@@ -150,28 +149,55 @@ function renderTracks() {
   }
 
   elements.controllerCard.dataset.state = controller.state;
-  const labels = { unlocked: "未锁定", locked: "已锁定", lost: "跟踪中断 · 控制暂停" };
+  const recoveryStates = ["suspect", "reacquiring", "lost"];
+  const isRecovering = recoveryStates.includes(controller.state);
+  const labels = {
+    unlocked: "未锁定",
+    locked: "已锁定",
+    suspect: "主控短暂丢失 · 控制暂停",
+    reacquiring: "正在重新寻找主控 · 控制暂停",
+    lost: "跟踪中断 · 控制暂停",
+  };
   elements.controllerStatus.textContent = labels[controller.state] || "未锁定";
   elements.controllerTrackId.textContent = controller.track_id || "--";
   elements.targetLabel.textContent = controller.state === "locked"
-    ? "主控：" + controller.track_id
-    : controller.state === "lost" ? "主控暂时丢失" : "主控未锁定";
+    ? "主控会话：" + (controller.controller_id || controller.track_id)
+    : isRecovering ? "正在保留原主控身份" : "主控未锁定";
   elements.unlockController.disabled = controller.state === "unlocked";
   elements.controllerDetail.textContent = controller.state === "locked"
     ? "主控轨迹有效"
-    : controller.state === "lost"
-      ? "信号丢失 · 控制暂停"
-      : appState.state === "running"
-        ? tracks.length
-          ? "保持 OK 手势 · " + (controller.lock_progress || 0) + "/" + (controller.lock_required_frames || 5) + " 帧"
-          : "未检测到肩部轨迹；请让双肩进入画面并保持清晰"
-        : appState.state === "reconnecting" ? "视频流恢复后需要重新做 OK 手势锁定" : "视频流未启动";
+    : controller.state === "suspect"
+      ? "短暂漏检容错中；已暂停新操作，等待原轨迹恢复"
+      : controller.state === "reacquiring" || controller.state === "lost"
+        ? "正在重新关联原主控；不会接受其他人员接管"
+        : appState.state === "running"
+          ? tracks.length
+            ? "保持比耶手势 · " + (controller.lock_progress || 0) + "/" + (controller.lock_required_frames || 2) + "（最近 " + (controller.lock_window_frames || 5) + " 帧）"
+            : "未检测到肩部轨迹；请让双肩进入画面并保持清晰"
+          : appState.state === "reconnecting" ? "视频流恢复后需要重新做比耶手势锁定" : "视频流未启动";
 
   const vision = appState.vision || {};
+  const ambiguousTrackCount = tracks.filter((track) => track.ambiguous).length;
   elements.visionDiagnostics.textContent = "人体轨迹 " + tracks.length
+    + " · 明确 " + (tracks.length - ambiguousTrackCount) + " · 歧义 " + ambiguousTrackCount
     + " · 手部 " + (vision.hand_count || 0)
-    + " · OK " + (vision.ok_hand_count || 0)
-    + " · 已关联 OK " + (vision.associated_ok_count || 0);
+    + " · 比耶 " + (vision.lock_gesture_count || 0)
+    + " · 已关联比耶 " + (vision.associated_lock_gesture_count || 0)
+    + " · 手部输入 " + (vision.hand_inference_width || 0) + "px"
+    + " · 低置信 " + (vision.low_confidence_hand_count || 0)
+    + " · 门槛 " + Math.round((vision.confidence_threshold || 0.6) * 100) + "%";
+  const visionMs = appState.last_vision_ms;
+  const jpegMs = appState.last_jpeg_encode_ms;
+  const queueDelayMs = appState.last_queue_delay_ms;
+  const timings = vision.timings || {};
+  const droppedFrames = appState.dropped_frames || 0;
+  elements.pipelineDiagnostics.textContent = visionMs == null
+    ? "预览 -- FPS · AI -- FPS · 预处理 -- ms · Pose -- ms · 手势 -- ms · 轨迹 -- ms · 推理 -- ms · JPEG -- ms · 排队 -- ms · 丢帧 " + droppedFrames
+    : "预览 " + (appState.preview_fps || 0) + " FPS · AI " + (appState.ai_processing_fps || 0) + " FPS"
+      + " · 预处理 " + Math.round(timings.preprocessing_ms || 0) + " ms"
+      + " · Pose " + Math.round(timings.pose_inference_ms || 0) + " ms · 手势 " + Math.round(timings.gesture_inference_ms || 0) + " ms"
+      + " · 轨迹 " + Math.round(timings.tracking_ms || 0) + " ms · 推理 " + Math.round(visionMs) + " ms · JPEG " + Math.round(jpegMs || 0)
+      + " ms · 排队 " + Math.round(queueDelayMs || 0) + " ms · 丢帧 " + droppedFrames;
   const hands = vision.hands || [];
   if (!hands.length) {
     elements.handDiagnostics.textContent = appState.state === "running"
@@ -179,15 +205,19 @@ function renderTracks() {
         ? "人体已检测；暂未检测到手部，请举手入镜并避免遮挡"
         : "尚未建立人体轨迹，请确保双肩清晰进入画面"
       : appState.state === "reconnecting"
-        ? "摄像头正在重连；控制已暂停，恢复后需重新做 OK 手势"
+        ? "摄像头正在重连；控制已暂停，恢复后需重新做比耶手势"
         : "等待识别手部";
   } else {
     elements.handDiagnostics.textContent = hands.slice(0, 3).map((hand) => {
       const gestureName = hand.gesture || "未识别内置手势";
       const confidence = Math.round((hand.confidence || 0) * 100);
-      const okState = hand.is_ok ? "OK 已确认" : "OK 未确认：" + hand.ok_reason;
-      return (hand.handedness || "手") + " · " + gestureName + " " + confidence + "% · "
-        + okState + " · " + (hand.track_id || hand.association_reason) + " · " + hand.action_reason;
+      const lockState = hand.is_lock_gesture
+        ? "比耶已确认"
+        : "比耶未确认：" + hand.lock_gesture_reason;
+      return (hand.handedness || "手") + " · " + gestureName + " " + confidence + "% · 锁定 "
+        + (appState.controller?.lock_progress || 0) + "/3（5帧窗口） · "
+        + lockState + " · " + (hand.lock_track_id || hand.track_id || hand.lock_association_reason || hand.association_reason)
+        + " · " + hand.action_reason;
     }).join("  /  ");
   }
   elements.trackList.replaceChildren();
@@ -282,46 +312,49 @@ async function unlockController() {
   }
 }
 
-function buildMappings() {
-  elements.mappingGrid.replaceChildren();
-  for (const [gesture, label] of GESTURES) {
-    const row = document.createElement("div");
-    row.className = "mapping-row";
-    const gestureLabel = document.createElement("label");
-    gestureLabel.textContent = label;
-    gestureLabel.htmlFor = "mapping-" + gesture;
-    const select = document.createElement("select");
-    select.id = "mapping-" + gesture;
-    select.dataset.gesture = gesture;
-    for (const [action, actionLabel] of ACTIONS) select.add(new Option(actionLabel, action));
-    select.value = mappings[gesture] || "none";
-    row.append(gestureLabel, select);
-    elements.mappingGrid.append(row);
+async function loadRecognitionSettings() {
+  try {
+    const settings = await api("/api/recognition-settings");
+    const threshold = Number(settings.gesture_confidence_threshold);
+    elements.gestureConfidenceRange.value = String(threshold);
+    elements.confidenceValue.value = Math.round(threshold * 100) + "%";
+    elements.confidenceValue.textContent = elements.confidenceValue.value;
+  } catch (error) {
+    elements.confidenceStatus.textContent = error.message;
   }
 }
 
-async function loadMappings() {
-  try {
-    mappings = (await api("/api/mappings")).mappings;
-    buildMappings();
-  } catch (error) {
-    elements.mappingStatus.textContent = error.message;
-  }
+function saveConfidenceThreshold() {
+  const threshold = Number(elements.gestureConfidenceRange.value);
+  confidenceSaveQueue = confidenceSaveQueue.catch(() => {}).then(async () => {
+    try {
+      const settings = await api("/api/recognition-settings", {
+        method: "PUT",
+        body: JSON.stringify({ gesture_confidence_threshold: threshold }),
+      });
+      if (Number(elements.gestureConfidenceRange.value) === threshold) {
+        const saved = Number(settings.gesture_confidence_threshold);
+        elements.confidenceStatus.textContent = "已立即应用并保存";
+        elements.confidenceValue.value = Math.round(saved * 100) + "%";
+      }
+    } catch (error) {
+      if (Number(elements.gestureConfidenceRange.value) === threshold) {
+        elements.confidenceStatus.textContent = error.message;
+      }
+    }
+  });
 }
 
-async function saveMappings() {
-  const next = Object.fromEntries(
-    [...elements.mappingGrid.querySelectorAll("select")].map((select) => [select.dataset.gesture, select.value]),
-  );
-  elements.saveMappings.disabled = true;
-  try {
-    mappings = (await api("/api/mappings", { method: "PUT", body: JSON.stringify({ mappings: next }) })).mappings;
-    elements.mappingStatus.textContent = "映射已保存";
-    window.setTimeout(() => { elements.mappingStatus.textContent = ""; }, 1800);
-  } catch (error) {
-    elements.mappingStatus.textContent = error.message;
-  } finally {
-    elements.saveMappings.disabled = false;
+function scheduleConfidenceSave(immediate = false) {
+  const threshold = Number(elements.gestureConfidenceRange.value);
+  elements.confidenceValue.value = Math.round(threshold * 100) + "%";
+  elements.confidenceValue.textContent = elements.confidenceValue.value;
+  elements.confidenceStatus.textContent = "应用中…";
+  window.clearTimeout(confidenceSaveTimer);
+  if (immediate) {
+    saveConfidenceThreshold();
+  } else {
+    confidenceSaveTimer = window.setTimeout(saveConfidenceThreshold, 180);
   }
 }
 
@@ -344,7 +377,14 @@ function handleEvent(event) {
   const secondary = document.createElement("div");
   secondary.className = "event-secondary";
   const score = Math.round((event.confidence || 0) * 100);
-  secondary.textContent = event.target_id + " · " + event.handedness + " · " + score + "% · " + actionLabel(event.action);
+  const actionStatus = event.workflow_handled
+    ? "工作流已接管"
+    : event.action_triggered
+      ? actionLabel(event.action)
+      : event.workflow_triggered
+        ? "等待工作流匹配"
+        : actionLabel(event.action);
+  secondary.textContent = event.target_id + " · " + event.handedness + " · " + score + "% · " + actionStatus;
   row.append(primary, secondary);
   elements.eventList.prepend(row);
   while (elements.eventList.children.length > 8) elements.eventList.lastElementChild.remove();
@@ -372,11 +412,12 @@ elements.toggleRtspVisibility.addEventListener("click", () => {
   elements.toggleRtspVisibility.setAttribute("aria-pressed", String(!showing));
 });
 elements.unlockController.addEventListener("click", unlockController);
-elements.saveMappings.addEventListener("click", saveMappings);
+elements.gestureConfidenceRange.addEventListener("input", () => scheduleConfidenceSave());
+elements.gestureConfidenceRange.addEventListener("change", () => scheduleConfidenceSave(true));
 elements.clearEvents.addEventListener("click", () => elements.eventList.replaceChildren());
 window.addEventListener("resize", drawTracks);
 
-loadMappings();
+loadRecognitionSettings();
 refreshStatus();
-window.setInterval(refreshStatus, 900);
+window.setInterval(refreshStatus, 250);
 connectEvents();

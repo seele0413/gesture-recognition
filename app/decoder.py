@@ -25,6 +25,7 @@ class PyAVDecoder:
                 "rtsp_transport": "tcp",
                 "rw_timeout": str(int(read_timeout * 1_000_000)),
                 "max_delay": "500000",
+                "fflags": "discardcorrupt",
             },
             "timeout": (open_timeout, read_timeout),
         }
@@ -44,15 +45,44 @@ class PyAVDecoder:
         self._stream = streams[0]
         self._frames = iter(self._container.decode(video=self._stream.index))
         self._closed = False
+        self.dropped_frames = 0
 
     def read(self) -> tuple[bool, Any]:
         if self._closed:
             return False, None
-        try:
-            frame = next(self._frames)
-        except StopIteration:
-            return False, None
-        return True, frame.to_ndarray(format="bgr24")
+
+        # A damaged RTSP frame should not take down the whole vision session.
+        # Try a few decoded frames before asking StreamManager to reconnect.
+        for _ in range(5):
+            try:
+                frame = next(self._frames)
+            except StopIteration:
+                return False, None
+
+            if getattr(frame, "is_corrupt", False):
+                self.dropped_frames += 1
+                continue
+
+            try:
+                image = frame.to_ndarray(format="bgr24")
+            except Exception:
+                self.dropped_frames += 1
+                continue
+
+            shape = getattr(image, "shape", None)
+            if (
+                shape is None
+                or len(shape) != 3
+                or shape[0] < 2
+                or shape[1] < 2
+                or shape[2] != 3
+            ):
+                self.dropped_frames += 1
+                continue
+
+            return True, image
+
+        return False, None
 
     def close(self) -> None:
         if self._closed:

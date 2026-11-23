@@ -18,13 +18,17 @@ GESTURES = (
 )
 
 ACTIONS = ("none", "play_pause", "volume_up", "volume_down", "mute_toggle")
+DEFAULT_GESTURE_CONFIDENCE_THRESHOLD = 0.60
+MIN_GESTURE_CONFIDENCE_THRESHOLD = 0.50
+MAX_GESTURE_CONFIDENCE_THRESHOLD = 0.90
+GESTURE_CONFIDENCE_STEP = 0.05
 DEFAULT_MAPPINGS = {
     "Open_Palm": "play_pause",
     "Closed_Fist": "none",
     "Thumb_Up": "volume_up",
     "Thumb_Down": "volume_down",
     "Pointing_Up": "none",
-    "Victory": "mute_toggle",
+    "Victory": "none",
     "ILoveYou": "none",
 }
 LEGACY_DEFAULT_MAPPINGS = {
@@ -47,10 +51,14 @@ LEGACY_ACTIONS = {
 def migrate_legacy_mappings(value: Mapping[str, str]) -> dict[str, str]:
     if dict(value) == LEGACY_DEFAULT_MAPPINGS:
         return dict(DEFAULT_MAPPINGS)
-    return {
+    migrated = {
         gesture: LEGACY_ACTIONS.get(action, action)
         for gesture, action in value.items()
     }
+    # Victory is now reserved for acquiring the exhibition controller.
+    if "Victory" in migrated:
+        migrated["Victory"] = "none"
+    return migrated
 
 
 def validate_mappings(value: Mapping[str, str]) -> dict[str, str]:
@@ -58,7 +66,24 @@ def validate_mappings(value: Mapping[str, str]) -> dict[str, str]:
         raise ValueError("映射必须且只能包含所有内置手势")
     if any(action not in ACTIONS for action in value.values()):
         raise ValueError("映射包含不支持的网页动作")
+    if value.get("Victory") != "none":
+        raise ValueError("V 字手势已保留用于主控锁定，不能映射普通网页动作")
     return {gesture: value[gesture] for gesture in GESTURES}
+
+
+def validate_gesture_confidence_threshold(value: object) -> float:
+    try:
+        threshold = float(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError("手势置信度必须是 0.50 到 0.90 之间、步长为 0.05 的数值") from error
+    if not math.isfinite(threshold):
+        raise ValueError("手势置信度必须是有限数值")
+    steps = (threshold - MIN_GESTURE_CONFIDENCE_THRESHOLD) / GESTURE_CONFIDENCE_STEP
+    if not MIN_GESTURE_CONFIDENCE_THRESHOLD <= threshold <= MAX_GESTURE_CONFIDENCE_THRESHOLD or not math.isclose(
+        steps, round(steps), abs_tol=1e-7
+    ):
+        raise ValueError("手势置信度必须是 0.50 到 0.90 之间、步长为 0.05 的数值")
+    return round(threshold, 2)
 
 
 def validate_rtsp_url(value: str) -> str:
@@ -84,6 +109,7 @@ def build_gesture_event(
     action: str,
     action_triggered: bool,
     landmarks: Sequence[Mapping[str, float]],
+    workflow_triggered: bool = False,
 ) -> dict[str, object]:
     if len(landmarks) != 21:
         raise ValueError("手势事件必须包含 21 个手部关键点")
@@ -99,23 +125,32 @@ def build_gesture_event(
         "timestamp_ms": int(timestamp_ms),
         "action": action,
         "action_triggered": bool(action_triggered),
+        "workflow_triggered": bool(workflow_triggered),
         "landmarks": [dict(point) for point in landmarks],
     }
 
 
 def build_controller_event(
-    *, state: str, track_id: str | None, timestamp_ms: int, reason: str
+    *,
+    state: str,
+    track_id: str | None,
+    timestamp_ms: int,
+    reason: str,
+    controller_id: str | None = None,
+    identity_confirmed: bool | None = None,
 ) -> dict[str, object]:
-    if state not in {"unlocked", "locked", "lost"}:
+    if state not in {"unlocked", "locked", "suspect", "reacquiring"}:
         raise ValueError("无效的主控状态")
-    if state == "locked" and not track_id:
-        raise ValueError("锁定状态必须包含 track_id")
+    if state != "unlocked" and not track_id:
+        raise ValueError("主控活动状态必须包含 track_id")
     return {
         "type": "controller",
         "state": state,
+        "controller_id": controller_id,
         "track_id": track_id,
         "timestamp_ms": int(timestamp_ms),
         "reason": reason,
+        "identity_confirmed": bool(state == "locked" or identity_confirmed),
     }
 
 
@@ -129,13 +164,23 @@ class _GestureState:
 class GestureGate:
     """Debounces gestures and rate-limits mapped actions per action type."""
 
-    def __init__(self, stable_frames: int = 3, confidence_threshold: float = 0.7, cooldown_ms: int = 800):
+    def __init__(
+        self,
+        stable_frames: int = 3,
+        confidence_threshold: float = DEFAULT_GESTURE_CONFIDENCE_THRESHOLD,
+        cooldown_ms: int = 800,
+    ):
         self.stable_frames = stable_frames
-        self.confidence_threshold = confidence_threshold
+        self.confidence_threshold = validate_gesture_confidence_threshold(confidence_threshold)
         self.cooldown_ms = cooldown_ms
         self._states: dict[str, _GestureState] = {}
         self._last_action_at: dict[str, int] = {}
         self._last_status: dict[str, dict[str, object]] = {}
+
+    def set_confidence_threshold(self, confidence_threshold: float) -> None:
+        self.confidence_threshold = validate_gesture_confidence_threshold(confidence_threshold)
+        self._states.clear()
+        self._last_status.clear()
 
     def observe(
         self,
@@ -150,8 +195,19 @@ class GestureGate:
             state.label = None
             state.frames = 0
             state.emitted_label = None
-            reason = "未识别到内置手势" if label not in GESTURES else "识别置信度不足"
-            self._last_status[key] = {"stable_frames": 0, "reason": reason}
+            low_confidence = label in GESTURES
+            reason = (
+                f"识别置信度不足（{confidence:.0%}，门槛 {self.confidence_threshold:.0%}）"
+                if low_confidence
+                else "未识别到内置手势"
+            )
+            self._last_status[key] = {
+                "stable_frames": 0,
+                "reason": reason,
+                "reason_code": "low_confidence" if low_confidence else "unrecognized_gesture",
+                "confidence": confidence,
+                "confidence_threshold": self.confidence_threshold,
+            }
             return None
 
         if state.label != label:
@@ -165,31 +221,55 @@ class GestureGate:
             self._last_status[key] = {
                 "stable_frames": state.frames,
                 "reason": f"手势稳定确认中（{state.frames}/{self.stable_frames} 帧）",
+                "reason_code": "stabilizing",
+                "confidence": confidence,
+                "confidence_threshold": self.confidence_threshold,
             }
             return None
         if state.emitted_label == label:
             self._last_status[key] = {
                 "stable_frames": state.frames,
                 "reason": "本次手势已处理，等待手势变化",
+                "reason_code": "already_handled",
+                "confidence": confidence,
+                "confidence_threshold": self.confidence_threshold,
             }
             return None
 
         state.emitted_label = label
         if action == "none":
-            self._last_status[key] = {"stable_frames": state.frames, "reason": "该手势未映射网页动作"}
+            self._last_status[key] = {
+                "stable_frames": state.frames,
+                "reason": "手势已确认，等待匹配工作流",
+                "reason_code": "workflow_ready",
+                "confidence": confidence,
+                "confidence_threshold": self.confidence_threshold,
+            }
             return False
 
         now = int(time.monotonic() * 1000) if now_ms is None else now_ms
         last_action = self._last_action_at.get(action)
         if last_action is not None and now - last_action < self.cooldown_ms:
-            self._last_status[key] = {"stable_frames": state.frames, "reason": "动作冷却中"}
+            self._last_status[key] = {
+                "stable_frames": state.frames,
+                "reason": "动作冷却中",
+                "reason_code": "cooldown",
+                "confidence": confidence,
+                "confidence_threshold": self.confidence_threshold,
+            }
             return False
         self._last_action_at[action] = now
-        self._last_status[key] = {"stable_frames": state.frames, "reason": "动作已触发"}
+        self._last_status[key] = {
+            "stable_frames": state.frames,
+            "reason": "动作已触发",
+            "reason_code": "triggered",
+            "confidence": confidence,
+            "confidence_threshold": self.confidence_threshold,
+        }
         return True
 
     def status(self, key: str) -> dict[str, object]:
-        return dict(self._last_status.get(key, {"stable_frames": 0, "reason": "等待手势"}))
+        return dict(self._last_status.get(key, {"stable_frames": 0, "reason": "等待手势", "reason_code": "waiting"}))
 
     def reset_except(self, active_keys: set[str]) -> None:
         for key in list(self._states):

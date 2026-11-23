@@ -10,6 +10,10 @@ const elements = {
   cameraStatus: document.getElementById("cameraStatus"),
   cameraStatusLabel: document.getElementById("cameraStatusLabel"),
   gestureFeedback: document.getElementById("gestureFeedback"),
+  scenePanel: document.getElementById("scenePanel"),
+  sceneHeadline: document.getElementById("sceneHeadline"),
+  sceneSubhead: document.getElementById("sceneSubhead"),
+  sceneNotice: document.getElementById("sceneNotice"),
 };
 
 const ACTION_LABELS = {
@@ -28,6 +32,16 @@ let status = {
 let feedbackTimer = 0;
 let feedRetryTimer = 0;
 let feedFailed = false;
+const displayCommandResults = new Map();
+const pendingDisplayCommands = new Map();
+
+const PANEL_COPY = {
+  welcome: ["欢迎莅临康晋电气", "智能展厅交互"],
+  company: ["康晋电气", "专注电气技术与创新"],
+  product: ["产品中心", "以可靠产品服务客户"],
+  factory: ["智能制造", "持续提升制造品质"],
+  presentation: ["演示模式", "康晋电气企业展示"],
+};
 
 async function api(path) {
   const response = await fetch(path, { cache: "no-store" });
@@ -63,6 +77,7 @@ function renderCamera() {
   const controller = status.controller || { state: "unlocked", track_id: null };
   const streamReady = status.state === "running";
   const frameFresh = Boolean(status.frame_fresh ?? status.frame_ready);
+  // Multipart MJPEG remains open; backend frame freshness is the reliable signal.
   const hasImage = streamReady && frameFresh && !feedFailed;
 
   elements.cameraFeed.hidden = !hasImage;
@@ -86,7 +101,8 @@ function renderCamera() {
   if (!hasImage) {
     elements.cameraPlaceholderLabel.textContent = feedFailed
       ? "预览传输中断，正在重新连接"
-      : status.frame_age_ms == null ? "已连接，正在等待首帧" : "画面停滞，正在等待新帧";
+      : status.frame_age_ms == null ? "已连接，正在等待首帧"
+        : "画面停滞，正在等待新帧";
     elements.cameraStatusLabel.textContent = feedFailed
       ? "MJPEG 预览连接失败，正在自动重订阅"
       : status.frame_age_ms == null
@@ -129,8 +145,10 @@ elements.cameraFeed.addEventListener("error", () => {
   window.clearTimeout(feedRetryTimer);
   feedRetryTimer = window.setTimeout(() => {
     if (status.state !== "running") return;
+    feedFailed = false;
     elements.cameraFeed.removeAttribute("src");
     elements.cameraFeed.src = "/video.mjpg?display=" + Date.now();
+    renderCamera();
   }, 1200);
 });
 
@@ -179,20 +197,172 @@ function handleEvent(event) {
   }
   if (event.type !== "gesture") return;
   console.log("[gesture-control]", event);
-  if (event.action_triggered) applyAction(event.action);
+  if (event.action_triggered && !event.workflow_handled) applyAction(event.action);
 }
 
-function connectEvents() {
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const socket = new WebSocket(protocol + "//" + window.location.host + "/ws/events");
-  socket.addEventListener("message", (message) => {
-    try {
-      handleEvent(JSON.parse(message.data));
-    } catch (error) {
-      console.error("无法解析手势事件", error);
+
+function setScene(scene) {
+  const scenes = ["welcome", "company_intro", "product_intro", "factory_intro", "presentation_mode"];
+  if (!scenes.includes(scene)) throw new Error("未登记的展厅场景");
+  document.body.dataset.scene = scene;
+  const panels = {
+    welcome: "welcome", company_intro: "company", product_intro: "product",
+    factory_intro: "factory", presentation_mode: "presentation",
+  };
+  setPanel(panels[scene], true);
+}
+
+function setPanel(panel, visible) {
+  if (!Object.hasOwn(PANEL_COPY, panel)) throw new Error("未登记的展示面板");
+  if (visible) {
+    const [headline, subhead] = PANEL_COPY[panel];
+    elements.scenePanel.dataset.panel = panel;
+    elements.sceneHeadline.textContent = headline;
+    elements.sceneSubhead.textContent = subhead;
+    elements.scenePanel.hidden = false;
+  } else if (elements.scenePanel.dataset.panel === panel) {
+    elements.scenePanel.hidden = true;
+  }
+}
+
+function setSceneText(field, text) {
+  const fields = {
+    headline: elements.sceneHeadline,
+    subhead: elements.sceneSubhead,
+    notice: elements.sceneNotice,
+  };
+  if (!Object.hasOwn(fields, field) || typeof text !== "string" || text.length > 160) {
+    throw new Error("展示文本字段或长度无效");
+  }
+  fields[field].textContent = text;
+}
+
+function seekVideo(positionMs) {
+  if (!Number.isInteger(positionMs) || positionMs < 0) throw new Error("视频位置无效");
+  if (!Number.isFinite(elements.video.duration)) throw new Error("视频尚未就绪");
+  const seconds = positionMs / 1000;
+  if (seconds > elements.video.duration) throw new Error("跳转位置超过视频时长");
+  elements.video.currentTime = seconds;
+  return { current_time_ms: Math.round(elements.video.currentTime * 1000) };
+}
+
+async function executeDisplayAction(action, params, timeoutMs = 10000) {
+  const video = elements.video;
+  switch (action) {
+    case "web.navigate_route":
+    case "web.navigate_page":
+      throw new Error("页面切换由外层展示控制中心统一处理");
+    case "web.set_scene":
+      setScene(params.scene);
+      return { scene: params.scene };
+    case "web.show_panel":
+      setPanel(params.panel, true);
+      return { panel: params.panel, visible: true };
+    case "web.hide_panel":
+      setPanel(params.panel, false);
+      return { panel: params.panel, visible: false };
+    case "web.set_text":
+      setSceneText(params.field, params.text);
+      return { field: params.field, updated: true };
+    case "web.return_home":
+      elements.scenePanel.hidden = true;
+      setScene("welcome");
+      if (!video.currentSrc.endsWith("/media/promo.mp4")) {
+        video.src = "/media/promo.mp4";
+        video.load();
+      }
+      video.currentTime = 0;
+      return { home: true };
+    case "video.load": {
+      if (!/^\/media\/assets\/[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(params.url || "")) {
+        throw new Error("视频素材地址不在登记范围内");
+      }
+      video.pause();
+      video.src = params.url;
+      const loaded = new Promise((resolve, reject) => {
+        const timer = window.setTimeout(() => reject(new Error("视频加载超时")), Math.max(100, Math.min(10000, timeoutMs - 100)));
+        video.addEventListener("loadedmetadata", () => { window.clearTimeout(timer); resolve(); }, { once: true });
+        video.addEventListener("error", () => { window.clearTimeout(timer); reject(new Error("无法读取登记的视频素材")); }, { once: true });
+      });
+      video.load();
+      await loaded;
+      return { duration_ms: Math.round(video.duration * 1000) };
     }
+    case "video.play":
+      await video.play();
+      return { paused: video.paused };
+    case "video.pause":
+      video.pause();
+      return { paused: video.paused };
+    case "video.seek":
+      return seekVideo(params.position_ms);
+    case "video.set_volume":
+      if (typeof params.volume !== "number" || params.volume < 0 || params.volume > 1) throw new Error("音量范围无效");
+      video.volume = params.volume;
+      return { volume: video.volume };
+    case "video.volume_up":
+      video.volume = Math.min(1, Math.round((video.volume + 0.1) * 10) / 10);
+      showFeedback("音量 " + Math.round(video.volume * 100) + (video.muted ? "% · 已静音" : "%"));
+      return { volume: video.volume, muted: video.muted };
+    case "video.volume_down":
+      video.volume = Math.max(0, Math.round((video.volume - 0.1) * 10) / 10);
+      showFeedback("音量 " + Math.round(video.volume * 100) + (video.muted ? "% · 已静音" : "%"));
+      return { volume: video.volume, muted: video.muted };
+    case "video.mute":
+      video.muted = true;
+      return { muted: true };
+    case "video.unmute":
+      video.muted = false;
+      return { muted: false };
+    case "video.set_loop":
+      video.loop = Boolean(params.enabled);
+      return { loop: video.loop };
+    default:
+      throw new Error("展示页面不支持此动作");
+  }
+}
+
+function connectPageBridge() {
+  const generation = Number(new URLSearchParams(window.location.search).get("shell_generation") || 0);
+  window.addEventListener("message", async (event) => {
+    if (event.origin !== window.location.origin || event.source !== window.parent) return;
+    const message = event.data;
+    if (!message || typeof message !== "object") return;
+    if (message.type === "display:event") {
+      handleEvent(message.event || {});
+      return;
+    }
+    if (message.type !== "display:command" || message.generation !== generation) return;
+    const command = message.command;
+    if (!command || typeof command.run_id !== "string" || typeof command.command_id !== "string") return;
+    const key = command.run_id + ":" + command.command_id;
+    let response = displayCommandResults.get(key);
+    if (!response) {
+      let pending = pendingDisplayCommands.get(key);
+      if (!pending) {
+        pending = executeDisplayAction(command.action, command.params || {}, command.timeout_ms).then(
+          (result) => ({ success: true, result }),
+          (error) => ({ success: false, error: String(error?.message || error).slice(0, 300) }),
+        );
+        pendingDisplayCommands.set(key, pending);
+      }
+      const outcome = await pending;
+      pendingDisplayCommands.delete(key);
+      response = {
+        type: "display:result",
+        generation,
+        run_id: command.run_id,
+        command_id: command.command_id,
+        ...outcome,
+      };
+      displayCommandResults.set(key, response);
+      while (displayCommandResults.size > 128) {
+        displayCommandResults.delete(displayCommandResults.keys().next().value);
+      }
+    }
+    window.parent.postMessage(response, window.location.origin);
   });
-  socket.addEventListener("close", () => window.setTimeout(connectEvents, 1500));
+  window.parent.postMessage({ type: "display:ready", page_id: "promo", generation }, window.location.origin);
 }
 
 elements.playButton.addEventListener("click", (event) => {
@@ -228,4 +398,7 @@ document.addEventListener("fullscreenchange", () => {
 
 refreshStatus();
 window.setInterval(refreshStatus, 1100);
-connectEvents();
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) refreshStatus();
+});
+connectPageBridge();
