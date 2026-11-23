@@ -19,7 +19,7 @@ def new_workflow(name: str = "新建工作流") -> dict:
         "name": name,
         "description": "",
         "enabled": False,
-        "trigger": {"type": "gesture_trigger", "gesture": "Open_Palm"},
+        "trigger": {"type": "gesture_trigger", "gesture": "Open_Palm", "page_scope": "global"},
         "nodes": [
             {"id": "play", "type": "action", "action": "video.play", "params": {}, "timeout_ms": 3000, "on_error": "stop", "position": {"x": 170, "y": 80}},
             {"id": "end", "type": "end", "params": {}, "position": {"x": 470, "y": 80}},
