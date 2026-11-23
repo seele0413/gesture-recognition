@@ -68,6 +68,8 @@
 .trigger-editor label, .edge-when-wrap { color: #727d74; font-size: 10px; white-space: nowrap; }
 .trigger-editor select, .edge-when-wrap select { min-height: 30px; padding: 4px 7px; font-size: 11px; }
 .trigger-fields { display: flex; align-items: center; gap: 6px; }
+.trigger-page-scope-control { display: inline-flex; align-items: center; gap: 5px; color: #727d74; font-size: 10px; white-space: nowrap; }
+.trigger-page-scope-control select { min-height: 30px; max-width: 220px; padding: 4px 7px; font-size: 11px; }
 .validation-message { display: none; flex: 0 0 auto; padding: 8px 13px; border-bottom: 1px solid #d8ded8; color: #4d674f; background: #edf5ee; font-size: 11px; }
 .validation-message[data-state="error"] { display: block; border-color: #e8c9c1; color: #9e5144; background: #fff2ef; }
 .validation-message[data-state="ok"] { display: block; }
