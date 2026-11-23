@@ -185,6 +185,7 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
     workflow_generator = WorkflowGenerator()
     display_channel.on_state_change = workflow_engine.set_display_connected
     display_channel.on_ready_change = workflow_engine.set_display_ready
+    display_channel.on_page_change = workflow_engine.set_display_page
     hub.add_listener(workflow_engine.on_event)
 
     @asynccontextmanager
@@ -215,6 +216,19 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
             )
         )
         return errors
+
+    def ensure_trigger_available(definition: dict) -> None:
+        if not definition.get("enabled"):
+            return
+        trigger = definition.get("trigger", {})
+        for other in store.get_workflows(enabled_only=True):
+            if other.get("id") == definition.get("id"):
+                continue
+            if _triggers_conflict(trigger, other.get("trigger", {})):
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"触发器与已启用工作流“{other['name']}”冲突",
+                )
     app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
 
     @app.middleware("http")
@@ -568,6 +582,7 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
         errors = validate_workflow_definition(payload)
         if errors:
             raise HTTPException(status_code=400, detail=errors)
+        ensure_trigger_available(payload)
         try:
             return {"workflow": store.save_workflow(payload)}
         except (KeyError, TypeError, ValueError) as error:
@@ -589,6 +604,7 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
         errors = validate_workflow_definition(payload)
         if errors:
             raise HTTPException(status_code=400, detail=errors)
+        ensure_trigger_available(payload)
         try:
             return {"workflow": store.save_workflow(payload)}
         except (KeyError, TypeError, ValueError) as error:
@@ -651,13 +667,7 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
         errors = validate_workflow_definition(workflow)
         if errors:
             raise HTTPException(status_code=400, detail=errors)
-        if enabled:
-            trigger = workflow["trigger"]
-            for other in store.get_workflows(enabled_only=True):
-                if other["id"] == workflow_id:
-                    continue
-                if _triggers_conflict(trigger, other["trigger"]):
-                    raise HTTPException(status_code=409, detail=f"触发器与已启用工作流“{other['name']}”冲突")
+        ensure_trigger_available(workflow)
         return {"workflow": store.save_workflow(workflow)}
 
     @app.post("/api/workflows/{workflow_id}/enable")
@@ -732,10 +742,18 @@ def create_app(database_path: Path = DATABASE_PATH, promo_path: Path = PROMO_VID
 
 
 def _triggers_conflict(left: dict, right: dict) -> bool:
-    if left.get("type") == "controller_locked" or right.get("type") == "controller_locked":
-        return left.get("type") == right.get("type") == "controller_locked"
-    left_gestures = {left["gesture"]} if left.get("type") == "gesture_trigger" else set(left.get("gestures", []))
-    right_gestures = {right["gesture"]} if right.get("type") == "gesture_trigger" else set(right.get("gestures", []))
+    left_type = left.get("type")
+    right_type = right.get("type")
+    if left_type == "controller_locked" or right_type == "controller_locked":
+        return left_type == right_type == "controller_locked"
+
+    # Missing page_scope is the legacy representation of a global trigger.
+    # Global and page-specific triggers may coexist; the page-specific one wins.
+    if left.get("page_scope", "global") != right.get("page_scope", "global"):
+        return False
+
+    left_gestures = {left["gesture"]} if left_type == "gesture_trigger" else set(left.get("gestures", []))
+    right_gestures = {right["gesture"]} if right_type == "gesture_trigger" else set(right.get("gestures", []))
     return bool(left_gestures & right_gestures)
 
 
