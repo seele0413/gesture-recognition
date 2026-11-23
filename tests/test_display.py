@@ -29,14 +29,17 @@ class DisplayCommandChannelTests(unittest.TestCase):
             websocket = FakeWebSocket()
             connection_events = []
             ready_events = []
+            page_events = []
             channel.on_state_change = connection_events.append
             channel.on_ready_change = ready_events.append
+            channel.on_page_change = page_events.append
 
             self.assertTrue(await channel.connect(websocket))
             self.assertTrue(channel.connected)
             self.assertFalse(channel.ready)
             self.assertEqual(connection_events, [True])
             self.assertEqual(ready_events, [])
+            self.assertEqual(page_events, [])
 
             await channel.receive(websocket, {
                 "type": "display:ready",
@@ -48,6 +51,7 @@ class DisplayCommandChannelTests(unittest.TestCase):
             self.assertEqual(channel.ready_page_id, "promo")
             self.assertEqual(channel.ready_generation, 1)
             self.assertEqual(ready_events, [True])
+            self.assertEqual(page_events, ["promo"])
 
             await channel.receive(websocket, {
                 "type": "display:loading",
@@ -58,6 +62,7 @@ class DisplayCommandChannelTests(unittest.TestCase):
             self.assertFalse(channel.ready)
             self.assertEqual(connection_events, [True])
             self.assertEqual(ready_events, [True, False])
+            self.assertEqual(page_events, ["promo", None])
 
             await channel.receive(websocket, {
                 "type": "display:ready",
@@ -67,11 +72,13 @@ class DisplayCommandChannelTests(unittest.TestCase):
             self.assertTrue(channel.ready)
             self.assertEqual(channel.ready_page_id, "factory")
             self.assertEqual(channel.ready_generation, 2)
+            self.assertEqual(page_events, ["promo", None, "factory"])
 
             await channel.disconnect(websocket)
             self.assertFalse(channel.connected)
             self.assertFalse(channel.ready)
             self.assertEqual(connection_events, [True, False])
+            self.assertEqual(page_events, ["promo", None, "factory", None])
 
         asyncio.run(scenario())
 
