@@ -19,7 +19,11 @@ _CONDITION_FIELDS = {"gesture", "confidence", "handedness", "target_id", "action
 _OPERATORS = {"eq", "ne", "gt", "gte", "lt", "lte", "in"}
 
 
-def validate_workflow(definition: Any, action_schemas: Mapping[str, dict]) -> list[str]:
+def validate_workflow(
+    definition: Any,
+    action_schemas: Mapping[str, dict],
+    display_page_ids: set[str] | None = None,
+) -> list[str]:
     errors: list[str] = []
     if not isinstance(definition, dict):
         return ["工作流必须是 JSON 对象"]
@@ -49,10 +53,19 @@ def validate_workflow(definition: Any, action_schemas: Mapping[str, dict]) -> li
         errors.append("trigger 必须是对象")
     else:
         trigger_type = trigger.get("type")
+        page_scope = trigger.get("page_scope", "global")
+        if trigger_type in {"gesture_trigger", "gesture_sequence_trigger"}:
+            if not isinstance(page_scope, str) or not page_scope.strip():
+                errors.append("适用主页必须是 global 或已登记的页面 ID")
+            elif page_scope != "global":
+                if not _ID.fullmatch(page_scope):
+                    errors.append("适用主页 ID 格式无效")
+                elif display_page_ids is not None and page_scope not in display_page_ids:
+                    errors.append(f"适用主页未登记：{page_scope}")
         if trigger_type == "gesture_trigger":
             if trigger.get("gesture") not in GESTURES:
                 errors.append("手势触发器必须指定内置手势")
-            if set(trigger) - {"type", "gesture"}:
+            if set(trigger) - {"type", "gesture", "page_scope"}:
                 errors.append("手势触发器包含不支持的字段")
         elif trigger_type == "gesture_sequence_trigger":
             gestures = trigger.get("gestures")
@@ -61,7 +74,7 @@ def validate_workflow(definition: Any, action_schemas: Mapping[str, dict]) -> li
             window = trigger.get("sequence_window_ms", 5000)
             if not isinstance(window, int) or isinstance(window, bool) or not 1000 <= window <= 30000:
                 errors.append("sequence_window_ms 必须为 1000～30000")
-            if set(trigger) - {"type", "gestures", "sequence_window_ms"}:
+            if set(trigger) - {"type", "gestures", "sequence_window_ms", "page_scope"}:
                 errors.append("手势序列触发器包含不支持的字段")
         elif trigger_type == "controller_locked":
             if set(trigger) != {"type"}:
