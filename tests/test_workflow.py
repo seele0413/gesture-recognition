@@ -29,6 +29,17 @@ class WorkflowValidatorTests(unittest.TestCase):
         schemas = {"video.play": {"properties": {}, "required": [], "idempotent": True}}
         self.assertEqual(validate_workflow(workflow, schemas), [])
 
+    def test_page_scope_accepts_registered_pages_and_rejects_unknown_pages(self):
+        workflow = new_workflow()
+        workflow["trigger"]["page_scope"] = "promo"
+        self.assertEqual(
+            validate_workflow(workflow, self.registry.schema_map(), set(DISPLAY_PAGE_IDS)),
+            [],
+        )
+        workflow["trigger"]["page_scope"] = "not-registered"
+        errors = validate_workflow(workflow, self.registry.schema_map(), set(DISPLAY_PAGE_IDS))
+        self.assertTrue(any("适用主页未登记" in error for error in errors))
+
     def test_rejects_duplicate_ids_cycles_unknown_actions_and_bad_parameters(self):
         workflow = new_workflow()
         workflow["nodes"] = [
@@ -142,6 +153,63 @@ class WorkflowEngineTests(unittest.IsolatedAsyncioTestCase):
         await self.engine._active_task
         self.assertEqual([item[0] for item in self.calls], [0, 0])
         self.assertEqual(len(self.store.get_workflow_runs()), 2)
+
+    async def test_page_scoped_gesture_overrides_global_and_falls_back_on_other_pages(self):
+        global_workflow = self._workflow(action_count=1, trigger={
+            "type": "gesture_trigger", "gesture": "Open_Palm", "page_scope": "global",
+        })
+        promo_workflow = self._workflow(action_count=1, trigger={
+            "type": "gesture_trigger", "gesture": "Open_Palm", "page_scope": "promo",
+        })
+        factory_workflow = self._workflow(action_count=1, trigger={
+            "type": "gesture_trigger", "gesture": "Open_Palm", "page_scope": "factory",
+        })
+        global_workflow["nodes"][0]["params"]["value"] = 1
+        promo_workflow["nodes"][0]["params"]["value"] = 2
+        factory_workflow["nodes"][0]["params"]["value"] = 3
+        self.store.save_workflow(global_workflow)
+        self.store.save_workflow(promo_workflow)
+        self.store.save_workflow(factory_workflow)
+
+        self.engine.set_display_page("promo")
+        promo_event = await self._trigger(timestamp=100)
+        self.assertTrue(promo_event["workflow_handled"])
+        await self.engine._active_task
+
+        self.engine.set_display_page("factory")
+        factory_event = await self._trigger(timestamp=200)
+        self.assertTrue(factory_event["workflow_handled"])
+        await self.engine._active_task
+
+        self.engine.set_display_page("product")
+        fallback_event = await self._trigger(timestamp=300)
+        self.assertTrue(fallback_event["workflow_handled"])
+        await self.engine._active_task
+
+        self.assertEqual([item[0] for item in self.calls], [2, 3, 1])
+
+    async def test_page_change_clears_incomplete_gesture_sequences(self):
+        workflow = self._workflow(action_count=1, trigger={
+            "type": "gesture_sequence_trigger",
+            "gestures": ["Open_Palm", "Victory"],
+            "sequence_window_ms": 5000,
+            "page_scope": "promo",
+        })
+        self.store.save_workflow(workflow)
+
+        self.engine.set_display_page("promo")
+        self.assertIsNone(await self._trigger(gesture="Open_Palm", timestamp=100))
+
+        self.engine.set_display_page("factory")
+        self.assertIsNone(await self._trigger(gesture="Victory", timestamp=200))
+        self.engine.set_display_page("promo")
+        self.assertIsNone(await self._trigger(gesture="Victory", timestamp=300))
+
+        self.assertIsNone(await self._trigger(gesture="Open_Palm", timestamp=400))
+        completed = await self._trigger(gesture="Victory", timestamp=500)
+        self.assertTrue(completed["workflow_handled"])
+        await self.engine._active_task
+        self.assertEqual(len(self.calls), 1)
 
     async def test_one_confirmed_master_gesture_runs_five_sequential_actions(self):
         workflow = self.store.save_workflow(self._workflow())
