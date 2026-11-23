@@ -54,7 +54,7 @@ def validate_workflow(
     else:
         trigger_type = trigger.get("type")
         page_scope = trigger.get("page_scope", "global")
-        if trigger_type in {"gesture_trigger", "gesture_sequence_trigger"}:
+        if trigger_type in ("gesture_trigger", "gesture_sequence_trigger"):
             if not isinstance(page_scope, str) or not page_scope.strip():
                 errors.append("适用主页必须是 global 或已登记的页面 ID")
             elif page_scope != "global":
