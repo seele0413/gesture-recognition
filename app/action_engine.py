@@ -96,6 +96,7 @@ class WorkflowEngine:
         self._active_task_started = False
         self._display_connected = False
         self._display_ready = False
+        self._display_page_id: str | None = None
         self._cancel_reason = ""
         self._sequences: dict[str, list[tuple[str, int]]] = {}
         self._event_waiters: set[tuple[asyncio.Future, Callable[[dict[str, Any]], bool]]] = set()
@@ -103,7 +104,11 @@ class WorkflowEngine:
         self._closed = False
 
     def validate(self, definition: dict[str, Any]) -> list[str]:
-        return validate_workflow(definition, self.actions.schema_map())
+        return validate_workflow(
+            definition,
+            self.actions.schema_map(),
+            set(self.store.get_display_page_ids(include_disabled=True)),
+        )
 
     @property
     def active_run_id(self) -> str | None:
@@ -113,10 +118,20 @@ class WorkflowEngine:
         self._display_connected = bool(connected)
         if not self._display_connected:
             self._display_ready = False
+            self.set_display_page(None)
             self.cancel_active("展示执行客户端断开，已取消后续动作")
 
     def set_display_ready(self, ready: bool) -> None:
         self._display_ready = bool(ready) if self._display_connected else False
+        if not self._display_ready:
+            self.set_display_page(None)
+
+    def set_display_page(self, page_id: str | None) -> None:
+        current = page_id if self._display_connected and self._display_ready and isinstance(page_id, str) else None
+        if current != self._display_page_id:
+            self._display_page_id = current
+            # A gesture sequence must never begin on one page and finish on another.
+            self._sequences.clear()
 
     async def on_event(self, event: dict[str, Any]) -> dict[str, Any] | None:
         """EventHub listener. Returns a modified gesture event when a workflow claims it."""
@@ -162,23 +177,44 @@ class WorkflowEngine:
         if len(self._seen_events) > 512:
             self._seen_events = set(list(self._seen_events)[-256:])
 
-        candidates: list[dict[str, Any]] = []
+        page_candidates: list[dict[str, Any]] = []
+        global_candidates: list[dict[str, Any]] = []
         claimed = False
         for definition in self.store.get_workflows(enabled_only=True):
             trigger = definition["trigger"]
-            if trigger["type"] == "gesture_trigger" and trigger["gesture"] == gesture:
-                candidates.append(definition)
+            trigger_type = trigger.get("type")
+            if trigger_type not in {"gesture_trigger", "gesture_sequence_trigger"}:
+                continue
+            page_scope = trigger.get("page_scope", "global")
+            if page_scope != "global" and page_scope != self._display_page_id:
+                continue
+            target_candidates = global_candidates if page_scope == "global" else page_candidates
+            if trigger_type == "gesture_trigger" and trigger.get("gesture") == gesture:
+                target_candidates.append(definition)
                 claimed = True
-            elif trigger["type"] == "gesture_sequence_trigger":
+            elif trigger_type == "gesture_sequence_trigger":
                 if self._advance_sequence(definition, str(gesture), timestamp_ms):
-                    candidates.append(definition)
+                    target_candidates.append(definition)
                     claimed = True
+
+        # A page-specific match overrides the global fallback. Within the same
+        # scope, a direct gesture wins over a completed sequence on that frame.
+        candidates = page_candidates or global_candidates
+        direct_candidates = [
+            item for item in candidates if item["trigger"].get("type") == "gesture_trigger"
+        ]
+        if direct_candidates:
+            candidates = direct_candidates
 
         if candidates:
             if len(candidates) == 1:
-                self._start(candidates[0], event)
+                trigger_event = {**event, "display_page_id": self._display_page_id}
+                self._start(candidates[0], trigger_event)
             else:
-                self._emit({"type": "workflow", "status": "failed", "error": "同一手势匹配了多个工作流，请调整触发器"})
+                self._emit({
+                    "type": "workflow", "status": "failed",
+                    "error": "当前展示主页的手势触发匹配到多个工作流，请检查页面作用域和触发器",
+                })
         if claimed:
             event["workflow_handled"] = True
             return event
@@ -229,7 +265,7 @@ class WorkflowEngine:
         created_at = utc_now()
         safe_trigger_event = {
             key: value for key, value in trigger_event.items()
-            if key in {"type", "target_id", "gesture", "confidence", "handedness", "timestamp_ms", "action", "action_triggered", "workflow_triggered", "state", "track_id", "reason"}
+            if key in {"type", "target_id", "gesture", "confidence", "handedness", "timestamp_ms", "action", "action_triggered", "workflow_triggered", "state", "track_id", "reason", "display_page_id"}
         }
         run = {
             "run_id": run_id, "workflow_id": definition["id"], "workflow_version": definition["version"],
